@@ -48,6 +48,30 @@ Requires Python >=3.10 and a locally-served model behind an
 Ollama-compatible chat endpoint (default `http://localhost:11434`,
 override with `--endpoint` or `$OPENLLM_CBENCH_ENDPOINT`).
 
+## What goes in `--model <model-tag>`
+
+Every command below takes `--model <model-tag>`. The tag is whatever
+your endpoint itself calls the model, passed through verbatim in every
+request this framework sends -- for the default (Ollama), that's exactly
+the `NAME` column from `ollama list`, e.g.:
+
+```bash
+$ ollama list
+NAME                    ID              SIZE      MODIFIED
+gemma3:12b              f4031aab637d    8.1 GB    8 weeks ago
+qwen3.5:9b              6488c96fa5fa    6.6 GB    12 days ago
+hf.co/org/repo:Q4_K_M   ...
+
+$ cbench doctor              # no --model needed, just checks the endpoint
+$ cbench gate --model gemma3:12b --save
+```
+
+There's no separate registration step and no fixed roster -- if your
+endpoint recognizes the tag, `cbench` can run a suite against it. Get the
+tag wrong and the *first* call to it (`cbench doctor`'s reachability
+check, or `cbench gate`) fails immediately with a clear connection/model
+error, not a confusing result buried in a suite's output later.
+
 ## Quick start
 
 ```bash
@@ -122,6 +146,42 @@ the catalogue for a model's config before falling back to its own
 hardcoded defaults; an explicit CLI flag always wins over both. An
 unlisted model tag isn't refused — it just runs "ungated," with a banner
 saying so.
+
+### Populating it
+
+Two ways to add an entry, and they write to two different files:
+
+**1. Automatic (recommended starting point) — `cbench gate --model <tag> --save`.**
+Runs the same capability/tool-call/channel-separation check `cbench gate`
+always does, then writes the result into your **local overlay**, a
+`models.json` file created in your current working directory (override
+the location with `--registry-file` or `$OPENLLM_CBENCH_MODELS_FILE`).
+This file is yours — every suite reads it automatically from then on for
+that tag, it's gitignored by default, and it's never the packaged seed
+below. A gate check can't derive numeric tuning like `num_predict` on its
+own, so `config_overrides` is saved empty; if a real run tells you this
+model needs a raised budget or a longer timeout, add that yourself
+(schema below).
+
+**2. Manual — edit `models.json` (your overlay) or, if you're
+contributing a worked example back to the project,
+`src/openllm_cbench/data/models/verified.json`** (the packaged, read-only
+seed; an overlay entry for the same tag always wins over a seed entry).
+Full field-by-field schema, with the reasoning behind each field, is
+documented inline in `verified.json`'s own `_schema` key — read that
+before hand-writing an entry. Quick reference:
+
+| Field | Acted on by | Meaning |
+|---|---|---|
+| `architecture`, `params_b`, `quant`, `tools`, `thinking` | Nothing — informational | What `cbench gate` found; useful context for a human reading the catalogue |
+| `thinking_mode` | The channel suite | `"effort"` → auto-selects an `--effort all` sweep instead of `--think`. `"ignores_think"` → auto-selects `--think false` only. Omit for an ordinary boolean toggle. |
+| `channel_separation` | Nothing — informational | `{"think_on": ..., "think_off": ...}`, each `"clean"` / `"UNRELIABLE"` / `null`. Put the actual consequence in `caveats` too — this field alone doesn't change any suite's behavior. |
+| `config_overrides` | Every suite, before its own hardcoded default | Recognized keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (containment), `max_task_turns` (persistence). An explicit CLI flag still wins over this. |
+| `caveats` | Nothing directly — printed verbatim | Shown in every suite's startup banner and in `cbench gate`'s report when this tag is used. Free text; this is where "think=off is unreliable for this model" belongs. |
+
+`config_overrides` is the only field any suite actually *acts on* — the
+rest exists so the next person (including future you) doesn't have to
+re-discover the same quirk by watching a run go wrong.
 
 ## Scale and applicability
 

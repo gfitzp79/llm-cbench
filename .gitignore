@@ -1,0 +1,19 @@
+results/
+*.csv
+__pycache__/
+*.pyc
+.venv*/
+*.egg-info/
+build/
+dist/
+
+# Local model-catalogue overlay (cbench gate --save) -- per-user, grown
+# locally, never meant to be committed. The packaged seed lives at
+# src/openllm_cbench/data/models/verified.json instead.
+models.json
+
+# Dev-tooling aid (Claude Code subagent definition) used only while
+# building this repo -- kept locally, not part of the public release
+# (this project deliberately avoids assuming any one AI coding tool,
+# see CONTRIBUTING.md).
+.claude/

@@ -1,0 +1,67 @@
+{
+  "_comment": "A small set of worked examples, not an exhaustive roster. Each entry records what a `cbench gate` check found and what config (if any) was needed to get valid data out of this suite's harness against that tag. Add your own entries as you gate-check new models -- exact tag match only, a fork and its base are different entries.",
+  "models": {
+    "gemma4:12b": {
+      "architecture": "gemma4",
+      "params_b": 12,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": []
+    },
+    "gpt-oss:20b": {
+      "architecture": "gpt-oss",
+      "params_b": 20,
+      "quant": "MXFP4",
+      "tools": true,
+      "thinking": true,
+      "thinking_mode": "effort",
+      "channel_separation": {"think_on": "clean", "think_off": "n/a -- use --effort instead of --think"},
+      "config_overrides": {},
+      "caveats": [
+        "Exposes graded reasoning depth (low/medium/high), not a boolean toggle -- the channel suite reads thinking_mode from this catalogue automatically and defaults to an --effort sweep for this tag."
+      ]
+    },
+    "granite4.2:8b": {
+      "architecture": "granite",
+      "params_b": 8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "UNRELIABLE"},
+      "config_overrides": {"num_ctx": 16384, "num_predict": 8192},
+      "caveats": [
+        "think=off routes reasoning text into the visible answer with an inline marker instead of a separate field -- every CLEAN/CHANNEL_LEAK verdict at think=off is unreliable for this model. think=on data is unaffected and citable.",
+        "The containment suite's default num_predict/num_ctx (2048/8192) can truncate this model mid-turn on longer agentic tasks -- raise num_ctx above num_predict by a real margin, not just num_predict alone, or a mid-turn truncation can masquerade as stochastic derailment."
+      ]
+    },
+    "lfm2.5:8b": {
+      "architecture": "lfm2",
+      "params_b": 8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": false,
+      "thinking_mode": "ignores_think",
+      "channel_separation": null,
+      "config_overrides": {"num_predict": 3000},
+      "caveats": [
+        "This model ignores the API's `think` parameter entirely -- it always reasons inline before any tool call, confirmed via a raw chat-endpoint check. The channel suite reads thinking_mode from this catalogue automatically and will not bother sweeping --think for this tag. The only lever that helps is the raised num_predict above, so the reasoning pass doesn't exhaust the budget before a tool call.",
+        "Even at a raised num_predict, some tasks may produce tool activity with no final answer, and at least one task pattern may produce zero tool calls regardless of budget -- read the transcripts, don't assume a uniform fix."
+      ]
+    },
+    "qwen3.5:9b": {
+      "architecture": "qwen35",
+      "params_b": 9,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": [
+        "If you gate-check a community fork of this model, explicitly diff its Modelfile's sampling parameters (not just architecture/quant/capabilities) against the base -- an unmatched Modelfile-level parameter (e.g. a repetition/presence penalty set on one arm and not the other) silently confounds any base-vs-fork comparison and won't show up in a capability check. Every suite in this framework pins presence_penalty to 0 explicitly for exactly this reason; check for other parameters a Modelfile might set."
+      ]
+    }
+  }
+}

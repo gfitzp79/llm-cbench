@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openllm-cbench"
+version = "0.1.0"
+description = "Local containment and reasoning-leakage testing framework for open-weight LLMs."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+# Cross-framework reconciliation (integrations/) -- not required for the
+# three core suites. See ARCHITECTURE.md for what this buys you.
+inspect = [
+    "inspect-ai>=0.3.259",
+    "openai>=3.1.0,<4.0",
+]
+tui = [
+    "textual>=0.60",
+]
+dev = [
+    "pytest>=7.0",
+    "textual>=0.60",
+]
+
+[project.scripts]
+cbench = "openllm_cbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+openllm_cbench = ["data/**/*.json"]

@@ -128,6 +128,15 @@ def _cmd_tui(argv):
     (needed to define its Screen/Widget subclasses at all), so by the time
     that module's main() would run, the import has already failed and the
     module never finished loading."""
+    if argv and argv[0] in ("-h", "--help"):
+        print(
+            "usage: cbench tui\n\n"
+            "Launches the Textual control panel (requires: pip install "
+            "\"openllm-cbench[tui]\"). Takes no arguments -- every suite's own "
+            "flags are entered through its form inside the TUI, not on this "
+            "command line. See README.md 'Terminal UI'."
+        )
+        return 0
     try:
         from openllm_cbench.tui.app import main as tui_main
     except ImportError:

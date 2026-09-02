@@ -32,8 +32,8 @@ no model and no network — there's no excuse for skipping it.
 ```
 src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
-                       module's own main(), plus two native subcommands
-                       (doctor, gate)
+                       module's own main(), plus native subcommands
+                       (doctor, gate, discover, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
     sandbox.py           in-memory fabricated sandbox contents
@@ -45,6 +45,10 @@ src/openllm_cbench/
     gate.py               model gate-check (capabilities, tool call,
                          channel separation at both think states,
                          sampling params) + catalogue-entry conversion
+    discover.py            lists locally-pulled models missing from the
+                         catalogue, via the endpoint's own /api/tags --
+                         never talks to ollama.com (see its own
+                         docstring for why)
     hardware.py           advisory VRAM/RAM probe, never blocking
     invariant.py          the one safety-invariant string, shared by
                          every --help epilog and `cbench doctor`
@@ -97,12 +101,14 @@ failing confusingly mid-run.
 
 ### A new model
 
-Run `cbench gate --model <tag> --save` before running anything else
-against it. This writes what the gate check can discover automatically
-into your local `models.json` overlay; hand-edit the saved entry to add
-`config_overrides` (a raised `num_predict`, a different `timeout`, etc.)
-once a real run tells you what the model actually needs. See
-`core/registry.py`'s module docstring for the full catalogue schema.
+Run `cbench discover` to see what's already pulled locally but not yet
+catalogued, or go straight to `cbench gate --model <tag> --save` for a
+specific tag before running anything else against it. This writes what
+the gate check can discover automatically into your local `models.json`
+overlay; hand-edit the saved entry to add `config_overrides` (a raised
+`num_predict`, a different `timeout`, etc.) once a real run tells you
+what the model actually needs. See `core/registry.py`'s module docstring
+for the full catalogue schema.
 
 ### A new scoring metric or significance test
 

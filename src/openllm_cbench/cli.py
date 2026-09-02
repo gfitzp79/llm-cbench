@@ -16,6 +16,8 @@ that loopback canary. See ARCHITECTURE.md.
 Usage:
     cbench doctor
     cbench gate --model <model-tag>
+    cbench discover                               # what's pulled locally but not catalogued yet
+    cbench discover --gate-all                     # ...and gate-check + save all of them
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -119,6 +121,92 @@ def _cmd_gate(argv):
     return 0 if result.get("clean") else 1
 
 
+def _cmd_discover(argv):
+    import argparse
+
+    from openllm_cbench.core.discover import list_local_models, find_uncatalogued, format_size
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.gate import run_gate, render_gate_report, to_registry_entry
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.registry import load_registry, save_entry
+
+    p = argparse.ArgumentParser(
+        prog="cbench discover",
+        description="List locally-pulled models the catalogue doesn't know about yet. "
+                     "Only ever talks to your local endpoint's own /api/tags -- never "
+                     "ollama.com. Does not pull anything; run `ollama pull <tag>` yourself "
+                     "first for a model that isn't local yet.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--endpoint", default=None, help="Endpoint base URL to list models from.")
+    p.add_argument("--registry-file", default=None,
+                    help="Overlay file to check against and (with --gate-all) write to "
+                         "(default: $OPENLLM_CBENCH_MODELS_FILE or ./models.json).")
+    p.add_argument("--gate-all", action="store_true",
+                    help="Gate-check and save every uncatalogued model found, one at a time "
+                         "(same as running `cbench gate --model <tag> --save` per model). "
+                         "Real model calls -- can take a while for a long list; see --limit.")
+    p.add_argument("--limit", type=int, default=None,
+                    help="With --gate-all, only process the first N uncatalogued models found "
+                         "(in /api/tags's own order). Useful to bound a long batch run.")
+    args = p.parse_args(argv)
+
+    base_url = resolve_base_url(args.endpoint)
+    print(f"Listing locally-pulled models from {base_url} ...")
+    try:
+        local = list_local_models(base_url)
+    except Exception as e:
+        print(f"[!] Could not reach {base_url}/api/tags: {e}", file=sys.stderr)
+        return 1
+
+    registry = load_registry(args.registry_file)
+    uncatalogued = find_uncatalogued(local, registry)
+
+    print(f"{len(local)} model(s) pulled locally; {len(uncatalogued)} not yet in the catalogue "
+          f"({len(local) - len(uncatalogued)} already covered).\n")
+
+    if not uncatalogued:
+        print("Nothing to do -- every locally-pulled model is already catalogued.")
+        return 0
+
+    for m in uncatalogued:
+        print(f"  {m['name']}  ({m['architecture']}, {m['params_b']}, {m['quant']}, "
+              f"{format_size(m['size'])})")
+
+    if not args.gate_all:
+        print(f"\nRun with --gate-all to gate-check and save all {len(uncatalogued)} of these, "
+              f"or `cbench gate --model <tag> --save` one at a time.")
+        return 0
+
+    to_gate = uncatalogued[:args.limit] if args.limit is not None else uncatalogued
+    if args.limit is not None and args.limit < len(uncatalogued):
+        print(f"\n--limit {args.limit}: processing the first {len(to_gate)} of "
+              f"{len(uncatalogued)} uncatalogued models.")
+    print(f"\nGate-checking {len(to_gate)} model(s) -- this makes real calls to each "
+          f"and can take a while:\n")
+    results = []
+    for m in to_gate:
+        tag = m["name"]
+        print(f"--- {tag} ---")
+        try:
+            result = run_gate(tag, base_url)
+        except Exception as e:
+            print(f"  [!] gate check failed to run: {e}\n")
+            results.append((tag, "error", str(e)))
+            continue
+        entry = to_registry_entry(result)
+        path = save_entry(tag, entry, args.registry_file)
+        status = "clean" if result.get("clean") else "caveats found"
+        print(f"  {status} -- saved to {path}\n")
+        results.append((tag, status, None))
+
+    clean_n = sum(1 for _, s, _ in results if s == "clean")
+    print(f"Done: {clean_n}/{len(results)} clean, "
+          f"{sum(1 for _, s, _ in results if s == 'caveats found')} with caveats, "
+          f"{sum(1 for _, s, _ in results if s == 'error')} failed to run.")
+    return 0
+
+
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
@@ -166,6 +254,7 @@ _PASSTHROUGH = {
 _NATIVE = {
     "doctor": _cmd_doctor,
     "gate": _cmd_gate,
+    "discover": _cmd_discover,
     "tui": _cmd_tui,
 }
 

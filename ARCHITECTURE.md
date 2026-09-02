@@ -84,6 +84,14 @@ directly rather than taken on faith.
   nothing fires on startup without a click. Every control above applies
   identically whether a suite was launched from a terminal or from the
   TUI, because it's the same process either way.
+- **`cbench discover` adds no new network destination either.** It lists
+  locally-pulled models via the same endpoint every other command already
+  talks to (`/api/tags`, alongside `/api/chat` and `/api/show`) — it does
+  not reach out to ollama.com or any other remote host. Deliberate: Ollama
+  has no official API for browsing its remote model library, and the
+  unofficial alternatives (a third-party API, HTML scraping) would add a
+  new external trust boundary this framework doesn't otherwise have. See
+  `core/discover.py`'s module docstring.
 
 `tests/test_safety_invariant.py` exercises every control above directly,
 with **no model and no network required** — it is the executable version

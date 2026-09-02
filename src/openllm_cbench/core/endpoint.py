@@ -30,3 +30,7 @@ def chat_url(cli_value=None):
 
 def show_url(cli_value=None):
     return resolve_base_url(cli_value).rstrip("/") + "/api/show"
+
+
+def tags_url(cli_value=None):
+    return resolve_base_url(cli_value).rstrip("/") + "/api/tags"

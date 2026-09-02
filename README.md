@@ -149,7 +149,24 @@ saying so.
 
 ### Populating it
 
-Two ways to add an entry, and they write to two different files:
+**Find out what's missing first — `cbench discover`.** Lists every model
+already pulled into your local endpoint that the catalogue doesn't know
+about yet:
+
+```bash
+cbench discover              # just list what's uncatalogued
+cbench discover --gate-all   # ...and gate-check + save every one of them
+cbench discover --gate-all --limit 3   # bound a long batch to the first 3
+```
+
+Only ever talks to your local endpoint's own `/api/tags` — never
+ollama.com. It doesn't pull anything or search Ollama's remote library;
+Ollama has no official API for that (there's an [open feature request](https://github.com/ollama/ollama/issues/9142)
+for one). `ollama pull <tag>` a model yourself first, then `cbench
+discover` picks it up.
+
+Two ways to add a *specific* entry once you know the tag, and they write
+to two different files:
 
 **1. Automatic (recommended starting point) — `cbench gate --model <tag> --save`.**
 Runs the same capability/tool-call/channel-separation check `cbench gate`

@@ -35,6 +35,13 @@ def test_gate_help_exits_immediately_without_a_model():
     assert "--model" in result.stdout
 
 
+def test_discover_help_exits_immediately_no_model_needed():
+    result = _run(["discover", "--help"])
+    assert result.returncode == 0
+    assert "--gate-all" in result.stdout
+    assert "--limit" in result.stdout
+
+
 def test_tui_help_exits_immediately_without_launching_the_app():
     """Regression test: found live that `cbench tui --help`
     hung indefinitely -- _cmd_tui() never inspected its own argv, so

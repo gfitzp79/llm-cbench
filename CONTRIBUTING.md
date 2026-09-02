@@ -126,6 +126,14 @@ it changes what earlier results meant without anyone noticing.
   <subcommand>` subprocess (`tui/jobs.py:cbench_command()`), not a direct
   import of the suite's `main()` into `tui/app.py`. If a PR adds a
   feature that only the TUI can do, that's a sign it's in the wrong file.
+  The one exception: a screen may call a `core/` function **directly**
+  (in-process, via `asyncio.to_thread` so it can't block the UI) purely
+  to *read* something for display -- the Models screen listing local
+  models via `core/discover.py` is the existing example. That's calling
+  the identical function `cbench discover` itself calls, not a second
+  implementation of it, and it has no side effect. Anything with a side
+  effect (writing the catalogue, downloading a model) still goes through
+  a real subprocess, no exception.
 - **Smoke-test before opening a PR, and say what you actually did.**
   Compile/syntax check is necessary but not sufficient — this project has
   twice caught real runtime-only bugs (a variable that only resolved at

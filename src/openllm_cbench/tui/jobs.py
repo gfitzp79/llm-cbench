@@ -35,10 +35,16 @@ RUNNABLE_SUITES = (
 
 
 def cbench_command(subcommand: str, args: list[str]) -> list[str]:
-    """The literal argv this job runs, and the same argv `cbench <subcommand>
-    ...` resolves to on the command line -- shown in the UI verbatim before
-    a run starts, so what the TUI is about to do is never a black box."""
-    return [sys.executable, "-m", "openllm_cbench.cli", subcommand, *args]
+    """The literal argv this job runs -- the same as `cbench <subcommand>
+    ...` on the command line plus `-u` (unbuffered stdout/stderr), shown
+    in the UI verbatim before a run starts, so what the TUI is about to
+    do is never a black box. `-u` matters specifically here: Python
+    block-buffers stdout when it isn't a real terminal (i.e. always, for
+    a subprocess piped through run_job()), so without it a long-running
+    command's output arrives in large delayed chunks instead of live --
+    most visible on `cbench pull`'s per-layer progress lines, but it
+    affects every subcommand's streamed output the same way."""
+    return [sys.executable, "-u", "-m", "openllm_cbench.cli", subcommand, *args]
 
 
 def build_args(model: str, dry_run: bool, extra_args: str) -> list[str]:

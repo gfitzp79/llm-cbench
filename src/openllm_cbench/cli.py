@@ -18,6 +18,7 @@ Usage:
     cbench gate --model <model-tag>
     cbench discover                               # what's pulled locally but not catalogued yet
     cbench discover --gate-all                     # ...and gate-check + save all of them
+    cbench pull --model <model-tag>               # download a model into the local endpoint
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -119,6 +120,46 @@ def _cmd_gate(argv):
               f"add config_overrides once a real run tells you what this model needs.")
 
     return 0 if result.get("clean") else 1
+
+
+def _cmd_pull(argv):
+    """Pulls a model into the local endpoint -- see core/pull.py's module
+    docstring for why this needs no new trust boundary beyond what
+    `ollama pull` already does from a terminal today."""
+    import argparse
+
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.pull import pull_model, throttled_progress_printer
+
+    p = argparse.ArgumentParser(
+        prog="cbench pull",
+        description="Pull a model into the local endpoint. Downloads real data, "
+                     "potentially several GB -- streams progress as it happens.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True)
+    p.add_argument("--endpoint", default=None)
+    args = p.parse_args(argv)
+
+    base_url = resolve_base_url(args.endpoint)
+    print(f"Pulling '{args.model}' into {base_url} ...")
+
+    def _print(line):
+        print(line, flush=True)
+
+    try:
+        ok, final = pull_model(args.model, base_url, on_progress=throttled_progress_printer(_print))
+    except Exception as e:
+        print(f"[!] Could not reach {base_url}: {e}", file=sys.stderr)
+        return 1
+
+    if ok:
+        print(f"\nDone: '{args.model}' pulled successfully. Run `cbench gate --model "
+              f"{args.model} --save` next to add it to your catalogue.")
+        return 0
+    print(f"\n[!] Pull failed: {final}", file=sys.stderr)
+    return 1
 
 
 def _cmd_discover(argv):
@@ -255,6 +296,7 @@ _NATIVE = {
     "doctor": _cmd_doctor,
     "gate": _cmd_gate,
     "discover": _cmd_discover,
+    "pull": _cmd_pull,
     "tui": _cmd_tui,
 }
 

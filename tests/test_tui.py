@@ -23,15 +23,18 @@ import pytest
 textual = pytest.importorskip("textual")
 
 from openllm_cbench.tui.jobs import build_args, cbench_command, RUNNABLE_SUITES  # noqa: E402
-from openllm_cbench.tui.app import CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen  # noqa: E402
+from openllm_cbench.tui.app import (  # noqa: E402
+    CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
+    ModelsScreen, PullScreen,
+)
 
 
 # --- jobs.py: pure argv construction -------------------------------------
 
 def test_cbench_command_uses_the_real_cli_module():
     argv = cbench_command("containment", ["--model", "x:1b", "--dry-run"])
-    assert argv[:3] == [sys.executable, "-m", "openllm_cbench.cli"]
-    assert argv[3] == "containment"
+    assert argv[:4] == [sys.executable, "-u", "-m", "openllm_cbench.cli"]
+    assert argv[4] == "containment"
     assert "--model" in argv and "x:1b" in argv
     assert "--dry-run" in argv
 
@@ -74,7 +77,7 @@ def test_runnable_suites_map_to_real_passthrough_subcommands():
 def test_dashboard_composes_and_navigates_to_run_screen():
     async def scenario():
         app = CBenchTUI()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
             assert isinstance(app.screen, DashboardScreen)
             await pilot.click("#goto-run")
@@ -86,7 +89,7 @@ def test_dashboard_composes_and_navigates_to_run_screen():
 def test_dashboard_navigates_to_gate_and_reports_screens():
     async def scenario():
         app = CBenchTUI()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
             await pilot.click("#goto-gate")
             await pilot.pause()
@@ -102,7 +105,7 @@ def test_dashboard_navigates_to_gate_and_reports_screens():
 def test_run_screen_requires_a_model_before_running():
     async def scenario():
         app = CBenchTUI()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
             await pilot.click("#goto-run")
             await pilot.pause()
@@ -119,7 +122,7 @@ def test_run_screen_requires_a_model_before_running():
 def test_invariant_bar_present_on_every_pushed_screen():
     async def scenario():
         app = CBenchTUI()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
             text = app.screen.query_one("#invariant-text").content
             assert "ATTEMPT" in str(text)
@@ -127,4 +130,86 @@ def test_invariant_bar_present_on_every_pushed_screen():
             await pilot.pause()
             text = app.screen.query_one("#invariant-text").content
             assert "ATTEMPT" in str(text)
+    asyncio.run(scenario())
+
+
+def test_dashboard_doctor_caption_explains_what_the_button_does():
+    # Regression: a user reported "Refresh doctor" was unclear. The
+    # button is now labelled "Check environment" and a permanent caption
+    # (not just log-widget text a user might miss) explains it.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            caption = str(app.screen.query_one("#doctor-caption").content)
+            assert "cbench doctor" in caption
+            assert "endpoint" in caption.lower()
+    asyncio.run(scenario())
+
+
+def test_dashboard_navigates_to_models_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            assert isinstance(app.screen, ModelsScreen)
+    asyncio.run(scenario())
+
+
+def test_models_screen_navigates_to_pull_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#goto-pull")
+            await pilot.pause()
+            assert isinstance(app.screen, PullScreen)
+    asyncio.run(scenario())
+
+
+def test_pull_screen_requires_a_model_before_pulling():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#goto-pull")
+            await pilot.pause()
+            await pilot.click("#pull-button")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#pull-log").lines]
+            assert any("model tag is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_run_screen_has_a_model_select_alongside_the_free_text_input():
+    # Both must exist: the picker for convenience, the Input as the
+    # actual source of truth (still works for a tag not pulled yet).
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-run")
+            await pilot.pause()
+            from textual.widgets import Select, Input
+            assert app.screen.query_one("#model-select", Select) is not None
+            assert app.screen.query_one("#model-input", Input) is not None
+    asyncio.run(scenario())
+
+
+def test_gate_screen_has_a_model_select_alongside_the_free_text_input():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-gate")
+            await pilot.pause()
+            from textual.widgets import Select, Input
+            assert app.screen.query_one("#gate-model-select", Select) is not None
+            assert app.screen.query_one("#gate-model-input", Input) is not None
     asyncio.run(scenario())

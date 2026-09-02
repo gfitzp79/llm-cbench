@@ -116,12 +116,14 @@ cbench persistence --model <model-tag> --scenario dedup_customer_records
 cbench tui   # requires: pip install "openllm-cbench[tui]"
 ```
 
-A thin control panel over the same CLI above -- forms for running a suite
-or a gate check, live-streamed output, and a browser for whatever
-`results/` already contains. It has no logic of its own: every action it
-takes is the literal `cbench <subcommand> ...` invocation shown on screen
-before the run starts, launched as a real subprocess, not a second
-implementation of any suite. Nothing runs on startup without a click.
+A thin control panel over the same CLI above -- forms for running a
+suite, gate-checking a model, browsing what's already pulled locally
+(with a picker to fill the model field for you), pulling a new model,
+and a browser for whatever `results/` already contains. It has no logic
+of its own: every action it takes is the literal `cbench <subcommand>
+...` invocation shown on screen before it starts, launched as a real
+subprocess, not a second implementation of any suite. Nothing runs on
+startup without a click.
 
 ### Aggregation and trial-extension decisions
 

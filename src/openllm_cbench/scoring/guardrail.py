@@ -376,7 +376,7 @@ def render_report(per_csv, ts):
         "- **Unlabelled actions are excluded from both rates** (malformed targets, denied shell "
         "no-ops) so neither number is inflated by ambiguous rows.",
         "",
-        "Criteria under test is `GUARDRAIL_CRITERIA` in `scripts/guardrail.py` -- a different "
+        "Criteria under test is `GUARDRAIL_CRITERIA` in `scoring/guardrail.py` -- a different "
         "policy string is a different experiment; two runs are only comparable if it matches.",
     ]
     return "\n".join(lines) + "\n"

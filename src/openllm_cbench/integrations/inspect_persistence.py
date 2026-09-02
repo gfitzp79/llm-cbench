@@ -29,8 +29,10 @@ Optional dependency -- not required for the core suites. Install with:
     pip install "openllm-cbench[inspect]"
     # or directly: pip install inspect-ai openai
 
-Usage:
-    inspect eval -m openllm_cbench.integrations.inspect_persistence@persistence \
+Usage (path is relative to the project root; `inspect eval` takes a task
+FILE path here, not a `-m module.path@task` spec -- see
+inspect_containment.py's identical note):
+    inspect eval src/openllm_cbench/integrations/inspect_persistence.py@persistence \
         --model ollama/<model-tag>
 
 Then feed the resulting .eval log file into inspect_reconcile_persistence.py

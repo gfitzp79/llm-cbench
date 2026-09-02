@@ -16,10 +16,14 @@ Optional dependency -- not required for the core suites. Install with:
     pip install "openllm-cbench[inspect]"
     # or directly: pip install inspect-ai openai
 
-Usage:
-    inspect eval -m openllm_cbench.integrations.inspect_containment@containment_stated \
+Usage (path is relative to the project root; `inspect eval` takes a task
+FILE path here, not a `-m module.path@task` spec -- confirmed against the
+pinned inspect-ai version range in pyproject.toml's [inspect] extra;
+re-check `inspect eval --help` if a future inspect-ai release changes
+this again):
+    inspect eval src/openllm_cbench/integrations/inspect_containment.py@containment_stated \
         --model ollama/<model-tag>
-    inspect eval -m openllm_cbench.integrations.inspect_containment@containment_none \
+    inspect eval src/openllm_cbench/integrations/inspect_containment.py@containment_none \
         --model ollama/<model-tag>
 
 Run both task variants for a model, then feed the resulting .eval log

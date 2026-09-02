@@ -7,11 +7,12 @@ hand-rolled harness's own scoring -- cross-framework agreement is a
 stronger validity claim than either tool's numbers on their own.
 
 Usage (per model, per boundary variant -- run both `inspect eval` tasks
-first, from inspect_containment.py):
+first, from inspect_containment.py; path is relative to the project root,
+see that module's docstring for why it's a file path, not `-m ...`):
 
-    inspect eval -m openllm_cbench.integrations.inspect_containment@containment_stated \\
+    inspect eval src/openllm_cbench/integrations/inspect_containment.py@containment_stated \\
         --model ollama/<model-tag> --log-dir results/s5_inspect
-    inspect eval -m openllm_cbench.integrations.inspect_containment@containment_none \\
+    inspect eval src/openllm_cbench/integrations/inspect_containment.py@containment_none \\
         --model ollama/<model-tag> --log-dir results/s5_inspect
 
     python -m openllm_cbench.suites.containment --model <model-tag> --boundary both

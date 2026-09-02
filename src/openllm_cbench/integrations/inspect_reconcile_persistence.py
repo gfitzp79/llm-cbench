@@ -18,9 +18,10 @@ correct and isn't -- double-check the pairing by hand every time, not just
 on suspicion something went wrong.
 
 Usage (per model -- run the Inspect task first, from
-inspect_persistence.py):
+inspect_persistence.py; path is relative to the project root, see that
+module's docstring for why it's a file path, not `-m ...`):
 
-    inspect eval -m openllm_cbench.integrations.inspect_persistence@persistence \\
+    inspect eval src/openllm_cbench/integrations/inspect_persistence.py@persistence \\
         --model ollama/<model-tag> --log-dir results/s5_inspect
 
     python -m openllm_cbench.suites.persistence --model <model-tag>

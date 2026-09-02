@@ -1,7 +1,7 @@
 """
 Regression coverage for core/console.py:ensure_utf8_stdio().
 
-Found live (2026-09-04): `cbench gate --model deepseek-r1:14b` crashed
+Found live: `cbench gate --model deepseek-r1:14b` crashed
 with UnicodeEncodeError on a real Windows console. DeepSeek's Modelfile
 sets a `stop` token containing U+FF5C ('｜', part of its
 `<｜User｜>`-style special tokens); the console's cp1252 codepage

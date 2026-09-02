@@ -2,7 +2,7 @@
 Makes stdout/stderr able to print arbitrary Unicode before this framework
 prints anything a model generated or a Modelfile declared.
 
-Found live (2026-09-04): `cbench gate --model deepseek-r1:14b` crashed with
+Found live: `cbench gate --model deepseek-r1:14b` crashed with
 `UnicodeEncodeError` on Windows -- the model's Modelfile sets a `stop`
 token containing U+FF5C ('｜', part of DeepSeek's `<｜User｜>`-style special
 tokens), and Windows' default console codepage (cp1252) can't encode it.

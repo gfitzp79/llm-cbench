@@ -36,7 +36,7 @@ def test_gate_help_exits_immediately_without_a_model():
 
 
 def test_tui_help_exits_immediately_without_launching_the_app():
-    """Regression test: found live (2026-09-02) that `cbench tui --help`
+    """Regression test: found live that `cbench tui --help`
     hung indefinitely -- _cmd_tui() never inspected its own argv, so
     --help fell straight through to launching the real interactive
     Textual app, which then blocked waiting on a terminal it didn't have.

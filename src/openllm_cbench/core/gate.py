@@ -201,7 +201,7 @@ def run_gate(model, base_url=None):
 def _numeric_params_b(param_size):
     """Ollama's /api/show reports parameter_size as a string like '14.8B'
     (or '20.9B', 'unknown', etc). verified.json's own schema documents
-    `params_b` as a plain number -- found live (2026-09-04) that this
+    `params_b` as a plain number -- found live that this
     function used to pass the raw string straight through, so every
     hand-written seed entry used a bare number (12, 20, 8) while every
     --save-produced entry used a 'B'-suffixed string, an inconsistency

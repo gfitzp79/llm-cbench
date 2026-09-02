@@ -78,6 +78,185 @@
       "caveats": [
         "If you gate-check a community fork of this model, explicitly diff its Modelfile's sampling parameters (not just architecture/quant/capabilities) against the base -- an unmatched Modelfile-level parameter (e.g. a repetition/presence penalty set on one arm and not the other) silently confounds any base-vs-fork comparison and won't show up in a capability check. Every suite in this framework pins presence_penalty to 0 explicitly for exactly this reason; check for other parameters a Modelfile might set."
       ]
+    },
+
+    "llama3.1:8b": {
+      "architecture": "llama",
+      "params_b": 8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": []
+    },
+    "qwen3:14b": {
+      "architecture": "qwen3",
+      "params_b": 14.8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": []
+    },
+    "gemma3:12b": {
+      "architecture": "gemma3",
+      "params_b": 12.2,
+      "quant": "Q4_K_M",
+      "tools": false,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "Endpoint does not report a tools capability -- the containment and persistence suites need real tool calling and will not produce valid data. gemma3 (distinct from gemma4, already in this catalogue) does not expose tool calling via this endpoint."
+      ]
+    },
+    "mistral-nemo:12b": {
+      "architecture": "llama",
+      "params_b": 12.2,
+      "quant": "Q4_0",
+      "tools": true,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": []
+    },
+    "phi4:14b": {
+      "architecture": "phi3",
+      "params_b": 14.7,
+      "quant": "Q4_K_M",
+      "tools": false,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "Endpoint does not report a tools capability -- the containment and persistence suites need real tool calling and will not produce valid data."
+      ]
+    },
+    "qwen2.5-coder:14b": {
+      "architecture": "qwen2",
+      "params_b": 14.8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "Endpoint DOES report a tools capability, but the tool-call round-trip itself failed (no tool_calls block came back for a trivial single-tool prompt) -- a different, sneakier failure mode than 'no tools capability at all'. `has_tools_capability=true` is not sufficient evidence a model will actually produce a usable tool call; always check the tool-call-check line too, not just the capability list."
+      ]
+    },
+    "deepseek-r1:14b": {
+      "architecture": "qwen2",
+      "params_b": 14.8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": [
+        "Same tools-capability-reported-but-round-trip-fails pattern as qwen2.5-coder:14b above -- do not treat this model as tool-calling-capable for the containment/persistence suites despite the capability list saying so.",
+        "This model's Modelfile stop token contains a non-ASCII special-token character (U+FF5C, '｜', part of its <｜User｜>-style markers) -- this is what originally surfaced a real UnicodeEncodeError crash in this framework's own console output on Windows (fixed in core/console.py; see that module's docstring). A useful reminder that 'the model's own special tokens' is a real source of non-ASCII text, not just multilingual generated content."
+      ]
+    },
+    "granite4.1:8b": {
+      "architecture": "granite",
+      "params_b": 8.8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "No reasoning channel by design (same architecture family as granite4.2:8b above, but this generation doesn't expose 'thinking' at all) -- the channel suite has nothing to sweep for this tag; containment/persistence are unaffected."
+      ]
+    },
+    "huihui_ai/granite4.1-abliterated:8b": {
+      "architecture": "granite",
+      "params_b": 8.8,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "Community safety-ablated fork of granite4.1:8b (also in this catalogue) -- matches the base on architecture/params/quant/capabilities at gate time; diff Modelfile sampling parameters explicitly before treating any base-vs-fork comparison as clean (see qwen3.5:9b's caveat above for why)."
+      ]
+    },
+    "huihui_ai/gpt-oss-abliterated:20b": {
+      "architecture": "gpt-oss",
+      "params_b": 20.9,
+      "quant": "F16",
+      "tools": true,
+      "thinking": true,
+      "thinking_mode": "effort",
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": [
+        "Community safety-ablated fork of gpt-oss:20b (also in this catalogue, quant MXFP4 there vs F16 reported here) -- `ollama show` reports a different quant label between this fork and its base. Not independently re-verified at the tensor level in this catalogue entry whether that's a real precision difference or a labelling artifact of which weight subset `ollama show` picked to report -- treat the quant mismatch as a flag to check before citing any base-vs-fork comparison, not as a settled fact either way.",
+        "Exposes graded reasoning effort (low/medium/high), not a boolean think toggle, same as its base -- this catalogue's thinking_mode field already routes the channel suite to an --effort sweep automatically for this tag."
+      ]
+    },
+    "huihui_ai/gemma-4-abliterated:12b": {
+      "architecture": "gemma4",
+      "params_b": 11.9,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": [
+        "Community safety-ablated fork of gemma4:12b (also in this catalogue) -- matches the base on architecture/quant/capabilities at gate time; diff Modelfile sampling parameters explicitly before treating any base-vs-fork comparison as clean."
+      ]
+    },
+    "hf.co/empero-ai/Qwen3.8-9B-GGUF:Q4_K_M": {
+      "architecture": "qwen35",
+      "params_b": 9.2,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "clean"},
+      "config_overrides": {},
+      "caveats": [
+        "Third-party distillation naming pattern ('empero') -- core/provenance.py's provenance_note() already labels this automatically in every generated report as unaffiliated with the base model's original vendor; do not present its behaviour as a property of the Qwen model family without that qualifier."
+      ]
+    },
+    "foundation-sec-8b-reasoning:latest": {
+      "architecture": "llama",
+      "params_b": 8,
+      "quant": "Q4_K_M",
+      "tools": false,
+      "thinking": true,
+      "channel_separation": {"think_on": "UNRELIABLE (merge suspected)", "think_off": "UNRELIABLE (merge suspected)"},
+      "config_overrides": {},
+      "caveats": [
+        "No tools capability -- the containment and persistence suites need real tool calling and will not produce valid data against this model at all.",
+        "Reasoning text leaks into the visible answer instead of a separate field, at BOTH think states -- confirmed via cbench gate's merge guard firing on both. Every channel-suite verdict against this model would be unreliable regardless of --think setting. Net: this model cannot currently be validly assessed by any of this framework's three suites -- useful as a worked example of what a full gate-check failure looks like, not as a subject to actually run."
+      ]
+    },
+    "ServiceNow-AI/Apriel-1.6-15b-Thinker:Q4_K_M": {
+      "architecture": "llama",
+      "params_b": 14.4,
+      "quant": "Q4_K_M",
+      "tools": true,
+      "thinking": true,
+      "channel_separation": {"think_on": "clean", "think_off": "UNCERTAIN -- see caveat"},
+      "config_overrides": {},
+      "caveats": [
+        "think=off gate content was unusually long (1500+ chars for a one-sentence prompt) with 0 reported thinking chars -- consistent with this model delimiting its reasoning/final-answer boundary with a non-<think> marker this framework's generic merge guard doesn't recognize (see ARCHITECTURE.md 'Known limitations' -- the guard is hard-coded to <think>/</think>). The automated check reported 'clean' at think=off; this caveat exists precisely because that verdict should not be trusted at face value for this tag. Verify the actual delimiter convention by hand before citing any think=off channel-suite result for this model."
+      ]
+    },
+    "exaone-deep:7.8b": {
+      "architecture": "exaone",
+      "params_b": 7.8,
+      "quant": "Q4_K_M",
+      "tools": false,
+      "thinking": false,
+      "channel_separation": null,
+      "config_overrides": {},
+      "caveats": [
+        "No tools capability and no thinking capability reported -- the containment and persistence suites need real tool calling and will not produce valid data; the channel suite has no reasoning channel to sweep. A capable-looking 'deep' reasoning model name is not evidence of either capability -- always gate-check, don't infer from the tag."
+      ]
     }
   }
 }

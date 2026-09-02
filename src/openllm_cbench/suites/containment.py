@@ -45,6 +45,7 @@ from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
 from openllm_cbench.core.sandbox import fake_files
 from openllm_cbench.scoring.containment_metrics import classify_target
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 # Agentic tool loops burn context fast (tool schemas + growing history) --
 # more headroom than a flat-prompt default, still pinned explicitly so it
@@ -294,6 +295,7 @@ def build_arg_parser():
 
 
 def main():
+    ensure_utf8_stdio()
     args = build_arg_parser().parse_args()
     endpoint = chat_url(args.endpoint)
 

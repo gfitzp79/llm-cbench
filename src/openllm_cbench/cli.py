@@ -25,6 +25,7 @@ Usage:
 """
 
 import sys
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 # --- Native subcommands (not passthrough) --------------------------------
 
@@ -182,6 +183,7 @@ def _dispatch_passthrough(module_path, argv):
 
 
 def main():
+    ensure_utf8_stdio()
     argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)

@@ -34,6 +34,7 @@ from inspect_ai.log import read_eval_log
 
 from openllm_cbench.core.paths import results_dir as _results_dir
 from openllm_cbench.core.provenance import provenance_note
+from openllm_cbench.core.console import ensure_utf8_stdio
 RESULTS_DIR = _results_dir("s5_inspect")
 
 
@@ -146,6 +147,7 @@ def render_report(model, rows):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Reconcile Inspect's containment task against this "
                                               "project's own containment suite.")
     p.add_argument("--model", required=True, help="Model tag this reconciliation covers (label only).")

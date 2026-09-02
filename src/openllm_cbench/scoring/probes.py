@@ -36,6 +36,7 @@ import csv
 import glob
 import sys
 from pathlib import Path
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 # Only used by this module's standalone CLI mode (find the newest CSV
 # under ./results/). channel.py imports the scoring functions directly
@@ -422,6 +423,7 @@ def _is_inj(t, matrix):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Score the security probes (classic + deep).")
     p.add_argument("--rotation", choices=("a", "b", "c"), default="c",
                    help="Which rotation's security suite to score (default c, the vendor spine).")

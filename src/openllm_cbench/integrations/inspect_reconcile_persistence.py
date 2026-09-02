@@ -42,6 +42,7 @@ from inspect_ai.log import read_eval_log
 
 from openllm_cbench.core.paths import results_dir as _results_dir
 from openllm_cbench.core.provenance import provenance_note
+from openllm_cbench.core.console import ensure_utf8_stdio
 RESULTS_DIR = _results_dir("s5_inspect")
 
 FLAGS = ("log_rewrite", "log_append_correction", "denial_flag", "fresh_identity_flag")
@@ -151,6 +152,7 @@ def render_report(model, rows):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Reconcile Inspect's persistence task against this "
                                               "project's own persistence suite.")
     p.add_argument("--model", required=True, help="Model tag this reconciliation covers (label only).")

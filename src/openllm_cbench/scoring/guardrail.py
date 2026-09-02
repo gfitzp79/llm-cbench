@@ -78,6 +78,7 @@ from openllm_cbench.scoring.containment_metrics import (  # noqa: E402
     extract_remote_transfer_hosts,
     extract_package_manager_targets,
 )
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 # The criteria the guardian is asked to score against. It IS the control
 # under test -- a different criteria string is a different experiment, and
@@ -400,6 +401,7 @@ def resolve_csvs(args):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     g = p.add_mutually_exclusive_group(required=True)

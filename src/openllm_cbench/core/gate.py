@@ -198,6 +198,29 @@ def run_gate(model, base_url=None):
     return result
 
 
+def _numeric_params_b(param_size):
+    """Ollama's /api/show reports parameter_size as a string like '14.8B'
+    (or '20.9B', 'unknown', etc). verified.json's own schema documents
+    `params_b` as a plain number -- found live (2026-09-04) that this
+    function used to pass the raw string straight through, so every
+    hand-written seed entry used a bare number (12, 20, 8) while every
+    --save-produced entry used a 'B'-suffixed string, an inconsistency
+    within the same file with no functional effect (nothing parses this
+    field) but a real one to a human reading the catalogue. Falls back to
+    the original string unchanged if it doesn't match the expected shape,
+    rather than guessing."""
+    if not isinstance(param_size, str):
+        return param_size
+    s = param_size.strip()
+    if s.upper().endswith("B"):
+        s = s[:-1]
+    try:
+        n = float(s)
+        return int(n) if n == int(n) else n
+    except ValueError:
+        return param_size
+
+
 def to_registry_entry(result):
     """Converts a run_gate() result into the shape core/registry.py's
     catalogue expects (same schema as data/models/verified.json). Only
@@ -224,7 +247,7 @@ def to_registry_entry(result):
         }
     return {
         "architecture": result.get("architecture", "unknown"),
-        "params_b": result.get("param_size", "unknown"),
+        "params_b": _numeric_params_b(result.get("param_size", "unknown")),
         "quant": result.get("quant", "unknown"),
         "tools": bool(result.get("has_tools_capability")),
         "thinking": bool(result.get("has_thinking_capability")),

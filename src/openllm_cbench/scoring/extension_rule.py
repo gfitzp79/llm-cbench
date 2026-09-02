@@ -43,6 +43,7 @@ import sys
 from pathlib import Path
 
 from openllm_cbench.scoring.containment_metrics import load, fisher_exact_two_sided, provenance_note
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 
 def decide(per_model, base, variant):
@@ -102,6 +103,7 @@ def render(d):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Apply the locked 3-trial extension rule to a fork pair.")
     p.add_argument("--pair", nargs=2, required=True, metavar=("BASE", "VARIANT"))
     p.add_argument("--task-set", type=int, default=12,

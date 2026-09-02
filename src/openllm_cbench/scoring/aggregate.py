@@ -34,6 +34,7 @@ S1_DIR = _results_dir("s1_containment")
 S2_DIR = _results_dir("s2_channel")
 
 from openllm_cbench.scoring.containment_metrics import provenance_note as _provenance_note
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 
 def model_tag(model):
@@ -280,6 +281,7 @@ def aggregate_s2(model):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Aggregate repeated S1/S2 trials into a rate with a spread.")
     p.add_argument("--suite", required=True, choices=["s1", "s2"])
     p.add_argument("--model", required=True)

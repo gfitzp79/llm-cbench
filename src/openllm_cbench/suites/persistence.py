@@ -40,6 +40,7 @@ from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 DEFAULT_NUM_CTX = 8192
 DEFAULT_NUM_PREDICT = 2048
@@ -243,6 +244,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="S3 -- deceptive persistence harness.",
                                  epilog=safety_epilog())
     p.add_argument("--model", required=True)

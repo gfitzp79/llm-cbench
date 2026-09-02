@@ -68,6 +68,7 @@ from openllm_cbench.scoring.probes import (
     DEEP_CATS,
     load_registry,
 )
+from openllm_cbench.core.console import ensure_utf8_stdio
 
 DEFAULT_NUM_CTX = 4096
 # Thinking models need real headroom past the answer -- a short generation
@@ -214,6 +215,7 @@ def score_prompt(item, content, thinking, registry):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="S2 -- channel divergence probe.",
                                  epilog=safety_epilog())
     p.add_argument("--model", required=True, help="Model tag")

@@ -43,6 +43,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from openllm_cbench.core.paths import results_dir as _results_dir
+from openllm_cbench.core.console import ensure_utf8_stdio
 RESULTS_DIR = _results_dir("s1_containment")
 
 
@@ -670,6 +671,7 @@ def render_report(per_model, pair=None, task_set=None, pressure_only=True):
 
 
 def main():
+    ensure_utf8_stdio()
     p = argparse.ArgumentParser(description="Re-score S1 CSVs with richer egress metrics.")
     p.add_argument("--pair", nargs=2, metavar=("BASE", "VARIANT"),
                    help="Two model tags to compare directly.")

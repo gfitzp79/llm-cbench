@@ -25,7 +25,7 @@ textual = pytest.importorskip("textual")
 from openllm_cbench.tui.jobs import build_args, cbench_command, RUNNABLE_SUITES  # noqa: E402
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
-    ModelsScreen, PullScreen,
+    ModelsScreen, PullScreen, AssessmentScreen, AboutScreen,
 )
 
 
@@ -212,4 +212,120 @@ def test_gate_screen_has_a_model_select_alongside_the_free_text_input():
             from textual.widgets import Select, Input
             assert app.screen.query_one("#gate-model-select", Select) is not None
             assert app.screen.query_one("#gate-model-input", Input) is not None
+    asyncio.run(scenario())
+
+
+def test_dashboard_navigates_to_assessment_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-assess")
+            await pilot.pause()
+            assert isinstance(app.screen, AssessmentScreen)
+    asyncio.run(scenario())
+
+
+def test_dashboard_navigates_to_about_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-about")
+            await pilot.pause()
+            assert isinstance(app.screen, AboutScreen)
+            await pilot.click("#about-back")
+            await pilot.pause()
+            assert isinstance(app.screen, DashboardScreen)
+    asyncio.run(scenario())
+
+
+def test_about_screen_mentions_both_ai_tool_families_with_no_vendor_lock_in():
+    # This screen exists specifically because the user asked for "encourage
+    # using Claude Code/Cowork or Codex" -- guidance-only, no runtime
+    # dependency on either. Guard both halves of that decision.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-about")
+            await pilot.pause()
+            text = str(app.screen.query_one("#about-body Static").content)
+            assert "Claude Code" in text or "Claude" in text
+            assert "Codex" in text
+            assert "CONTRIBUTING.md" in text
+    asyncio.run(scenario())
+
+
+def test_assessment_screen_requires_a_model_before_starting():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-assess")
+            await pilot.pause()
+            await pilot.click("#assess-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
+            assert any("model tag is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_assessment_screen_requires_at_least_one_suite():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-assess")
+            await pilot.pause()
+            await pilot.click("#assess-model-input")
+            await pilot.press(*list("x:1b"))
+            for cb_id in ("#assess-s1", "#assess-s2", "#assess-s3"):
+                await pilot.click(cb_id)  # uncheck all three (default is checked)
+            await pilot.click("#assess-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
+            assert any("select at least one suite" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_assessment_screen_rejects_a_non_numeric_trial_count():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-assess")
+            await pilot.pause()
+            await pilot.click("#assess-model-input")
+            await pilot.press(*list("x:1b"))
+            trials_input = app.screen.query_one("#assess-trials-input")
+            trials_input.value = "not-a-number"
+            await pilot.click("#assess-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
+            assert any("positive whole number" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_assessment_screen_dry_run_builds_the_correct_assess_command():
+    # Confirms the real `cbench assess` argv is built correctly from the
+    # form fields -- suites joined, trials passed through, --dry-run
+    # only when checked (checked by default here).
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-assess")
+            await pilot.pause()
+            await pilot.click("#assess-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#assess-s2")  # uncheck S2, leaving S1+S3
+            await pilot.click("#assess-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#assess-preview").content)
+            assert "assess" in preview
+            assert "--model x:1b" in preview
+            assert "--suites s1,s3" in preview
+            assert "--trials 3" in preview
+            assert "--dry-run" in preview
     asyncio.run(scenario())

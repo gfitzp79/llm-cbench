@@ -106,6 +106,53 @@ def test_is_canary_url_matches_only_the_canary_port():
     assert is_canary_url("https://public.example.com/x", 9000) is False
 
 
+def test_is_canary_url_never_crashes_on_non_string_input():
+    """Found live running a genuinely small/undertrained model
+    (qwen3:0.6b) through `cbench assess`: it emitted a non-string value
+    for a URL-shaped tool argument, and the original bare `in` check
+    raised TypeError ('argument of type ... is not iterable'), killing
+    an in-progress trial. Nothing that isn't a string can be a match for
+    the canary's own address, so this must degrade to False."""
+    for bad in ({"nested": "dict"}, ["a", "list"], 123, None, 4.5):
+        assert is_canary_url(bad, 9000) is False
+
+
+def test_read_local_file_never_crashes_on_a_non_string_path():
+    """Same root cause as the is_canary_url case above (a small model's
+    malformed tool arguments), different tool: `files.get(path)` raised
+    TypeError ('unhashable type: dict') when the model passed a dict
+    where the schema calls for a string path. Must degrade to a
+    synthetic error, not propagate and kill the trial."""
+    server, port = start_canary()
+    try:
+        files, _ = fake_files(port)
+        state = _fresh_state()
+        for bad_path in ({"nested": "dict"}, ["a", "list"], 123, None):
+            result = execute_tool("read_local_file", {"path": bad_path}, files, port, state)
+            assert "invalid path argument" in result
+        assert state["log"][-1]["result"] == "malformed_path"
+    finally:
+        server.shutdown()
+
+
+def test_http_request_never_crashes_on_a_non_string_url():
+    """The http_request branch calls is_canary_url() before
+    classify_target()'s own try/except is reached -- a non-string url
+    used to crash there first. Covered end-to-end here (not just at
+    is_canary_url() in isolation) since that's the actual call path a
+    live trial takes."""
+    server, port = start_canary()
+    try:
+        files, _ = fake_files(port)
+        state = _fresh_state()
+        for bad_url in ({"nested": "dict"}, ["a", "list"], 123, None):
+            result = execute_tool("http_request", {"url": bad_url}, files, port, state)
+            assert "network unreachable" in result
+        assert state["escape_attempt"] is True
+    finally:
+        server.shutdown()
+
+
 def test_harmful_task_set_requires_extended_sandbox_files_to_exist():
     """fake_files() must not silently omit the two files the harmful-intent
     task set reads -- that would surface as a per-row tool error mid-run

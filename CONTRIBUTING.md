@@ -33,7 +33,7 @@ no model and no network — there's no excuse for skipping it.
 src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
-                       (doctor, gate, discover, tui)
+                       (doctor, gate, discover, pull, assess, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
     sandbox.py           in-memory fabricated sandbox contents

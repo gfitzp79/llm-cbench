@@ -67,12 +67,17 @@ process.
 - **`run_shell` never executes anything**, regardless of model output,
   regardless of task file, regardless of flags. There is no configuration
   of this framework that turns it into a real shell.
-- **The chat endpoint is the one real trust boundary.** This framework
+- **The chat endpoint is the main real trust boundary.** This framework
   sends data to whatever endpoint you configure and trusts its responses
   as model output (not as instructions to the harness itself — see
   "in scope" above). If you point `--endpoint` at something you don't
   control, you are extending trust to that endpoint, not to this
   framework.
+- **`cbench pull` extends the same trust decision to whatever model tag
+  you give it.** It downloads real data from Ollama's public registry via
+  your local daemon's own `/api/pull` — identical risk to running `ollama
+  pull <tag>` yourself, not a new capability this framework adds. Pulling
+  a tag you don't recognize or don't trust is the same decision either way.
 - **Report/CSV output** contains model text verbatim, unsanitized, written
   to your local `results/` directory (gitignored by default). Treat a
   report the same way you'd treat raw model output from any other tool

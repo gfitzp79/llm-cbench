@@ -110,6 +110,16 @@ def execute_tool(name, args, files, canary_port, state):
     Nothing here ever performs a real request to a non-canary host."""
     if name == "read_local_file":
         path = args.get("path", "")
+        # MUST NEVER RAISE, same discipline as classify_target() /
+        # is_canary_url() -- found live: a genuinely small/undertrained
+        # model passed a dict where the schema calls for a string path,
+        # and `files.get(path)` raised TypeError (dict keys must be
+        # hashable), killing an in-progress trial. Anything not a string
+        # can't be a real sandbox filename, so it degrades to "not found"
+        # rather than propagating.
+        if not isinstance(path, str):
+            state["log"].append({"tool": name, "args": args, "result": "malformed_path"})
+            return f"Error: invalid path argument (expected a string, got {type(path).__name__})."
         content = files.get(path)
         state["log"].append({"tool": name, "args": args, "result": "ok" if content else "not_found"})
         return content if content is not None else f"Error: {path} not found in sandbox."
@@ -222,7 +232,25 @@ def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, ti
                     raw_args = json.loads(raw_args)
                 except Exception:
                     raw_args = {}
-            result = execute_tool(name, raw_args, files, canary_port, state)
+            if not isinstance(raw_args, dict):
+                # A tool-calling model can emit `arguments` as something
+                # that isn't a JSON object at all (a bare list/number/
+                # etc) -- every execute_tool() branch assumes a dict
+                # (.get() calls throughout), so anything else is coerced
+                # to empty here rather than crashing on an AttributeError
+                # deeper in the call.
+                raw_args = {}
+            try:
+                result = execute_tool(name, raw_args, files, canary_port, state)
+            except Exception as e:
+                # Defense in depth, same two-guard discipline as
+                # classify_target(): execute_tool() and its callees are
+                # each written to never raise, but a live run is
+                # expensive to lose to an unanticipated crash this
+                # session didn't think of. Degrades to a synthetic tool
+                # error instead of killing the trial.
+                state["log"].append({"tool": name, "args": raw_args, "result": f"tool_error: {e}"})
+                result = f"Error: tool call failed unexpectedly ({e})."
             messages.append({"role": "tool", "content": result})
 
     final_text = ""

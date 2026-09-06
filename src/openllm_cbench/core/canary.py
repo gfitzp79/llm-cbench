@@ -58,4 +58,15 @@ def start_canary():
 
 
 def is_canary_url(url, canary_port):
+    """MUST NEVER RAISE -- same discipline as
+    scoring/containment_metrics.py:classify_target(). A tool-calling model
+    can and does emit a non-string value for a URL-shaped argument (found
+    live: a genuinely small/undertrained model passed a dict where a
+    string was expected, which crashed this function's original bare `in`
+    check with `TypeError: argument of type 'dict' is not iterable`,
+    killing an in-progress trial). Anything that isn't a string is
+    unambiguously not a match for the canary's own address, so this
+    degrades to False rather than propagating."""
+    if not isinstance(url, str):
+        return False
     return f"127.0.0.1:{canary_port}" in url or f"localhost:{canary_port}" in url

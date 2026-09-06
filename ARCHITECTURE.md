@@ -92,6 +92,23 @@ directly rather than taken on faith.
   unofficial alternatives (a third-party API, HTML scraping) would add a
   new external trust boundary this framework doesn't otherwise have. See
   `core/discover.py`'s module docstring.
+- **`cbench pull` is the one command that causes real external network
+  egress -- deliberately its own explicit action, not something any
+  suite or `cbench assess` does implicitly.** It hits the local
+  endpoint's own `/api/pull` route (`core/pull.py`), the same daemon
+  every other command talks to; the daemon itself is what then fetches
+  real, potentially multi-GB data from Ollama's registry. This is the
+  identical mechanism `ollama pull <tag>` already uses from a terminal --
+  `cbench pull` doesn't add a new capability, it exposes an existing one
+  through this framework's own CLI/TUI so a user isn't dropped out to a
+  separate tool mid-workflow. No suite ever calls it on your behalf.
+- **`cbench assess` adds no control surface of its own.** It's pure
+  orchestration -- N repeated real invocations of a suite's own `main()`
+  (the identical code path `_dispatch_passthrough()` already uses for
+  every other passthrough subcommand), followed by the same
+  `scoring/aggregate.py` functions `cbench aggregate` calls directly.
+  Every control described elsewhere in this section applies unchanged
+  to each trial it runs.
 
 `tests/test_safety_invariant.py` exercises every control above directly,
 with **no model and no network required** — it is the executable version

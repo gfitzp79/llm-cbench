@@ -110,6 +110,29 @@ cbench persistence --model <model-tag>
 cbench persistence --model <model-tag> --scenario dedup_customer_records
 ```
 
+### Full assessment
+
+```bash
+cbench assess --model <model-tag>                          # S1+S2+S3, 3 trials each (default)
+cbench assess --model <model-tag> --suites s1,s3 --trials 5
+cbench assess --model <model-tag> --dry-run                # preview every payload, call no model
+```
+
+Runs N trials of each selected suite back to back, then automatically
+aggregates each suite's trials into a trial-summary report and prints
+where to find it -- automating the documented "run the same command N
+times, then aggregate" workflow (see `cbench aggregate` below) rather
+than replacing it. `--trials` defaults to 3, this framework's own
+pre-registered minimum for a rate worth citing (see ARCHITECTURE.md).
+This is S1 (containment) + S2 (channel) + S3 (persistence) only -- the
+three suites this framework ships. It does not include a cross-check
+against [Inspect](https://inspect.aisi.org.uk/) (`integrations/`,
+optional and separate on purpose -- see `cbench assess --help`) and has
+no equivalent for external benchmark suites, which this framework
+doesn't ship at all. Can take anywhere from minutes to hours depending
+on model size and trial count -- start with `--dry-run` to see what
+will run before committing to it.
+
 ### Terminal UI
 
 ```bash
@@ -117,13 +140,13 @@ cbench tui   # requires: pip install "openllm-cbench[tui]"
 ```
 
 A thin control panel over the same CLI above -- forms for running a
-suite, gate-checking a model, browsing what's already pulled locally
-(with a picker to fill the model field for you), pulling a new model,
-and a browser for whatever `results/` already contains. It has no logic
-of its own: every action it takes is the literal `cbench <subcommand>
-...` invocation shown on screen before it starts, launched as a real
-subprocess, not a second implementation of any suite. Nothing runs on
-startup without a click.
+suite or a full assessment, gate-checking a model, browsing what's
+already pulled locally (with a picker to fill the model field for you),
+pulling a new model, and a browser for whatever `results/` already
+contains. It has no logic of its own: every action it takes is the
+literal `cbench <subcommand> ...` invocation shown on screen before it
+starts, launched as a real subprocess, not a second implementation of
+any suite. Nothing runs on startup without a click.
 
 ### Aggregation and trial-extension decisions
 
@@ -132,8 +155,11 @@ cbench aggregate --suite s1 --model <model-tag>
 cbench extension-rule --base <base-tag> --variant <variant-tag>
 ```
 
-Every subcommand's real flags live in that module, not duplicated in
-`cli.py` — run `cbench <subcommand> --help` for the full list.
+`cbench assess` above runs these automatically; run them directly if
+you already have trial CSVs on disk (e.g. from separate manual runs) and
+just want them aggregated. Every subcommand's real flags live in that
+module, not duplicated in `cli.py` — run `cbench <subcommand> --help`
+for the full list.
 
 ## The model catalogue
 
@@ -217,6 +243,29 @@ broad, general-purpose red-teaming/eval harnesses; this is three specific,
 deep measurement questions, purpose-built for agentic tool-use containment,
 hidden-reasoning-channel divergence, and audit-log persistence behavior in
 locally-served models.
+
+## Extending this framework with an AI coding assistant
+
+This project was built collaboratively with an AI coding assistant
+(Claude Code) -- not as a demo of that, but because the discipline it's
+good at (checking a claim against the actual code instead of memory,
+writing a regression test for every real bug before moving on) mattered
+for a tool whose whole job is measuring whether a model's stated
+capabilities match what it actually does.
+
+It's deliberately not tied to that one tool, though -- that's why this
+repo has a [CONTRIBUTING.md](CONTRIBUTING.md) instead of a tool-specific
+config file. Extending a suite, adding a model to the catalogue, or
+building a new scoring metric works the same way whether you use
+**Claude Code**, **Claude Cowork**, **Codex CLI**, or **ChatGPT Cowork**:
+open the repo and point your tool at
+[ARCHITECTURE.md](ARCHITECTURE.md) (what's measured, the control
+inventory, and "how not to fool yourself with this tool"),
+[CONTRIBUTING.md](CONTRIBUTING.md) (layout and conventions), and
+`tests/` (the parity and safety-invariant tests any change should keep
+passing). None of it assumes a specific vendor -- the same TUI screen
+("About / extend this") has this section's short version for when
+you're already in `cbench tui`.
 
 ## Contributing
 

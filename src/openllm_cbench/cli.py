@@ -19,6 +19,7 @@ Usage:
     cbench discover                               # what's pulled locally but not catalogued yet
     cbench discover --gate-all                     # ...and gate-check + save all of them
     cbench pull --model <model-tag>               # download a model into the local endpoint
+    cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -120,6 +121,125 @@ def _cmd_gate(argv):
               f"add config_overrides once a real run tells you what this model needs.")
 
     return 0 if result.get("clean") else 1
+
+
+def _cmd_assess(argv):
+    """Runs a full assessment of one model: N trials each of the selected
+    suites, then auto-aggregates each suite's trials into a trial-summary
+    report. This is S1 (containment) + S2 (channel) + S3 (persistence)
+    ONLY -- the three suites this framework actually ships. Deliberately
+    excludes two things a reader familiar with the private research lab
+    this framework was extracted from might expect: "S4" (that lab's
+    external inspect_evals benchmarks) was never extracted into this
+    framework and doesn't exist here to run; "S5" (that lab's Inspect
+    cross-validation of S1/S3) DOES exist here, as `integrations/`, but
+    stays a separate, deliberate action (`inspect eval ...`) rather than
+    being folded into every assessment -- it's a validity check on S1/S3's
+    own scoring, not a fourth independent measurement, and doubling S1/S3
+    runtime by default wasn't judged worth it for every run.
+
+    Each suite invocation is the identical `_dispatch_passthrough()`
+    machinery every other passthrough subcommand already uses -- N
+    repeated real calls to that suite's own main(), not a fourth
+    implementation of any of them. This automates the documented manual
+    workflow (scoring/aggregate.py's own module docstring: "run those N
+    times per model first ... then point this at the resulting CSVs")
+    rather than replacing it -- the exact same CSVs land in the exact
+    same place either way, so `cbench aggregate` still works standalone
+    on whatever this command produces."""
+    import argparse
+
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.paths import results_dir as _results_dir
+    from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3, model_tag
+
+    SUITE_INFO = {
+        "s1": ("containment", "openllm_cbench.suites.containment", aggregate_s1, "s1_containment"),
+        "s2": ("channel", "openllm_cbench.suites.channel", aggregate_s2, "s2_channel"),
+        "s3": ("persistence", "openllm_cbench.suites.persistence", aggregate_s3, "s3_persistence"),
+    }
+
+    p = argparse.ArgumentParser(
+        prog="cbench assess",
+        description="Full assessment of one model: N trials each of the selected suites "
+                     "(s1 containment, s2 channel, s3 persistence -- this framework's own "
+                     "three, no more), then auto-aggregate each into a trial-summary report.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True)
+    p.add_argument("--suites", default="s1,s2,s3",
+                    help="Comma-separated subset of s1,s2,s3 (default: all three).")
+    p.add_argument("--trials", type=int, default=3,
+                    help="Trials per suite (default 3 -- this framework's own pre-registered "
+                         "minimum for a rate worth citing; see ARCHITECTURE.md).")
+    p.add_argument("--dry-run", action="store_true",
+                    help="Pass --dry-run through to every suite invocation -- prints each "
+                         "payload, calls no model, and skips aggregation since there would "
+                         "be no real CSVs to aggregate.")
+    args = p.parse_args(argv)
+
+    suites = [s.strip() for s in args.suites.split(",") if s.strip()]
+    unknown = [s for s in suites if s not in SUITE_INFO]
+    if unknown:
+        print(f"[!] Unknown suite(s): {', '.join(unknown)} -- choose from s1,s2,s3", file=sys.stderr)
+        return 2
+    if not suites:
+        print("[!] --suites resolved to nothing to run.", file=sys.stderr)
+        return 2
+    if args.trials < 1:
+        print("[!] --trials must be at least 1.", file=sys.stderr)
+        return 2
+
+    print(f"Full assessment: '{args.model}', suites={','.join(suites)}, trials={args.trials}"
+          f"{' (dry-run)' if args.dry_run else ''}")
+    print("S1+S2+S3 only -- see this command's own --help / module docstring for why S4/S5 "
+          "aren't included.\n")
+
+    report_paths = []
+    failures = []
+    for suite in suites:
+        label, module_path, aggregate_fn, results_subdir = SUITE_INFO[suite]
+        print(f"=== {suite.upper()} ({label}) -- {args.trials} trial(s) ===")
+        for trial in range(1, args.trials + 1):
+            print(f"\n--- {suite} trial {trial}/{args.trials} ---")
+            trial_args = ["--model", args.model]
+            if args.dry_run:
+                trial_args.append("--dry-run")
+            rc = _dispatch_passthrough(module_path, trial_args)
+            if rc != 0:
+                print(f"[!] {suite} trial {trial} exited {rc} -- continuing with remaining trials.",
+                      file=sys.stderr)
+                failures.append((suite, trial, rc))
+
+        if args.dry_run:
+            print(f"\n[dry-run] Skipping aggregation for {suite} -- no real CSVs were produced.\n")
+            continue
+
+        print(f"\nAggregating {suite}...")
+        try:
+            md = aggregate_fn(args.model)
+        except SystemExit as e:
+            print(f"[!] Could not aggregate {suite}: {e}", file=sys.stderr)
+            continue
+        out_dir = _results_dir(results_subdir)
+        out_path = out_dir / f"trial_summary_{model_tag(args.model)}.md"
+        out_path.write_text(md, encoding="utf-8")
+        report_paths.append(out_path)
+        print(f"Report: {out_path}\n")
+
+    print("=" * 60)
+    print(f"Assessment complete: {len(suites)} suite(s), {args.trials} trial(s) each"
+          f"{' (dry-run, no reports)' if args.dry_run else ''}.")
+    if failures:
+        print(f"\n[!] {len(failures)} trial(s) exited non-zero -- read the output above "
+              f"before trusting any aggregate that includes them:")
+        for suite, trial, rc in failures:
+            print(f"    {suite} trial {trial}: exit {rc}")
+    if report_paths:
+        print("\nReports:")
+        for p_ in report_paths:
+            print(f"  {p_}")
+    return 1 if failures else 0
 
 
 def _cmd_pull(argv):
@@ -297,6 +417,7 @@ _NATIVE = {
     "gate": _cmd_gate,
     "discover": _cmd_discover,
     "pull": _cmd_pull,
+    "assess": _cmd_assess,
     "tui": _cmd_tui,
 }
 

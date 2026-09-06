@@ -76,10 +76,13 @@ class DashboardScreen(Screen):
             yield Static("openllm-cbench", id="title")
             with Horizontal(id="dashboard-buttons"):
                 yield Button("Run a suite", id="goto-run", variant="primary")
+                yield Button("Full assessment", id="goto-assess", variant="primary")
                 yield Button("Gate a model", id="goto-gate")
                 yield Button("Local models", id="goto-models")
+            with Horizontal(id="dashboard-buttons-2"):
                 yield Button("Browse reports", id="goto-reports")
                 yield Button("Check environment", id="run-doctor")
+                yield Button("About / extend this", id="goto-about")
             yield Static(
                 "\"Check environment\" runs `cbench doctor`: confirms your endpoint is "
                 "reachable, the safety canary binds correctly, reports GPU/RAM headroom, "
@@ -101,6 +104,8 @@ class DashboardScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "goto-run":
             self.app.push_screen(RunScreen())
+        elif event.button.id == "goto-assess":
+            self.app.push_screen(AssessmentScreen())
         elif event.button.id == "goto-gate":
             self.app.push_screen(GateScreen())
         elif event.button.id == "goto-models":
@@ -109,6 +114,8 @@ class DashboardScreen(Screen):
             self.app.push_screen(ReportsScreen())
         elif event.button.id == "run-doctor":
             self.run_doctor()
+        elif event.button.id == "goto-about":
+            self.app.push_screen(AboutScreen())
 
     def run_doctor(self) -> None:
         log = self.query_one("#doctor-log", RichLog)
@@ -425,6 +432,172 @@ class PullScreen(Screen):
                           "to your catalogue.[/dim]")
 
 
+class AssessmentScreen(Screen):
+    """Full assessment of one model -- equivalent to running `cbench
+    assess` yourself, and literally is: a real subprocess, same as every
+    other action-taking screen. All orchestration (repeated trials,
+    auto-aggregation, report paths) lives in cli.py's _cmd_assess(), not
+    here -- this screen is a form and a log, nothing more."""
+
+    BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield InvariantBar()
+        with Vertical(id="assess-form"):
+            yield Static(
+                "Full assessment -- equivalent to running `cbench assess` yourself. Runs "
+                "N trials of each selected suite, then auto-aggregates each into a "
+                "trial-summary report and points you at it. S1+S2+S3 only -- this "
+                "framework's own three suites (run `cbench assess --help` for why S4/S5 "
+                "aren't included). Can take a while for a larger model or a high trial "
+                "count -- start with Dry run checked to preview what will run."
+            )
+            yield Select([], id="assess-model-select", allow_blank=True,
+                         prompt="Pick a local model (or type the tag below) — loading...")
+            yield Input(placeholder="model tag, e.g. gemma3:12b", id="assess-model-input")
+            with Horizontal(id="assess-suite-checks"):
+                yield Checkbox("S1 containment", id="assess-s1", value=True)
+                yield Checkbox("S2 channel", id="assess-s2", value=True)
+                yield Checkbox("S3 persistence", id="assess-s3", value=True)
+            yield Input(value="3", placeholder="trials per suite (default 3)", id="assess-trials-input")
+            yield Checkbox("Dry run (print payloads, call no model)", id="assess-dry-run", value=True)
+            with Horizontal():
+                yield Button("Start assessment", id="assess-start", variant="primary")
+                yield Button("Back", id="assess-back")
+            yield Static("", id="assess-preview")
+            yield RichLog(id="assess-log", wrap=True, highlight=True, markup=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._load_models()
+
+    @work(exclusive=True)
+    async def _load_models(self) -> None:
+        await _populate_model_select(self.query_one("#assess-model-select", Select))
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "assess-model-select" and event.value is not Select.BLANK:
+            self.query_one("#assess-model-input", Input).value = str(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "assess-back":
+            self.app.pop_screen()
+        elif event.button.id == "assess-start":
+            self._start_assessment()
+
+    def _start_assessment(self) -> None:
+        model = self.query_one("#assess-model-input", Input).value.strip()
+        log = self.query_one("#assess-log", RichLog)
+        preview = self.query_one("#assess-preview", Static)
+        log.clear()
+
+        if not model:
+            log.write("[bold red]A model tag is required.[/bold red]")
+            return
+
+        suites = []
+        if self.query_one("#assess-s1", Checkbox).value:
+            suites.append("s1")
+        if self.query_one("#assess-s2", Checkbox).value:
+            suites.append("s2")
+        if self.query_one("#assess-s3", Checkbox).value:
+            suites.append("s3")
+        if not suites:
+            log.write("[bold red]Select at least one suite.[/bold red]")
+            return
+
+        trials_raw = self.query_one("#assess-trials-input", Input).value.strip() or "3"
+        try:
+            trials = int(trials_raw)
+            if trials < 1:
+                raise ValueError
+        except ValueError:
+            log.write("[bold red]Trials must be a positive whole number.[/bold red]")
+            return
+
+        args = ["--model", model, "--suites", ",".join(suites), "--trials", str(trials)]
+        if self.query_one("#assess-dry-run", Checkbox).value:
+            args.append("--dry-run")
+
+        argv = cbench_command("assess", args)
+        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._run_worker(argv, log)
+
+    @work(exclusive=True)
+    async def _run_worker(self, argv, log: RichLog) -> None:
+        result = await run_job(argv, on_line=lambda line: log.write(line))
+        if result.error:
+            log.write(f"[bold red]{result.error}[/bold red]")
+        else:
+            style = "bold green" if result.returncode == 0 else "bold red"
+            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+            if result.returncode == 0:
+                log.write("[dim]Go to \"Browse reports\" to read the trial-summary reports "
+                          "linked above.[/dim]")
+
+
+_ABOUT_TEXT = """\
+[bold]About this framework[/bold]
+
+openllm-cbench was built collaboratively with an AI coding assistant \
+(Claude Code) -- not as a demo of that, but because the discipline an \
+assistant like that is good at (reading its own prior output critically, \
+writing a regression test for every real bug before moving on, checking \
+a claim against the actual code instead of memory) turned out to matter \
+a lot for a tool whose whole job is measuring whether a model's stated \
+capabilities match what it actually does.
+
+[bold]Extending it yourself[/bold]
+
+This project deliberately doesn't assume you use any one AI tool -- \
+that's why it has a CONTRIBUTING.md instead of a tool-specific config \
+file. If you want to extend a suite, add a model to the catalogue, or \
+build a new scoring metric with an AI coding assistant's help, any of \
+these work the same way: open this repo in [bold]Claude Code[/bold] or \
+[bold]Claude Cowork[/bold], or in [bold]Codex CLI[/bold] / \
+[bold]ChatGPT Cowork[/bold], and point it at:
+
+  - ARCHITECTURE.md   -- what every suite measures and why, the control
+                         inventory, and "how not to fool yourself with
+                         this tool" (the most transferable section)
+  - CONTRIBUTING.md    -- layout, conventions, and the standing rules
+                         this project has learned the hard way (gate-check
+                         both think states, never branch suite code on a
+                         model name, smoke-test before calling something
+                         done)
+  - tests/             -- the parity and safety-invariant tests any
+                         change should keep passing
+
+None of this requires a specific vendor. The instructions above are \
+written to make sense to a human reading them cold, and that's also \
+what makes them make sense to any AI assistant you point at them.
+"""
+
+
+class AboutScreen(Screen):
+    """Documentation, not a feature -- reads a static string, takes no
+    action, contacts nothing. Exists because a request to 'encourage
+    using an AI coding assistant to extend this' is better served by
+    pointing at the docs that already answer it than by adding a new
+    runtime dependency on any one vendor's CLI."""
+
+    BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield InvariantBar()
+        with VerticalScroll(id="about-body"):
+            yield Static(_ABOUT_TEXT)
+        yield Button("Back", id="about-back")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "about-back":
+            self.app.pop_screen()
+
+
 class ReportsScreen(Screen):
     """Browses whatever `results/` already contains -- this screen reads
     files `cbench` wrote, it never generates or edits any of them."""
@@ -465,10 +638,10 @@ class CBenchTUI(App):
 
     CSS = """
     InvariantBar { background: $warning-darken-2; color: $text; padding: 0 1; }
-    #dashboard-buttons { height: auto; }
-    #dashboard-buttons Button { margin: 0 1 0 0; }
+    #dashboard-buttons, #dashboard-buttons-2 { height: auto; }
+    #dashboard-buttons Button, #dashboard-buttons-2 Button { margin: 0 1 1 0; }
     #doctor-caption { color: $text-muted; padding: 0 0 1 0; }
-    #run-form, #gate-form, #models-body, #pull-form { padding: 1; }
+    #run-form, #gate-form, #models-body, #pull-form, #assess-form { padding: 1; }
     RichLog { height: 1fr; border: solid $accent; }
     #reports-body { height: 1fr; }
     #reports-tree { width: 40%; }
@@ -476,6 +649,9 @@ class CBenchTUI(App):
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
     #models-table { height: 12; border: solid $accent; }
+    #assess-suite-checks { height: auto; }
+    #assess-suite-checks Checkbox { margin: 0 2 0 0; }
+    #about-body { height: 1fr; padding: 1 2; }
     """
 
     def on_mount(self) -> None:

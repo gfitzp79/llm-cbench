@@ -1,0 +1,14 @@
+# Normalise line endings in the repository to LF regardless of the
+# contributor's platform or local core.autocrlf setting. Without this,
+# what lands in a commit depends on each contributor's git config --
+# this repo was authored on Windows (autocrlf=true, which happened to
+# normalise correctly) but that is a local setting, not a property of
+# the repository, and a contributor with autocrlf=false would commit
+# CRLF into the same files.
+* text=auto eol=lf
+
+# Explicitly binary -- never touch these.
+*.png binary
+*.jpg binary
+*.gguf binary
+*.eval binary

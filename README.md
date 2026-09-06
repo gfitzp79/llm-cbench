@@ -188,10 +188,33 @@ cbench discover --gate-all --limit 3   # bound a long batch to the first 3
 ```
 
 Only ever talks to your local endpoint's own `/api/tags` — never
-ollama.com. It doesn't pull anything or search Ollama's remote library;
-Ollama has no official API for that (there's an [open feature request](https://github.com/ollama/ollama/issues/9142)
-for one). `ollama pull <tag>` a model yourself first, then `cbench
-discover` picks it up.
+ollama.com. It doesn't browse Ollama's remote library by keyword; Ollama
+has no official API for that (there's an [open feature request](https://github.com/ollama/ollama/issues/9142)
+for one), and this framework deliberately doesn't scrape or wrap an
+unofficial one.
+
+**Already know the exact tag? Check it exists before pulling —
+`cbench search`.**
+
+```bash
+cbench search --model <exact-tag>   # e.g. gemma3:12b -- no download
+```
+
+Not a keyword search — you need the exact tag, the same string you'd
+pass to `ollama pull`. Reuses that same command's own manifest-fetch
+step (real, live, against Ollama's actual registry) and aborts the
+connection right after, before any layer data downloads — a real
+existence check and download size for the cost of an aborted request,
+not a multi-GB download just to ask "does this exist." Then:
+
+```bash
+cbench pull --model <exact-tag>     # downloads it for real
+```
+
+`ollama pull <tag>` yourself works exactly as well — `cbench
+search`/`cbench pull` exist so you don't have to leave the CLI/TUI
+mid-workflow, not because they do anything `ollama` itself couldn't.
+Once pulled, `cbench discover` picks it up.
 
 Two ways to add a *specific* entry once you know the tag, and they write
 to two different files:

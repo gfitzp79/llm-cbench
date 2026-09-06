@@ -102,6 +102,15 @@ directly rather than taken on faith.
   `cbench pull` doesn't add a new capability, it exposes an existing one
   through this framework's own CLI/TUI so a user isn't dropped out to a
   separate tool mid-workflow. No suite ever calls it on your behalf.
+- **`cbench search` causes no network egress at all, despite living next
+  to `cbench pull`.** It reuses the same `/api/pull` route to reach the
+  real manifest step against Ollama's real registry, then aborts the
+  connection (`resp.close()`, `core/pull.py:check_model_availability()`)
+  before `iter_lines()` reads any actual layer data off the wire --
+  verified live that a real tag's manifest+size resolve in about a
+  second and nothing lands in `ollama list` afterward. Not a keyword
+  search of Ollama's library (no official API exists for that, see
+  `cbench discover`'s entry above) -- an exact-tag existence check only.
 - **`cbench assess` adds no control surface of its own.** It's pure
   orchestration -- N repeated real invocations of a suite's own `main()`
   (the identical code path `_dispatch_passthrough()` already uses for

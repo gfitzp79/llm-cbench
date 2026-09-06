@@ -18,6 +18,7 @@ Usage:
     cbench gate --model <model-tag>
     cbench discover                               # what's pulled locally but not catalogued yet
     cbench discover --gate-all                     # ...and gate-check + save all of them
+    cbench search --model <model-tag>             # check it exists in Ollama's registry first
     cbench pull --model <model-tag>               # download a model into the local endpoint
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench containment --model <model-tag> --boundary both
@@ -242,6 +243,52 @@ def _cmd_assess(argv):
     return 1 if failures else 0
 
 
+def _cmd_search(argv):
+    """Checks whether a model tag exists in Ollama's registry -- a real
+    live lookup, not a browsable catalogue. See
+    core/pull.py:check_model_availability()'s docstring for why this
+    reuses /api/pull's own manifest-fetch step rather than adding a new
+    external destination (Ollama has no official remote-library search
+    API; this framework deliberately doesn't scrape or wrap an unofficial
+    one -- see core/discover.py). Downloads nothing regardless of the
+    result."""
+    import argparse
+
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.pull import check_model_availability
+
+    p = argparse.ArgumentParser(
+        prog="cbench search",
+        description="Check whether an exact model tag exists in Ollama's registry, and its "
+                     "download size, without downloading it. Not a keyword/browse search -- "
+                     "you need the exact tag (as it would appear to `ollama pull`); this "
+                     "confirms it exists before you commit to pulling it.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True)
+    p.add_argument("--endpoint", default=None)
+    args = p.parse_args(argv)
+
+    base_url = resolve_base_url(args.endpoint)
+    print(f"Checking '{args.model}' against {base_url}'s registry ...")
+    try:
+        result = check_model_availability(args.model, base_url)
+    except Exception as e:
+        print(f"[!] Could not reach {base_url}: {e}", file=sys.stderr)
+        return 1
+
+    if result["exists"]:
+        gb = result["size_bytes"] / (1024 ** 3) if result["size_bytes"] else None
+        size_str = f"{gb:.1f} GB" if gb else "unknown size"
+        print(f"Found: '{args.model}' exists ({size_str}). "
+              f"Run `cbench pull --model {args.model}` to download it.")
+        return 0
+    print(f"Not found: '{args.model}' -- {result['error'] or 'no matching manifest'}.",
+          file=sys.stderr)
+    return 1
+
+
 def _cmd_pull(argv):
     """Pulls a model into the local endpoint -- see core/pull.py's module
     docstring for why this needs no new trust boundary beyond what
@@ -416,6 +463,7 @@ _NATIVE = {
     "doctor": _cmd_doctor,
     "gate": _cmd_gate,
     "discover": _cmd_discover,
+    "search": _cmd_search,
     "pull": _cmd_pull,
     "assess": _cmd_assess,
     "tui": _cmd_tui,

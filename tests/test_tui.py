@@ -187,6 +187,46 @@ def test_pull_screen_requires_a_model_before_pulling():
     asyncio.run(scenario())
 
 
+def test_pull_screen_requires_a_model_before_searching():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#goto-pull")
+            await pilot.pause()
+            await pilot.click("#search-button")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#pull-log").lines]
+            assert any("model tag is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_pull_screen_search_button_builds_the_correct_search_command():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#goto-pull")
+            await pilot.pause()
+            await pilot.click("#pull-model-input")
+            await pilot.press(*list("ornith-1.5:9b"))
+            await pilot.click("#search-button")
+            await pilot.pause()
+            # .text (not str(Strip), which reprs each Rich segment
+            # separately) -- a wrapped value like "ornith-1.5:9b" can
+            # land split across segments/lines, so join the real text
+            # before checking rather than searching one wrapped line at
+            # a time (see doctor-caption's identical fix earlier).
+            log_text = " ".join(x.text for x in app.screen.query_one("#pull-log").lines)
+            assert "search" in log_text
+            assert "ornith-1.5:9b" in log_text.replace("\n", "")
+    asyncio.run(scenario())
+
+
 def test_run_screen_has_a_model_select_alongside_the_free_text_input():
     # Both must exist: the picker for convenience, the Input as the
     # actual source of truth (still works for a tag not pulled yet).

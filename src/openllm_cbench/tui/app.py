@@ -296,7 +296,7 @@ class ModelsScreen(Screen):
             with Horizontal(id="models-buttons"):
                 yield Button("Refresh", id="models-refresh", variant="primary")
                 yield Button("Gate + save selected", id="models-gate-selected")
-                yield Button("Pull a new model", id="goto-pull")
+                yield Button("Search / pull a new model", id="goto-pull")
                 yield Button("Back", id="models-back")
             yield DataTable(id="models-table")
             yield RichLog(id="models-log", wrap=True, highlight=True, markup=True)
@@ -377,11 +377,15 @@ class ModelsScreen(Screen):
 
 
 class PullScreen(Screen):
-    """Downloads a model into the local endpoint -- a real `cbench pull`
-    subprocess, same pattern as every other action-taking screen. This
-    is the one screen in the app that causes real, potentially large
-    (multi-GB) network egress; the invariant bar and the static warning
-    below both say so before the button is anywhere near a click."""
+    """Search Ollama's registry for a model, then optionally download it
+    -- both are real `cbench search`/`cbench pull` subprocesses, same
+    pattern as every other action-taking screen. Pull is the one action
+    in this app that causes real, potentially large (multi-GB) network
+    egress; the invariant bar and the static warning below both say so
+    before that button is anywhere near a click. Search causes none --
+    it aborts the same /api/pull request right after the manifest step,
+    before any layer data downloads (see core/pull.py:
+    check_model_availability())."""
 
     BINDINGS = [("escape", "app.pop_screen", "Back")]
 
@@ -390,14 +394,16 @@ class PullScreen(Screen):
         yield InvariantBar()
         with Vertical(id="pull-form"):
             yield Static(
-                "Pull a model into your local endpoint -- equivalent to running "
-                "`cbench pull` (or `ollama pull`) yourself. [bold]This downloads real "
+                "Search Ollama's registry for an exact model tag (no download), then "
+                "pull it if you want it -- equivalent to running `cbench search` / "
+                "`cbench pull` (or `ollama pull`) yourself. [bold]Pull downloads real "
                 "data from Ollama's registry[/bold], possibly several GB, and can take "
-                "a while. The only screen in this app that does that."
+                "a while -- Search never does."
             )
             yield Input(placeholder="model tag, e.g. qwen3:4b", id="pull-model-input")
             with Horizontal():
-                yield Button("Pull", id="pull-button", variant="primary")
+                yield Button("Search", id="search-button", variant="primary")
+                yield Button("Pull", id="pull-button")
                 yield Button("Back", id="pull-back-button")
             yield RichLog(id="pull-log", wrap=True, highlight=True, markup=True)
         yield Footer()
@@ -405,8 +411,30 @@ class PullScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "pull-back-button":
             self.app.pop_screen()
+        elif event.button.id == "search-button":
+            self._start_search()
         elif event.button.id == "pull-button":
             self._start_pull()
+
+    def _start_search(self) -> None:
+        model = self.query_one("#pull-model-input", Input).value.strip()
+        log = self.query_one("#pull-log", RichLog)
+        log.clear()
+        if not model:
+            log.write("[bold red]A model tag is required.[/bold red]")
+            return
+        argv = cbench_command("search", ["--model", model])
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._search_worker(argv, log)
+
+    @work(exclusive=True)
+    async def _search_worker(self, argv, log: RichLog) -> None:
+        result = await run_job(argv, on_line=lambda line: log.write(line))
+        if result.error:
+            log.write(f"[bold red]{result.error}[/bold red]")
+        else:
+            style = "bold green" if result.returncode == 0 else "bold red"
+            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
 
     def _start_pull(self) -> None:
         model = self.query_one("#pull-model-input", Input).value.strip()

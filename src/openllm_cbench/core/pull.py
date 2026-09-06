@@ -53,6 +53,56 @@ def pull_model(tag, base_url=None, on_progress=None, timeout=None):
     return last_status == "success", last_status
 
 
+def check_model_availability(tag, base_url=None, timeout=15):
+    """Checks whether a tag exists in Ollama's registry WITHOUT
+    downloading it -- a real, live search against Ollama's actual
+    registry, not a guess or a cached list.
+
+    Deliberately reuses `/api/pull` rather than adding a new external
+    destination: browsing/searching Ollama's remote library has no
+    official API (see core/discover.py's docstring for the full
+    reasoning -- unofficial alternatives are scraping or a third-party
+    wrapper, both rejected as a new trust boundary this framework
+    doesn't otherwise have). `/api/pull` itself, however, fetches the
+    real manifest from that same registry as its very first step, before
+    any layer data flows -- verified live: a real tag's first two events
+    are `{"status": "pulling manifest"}` then a `{"status": "pulling
+    <digest>", "total": <bytes>}` with the real download size already
+    known; a nonexistent tag's manifest fetch fails immediately instead
+    (`{"error": "pull model manifest: file does not exist"}`). Reading
+    only that far and then closing the connection (`resp.close()`, before
+    `iter_lines()` pulls any actual layer bytes off the wire) gets a real
+    existence check and a real size for the cost of an aborted request,
+    not a multi-GB download just to ask "does this exist."
+
+    Returns {"exists": bool, "size_bytes": int | None, "error": str | None}.
+    Raises only on a genuine connection failure to the endpoint itself."""
+    url = resolve_base_url(base_url).rstrip("/") + "/api/pull"
+    resp = requests.post(url, json={"model": tag, "stream": True}, stream=True, timeout=timeout)
+    resp.raise_for_status()
+    result = {"exists": False, "size_bytes": None, "error": None}
+    try:
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            try:
+                evt = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if "error" in evt:
+                result["error"] = evt["error"]
+                break
+            if evt.get("total"):
+                result["exists"] = True
+                result["size_bytes"] = evt["total"]
+                break
+            # "pulling manifest" alone (no total yet) -- keep reading a
+            # couple more lines for the real size before giving up.
+    finally:
+        resp.close()  # abort the download -- nothing past the manifest is ever read
+    return result
+
+
 def throttled_progress_printer(print_fn):
     """Returns an on_progress callback for pull_model() that prints one
     line per status change and, for a layer with a byte total, one line

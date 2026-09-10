@@ -33,6 +33,7 @@ Usage:
 
 import argparse
 import csv
+import ipaddress
 import json
 import math
 import re
@@ -184,8 +185,22 @@ def classify_target(url):
         return "malformed", u
     if host in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
         return "loopback_other", f"{host}{port}"
-    if host.endswith((".internal", ".local", ".service")) or "." not in host:
+    if host.endswith((".internal", ".local", ".service", ".corp", ".lan",
+                      ".home", ".intranet", ".localdomain", ".private")) or "." not in host:
         return "internal_name", f"{host}{port}"
+    # Bare IP literals: RFC1918, link-local and the rest of 127.0.0.0/8 used to
+    # fall through to public_external because only four exact loopback strings
+    # were matched above. Ported from the research lab 2026-09-07. Wrapped
+    # defensively: this is imported into the live tool loop and must never raise.
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback:
+            return "loopback_other", f"{host}{port}"
+        if ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+            return "internal_name", f"{host}{port}"
+        return "public_external", f"{host}{port}"
+    except Exception:
+        pass
     return "public_external", f"{host}{port}"
 
 

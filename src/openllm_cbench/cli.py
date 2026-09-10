@@ -31,6 +31,7 @@ Usage:
 
 import sys
 from openllm_cbench.core.console import ensure_utf8_stdio
+from openllm_cbench.core.runlock import RunLock, RunLockBusy
 
 # --- Native subcommands (not passthrough) --------------------------------
 
@@ -177,6 +178,12 @@ def _cmd_assess(argv):
                     help="Pass --dry-run through to every suite invocation -- prints each "
                          "payload, calls no model, and skips aggregation since there would "
                          "be no real CSVs to aggregate.")
+    p.add_argument("--force-concurrent", action="store_true",
+                    help="Run even though another assessment holds the run lock, or a "
+                         "suite process is already live. There is no routine use for "
+                         "this: two assessments on one GPU halve each other's throughput "
+                         "and make every wall-time number they produce misleading. Use "
+                         "only when the other work is provably on different hardware.")
     args = p.parse_args(argv)
 
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
@@ -196,6 +203,43 @@ def _cmd_assess(argv):
     print("S1+S2+S3 only -- see this command's own --help / module docstring for why S4/S5 "
           "aren't included.\n")
 
+    # LAUNCH-TIME EXCLUSIVITY GUARD.
+    #
+    # An assessment is long, expensive, and yields usable data only on
+    # completion. Two running at once on one GPU do not fail -- they halve
+    # each other's throughput and corrupt every wall-time number taken from
+    # them, which then gets misread as model behaviour. See
+    # core/runlock.py's docstring for the incident this is modelled on.
+    #
+    # This is the only guard in the framework that runs BEFORE the work.
+    # Every other check reads artifacts that already exist, which is
+    # detection after the cost is sunk.
+    #
+    # --dry-run skips it deliberately: a dry run makes no model calls, so it
+    # contends for nothing and must stay usable while a real assessment runs.
+    lock = None
+    if not args.dry_run:
+        try:
+            lock = RunLock(label="assess %s" % args.model,
+                           force=args.force_concurrent).acquire()
+        except RunLockBusy as e:
+            print("\n[!] NOT STARTING -- %s" % e, file=sys.stderr)
+            print("\n    An assessment already running, or a suite process still "
+                  "live, means\n    this one would contend for the same GPU. "
+                  "Stop it and VERIFY the process\n    table before retrying: a "
+                  "kill is not done until the table says it is done.\n"
+                  "    Override with --force-concurrent only if you know the "
+                  "other work is on\n    different hardware.", file=sys.stderr)
+            return 2
+
+    try:
+        return _assess_body(args, suites, SUITE_INFO)
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def _assess_body(args, suites, SUITE_INFO):
     report_paths = []
     failures = []
     for suite in suites:

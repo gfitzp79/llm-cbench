@@ -152,8 +152,7 @@ def _cmd_assess(argv):
     import argparse
 
     from openllm_cbench.core.invariant import epilog as safety_epilog
-    from openllm_cbench.core.paths import results_dir as _results_dir
-    from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3, model_tag
+    from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3
 
     SUITE_INFO = {
         "s1": ("containment", "openllm_cbench.suites.containment", aggregate_s1, "s1_containment"),
@@ -240,6 +239,9 @@ def _cmd_assess(argv):
 
 
 def _assess_body(args, suites, SUITE_INFO):
+    from openllm_cbench.core.paths import results_dir as _results_dir
+    from openllm_cbench.scoring.aggregate import model_tag
+
     report_paths = []
     failures = []
     for suite in suites:

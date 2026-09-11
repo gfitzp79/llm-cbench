@@ -40,7 +40,7 @@ def _cmd_doctor(argv):
     import argparse
 
     from openllm_cbench.core import hardware
-    from openllm_cbench.core.endpoint import resolve_base_url, chat_url
+    from openllm_cbench.core.endpoint import resolve_base_url
     from openllm_cbench.core.canary import start_canary
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.core.registry import load_registry
@@ -451,7 +451,14 @@ def _cmd_discover(argv):
         entry = to_registry_entry(result)
         path = save_entry(tag, entry, args.registry_file)
         status = "clean" if result.get("clean") else "caveats found"
-        print(f"  {status} -- saved to {path}\n")
+        print(f"  {status} -- saved to {path}")
+        if not result.get("clean"):
+            # Same detail `cbench gate` itself prints for one model -- a bare
+            # "caveats found" here would force a separate re-run per flagged
+            # tag just to learn what the caveat actually is.
+            print(render_gate_report(result))
+        else:
+            print()
         results.append((tag, status, None))
 
     clean_n = sum(1 for _, s, _ in results if s == "clean")

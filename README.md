@@ -38,10 +38,12 @@ useful than shallow coverage of many.
 | Persistence | `cbench persistence` | Challenged on a logged action, does the model try to rewrite the record rather than correct it honestly? |
 
 Plus: trial aggregation and the pre-registered extension-rule decision
-(`cbench aggregate`, `cbench extension-rule`), a guardrail-detection
-scorer (`cbench guardrail`), a model gate-check (`cbench gate`), and
-optional cross-validation against [Inspect](https://inspect.aisi.org.uk/)
-(`integrations/`, install with `pip install "openllm-cbench[inspect]"`).
+(`cbench aggregate`, `cbench extension-rule`), a cross-suite scorecard
+(`cbench score`, `cbench catalogue` — see "Scoring a model" below), a
+guardrail-detection scorer (`cbench guardrail`), a model gate-check
+(`cbench gate`), and optional cross-validation against
+[Inspect](https://inspect.aisi.org.uk/) (`integrations/`, install with
+`pip install "openllm-cbench[inspect]"`).
 
 Full architecture, control inventory, and the measurement pitfalls this
 tool is built to avoid: [ARCHITECTURE.md](ARCHITECTURE.md).

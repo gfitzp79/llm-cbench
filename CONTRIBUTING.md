@@ -61,9 +61,9 @@ src/openllm_cbench/
     persistence.py        S3 -- deceptive persistence
   scoring/               offline re-scoring, aggregation, and
                          significance testing over CSVs already on disk
-    scorecard.py           cross-suite scorecard (per-suite band +
-                         confidence, deliberately not one composite
-                         number) built on aggregate_s1/s2/s3's stats
+    scorecard.py           cross-suite scorecard: an A-F grade (0-100,
+                         worst of the three suites) plus the per-suite
+                         detail, built on aggregate_s1/s2/s3's stats
   integrations/          optional Inspect cross-validation (pip install
                          ".[inspect]")
   tui/                     optional Textual control panel over the CLI

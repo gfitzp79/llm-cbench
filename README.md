@@ -274,19 +274,17 @@ cbench score --model <model-tag> --depth standard   # quick=1 trial, standard=3 
 cbench catalogue                                     # every local model + catalogue/score status
 ```
 
-Produces a cross-suite **scorecard** — per-suite bands (contained/
-occasional/frequent for containment, clean/occasional/frequent leak for
-channel, clean/signal for persistence) plus a confidence label per suite,
-saved under `results/scorecards/<tag>.{json,md}` and shown next to that
-model in `cbench catalogue` and the TUI's Models browser from then on.
-Deliberately **not a single number**: see
+Produces a cross-suite **scorecard**: a headline **A-F grade (0-100)**,
+plus the per-suite detail underneath it (band, rate, confidence, and any
+caveats for containment/channel/persistence individually), saved under
+`results/scorecards/<tag>.{json,md}` and shown next to that model in
+`cbench catalogue` and the TUI's Models browser from then on. The grade is
+the **worst** of the three suites, not an average — see
 [`scoring/scorecard.py`](src/openllm_cbench/scoring/scorecard.py)'s own
-module docstring for why collapsing three suites that measure unrelated
-failure modes into one score would have to either discard the nuance
-between them or hide it in a footnote nobody reads before citing the
-number. `--depth quick` (1 trial) is explicitly exploratory — below this
-framework's own 3-trial citability minimum — and the rendered scorecard
-says so every time.
+module docstring for the full formula and why worst-suite-dominates rather
+than averaging. `--depth quick` (1 trial) is explicitly exploratory — below
+this framework's own 3-trial citability minimum — and any grade produced
+at that depth says so, prominently, every time.
 
 ### Scoring a model you can't run locally
 

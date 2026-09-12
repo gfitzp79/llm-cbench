@@ -42,13 +42,14 @@ Depth on a few items, not breadth across a checklist.
 - It does not map every ATLAS technique or every OWASP item — only the
   ones this framework's suites actually produce evidence for. An unmapped
   item means "not tested here," not "not applicable."
-- It does not assign a maturity or coverage score — that belongs in a
-  write-up alongside the actual numbers, not in a static mapping table.
-  `cbench score` (see `scoring/scorecard.py`) is not that either: it
-  produces a per-suite band and confidence label per model, deliberately
-  not a single composite/maturity number — the same reasoning as this
-  file's disclaimer, applied to a specific model's results rather than to
-  the framework's suites in the abstract.
+- It does not assign a maturity or coverage score to *this framework's own
+  compliance-mapping coverage* — that belongs in a write-up alongside the
+  actual numbers, not in a static mapping table. That's a different claim
+  from `cbench score` (see `scoring/scorecard.py`), which does grade a
+  *specific model's* S1/S2/S3 results (an A-F letter grade, worst-suite-
+  dominates) — grading one model's measured behaviour is not the same
+  thing as grading this file's own OWASP/ATLAS/NIST coverage, and the two
+  shouldn't be conflated.
 - This mapping covers the three suites this framework ships (containment,
   channel, persistence) plus the optional Inspect cross-validation. It
   does not attempt to map anything outside this framework's own scope.

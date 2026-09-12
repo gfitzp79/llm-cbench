@@ -23,7 +23,7 @@ from textual.widgets import (
 
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
 from openllm_cbench.tui.jobs import (
-    RUNNABLE_SUITES, build_args, cbench_command, run_job, save_job_log,
+    RUNNABLE_SUITES, build_args, cbench_command, condensed_line_filter, run_job, save_job_log,
 )
 
 
@@ -303,15 +303,14 @@ class ModelsScreen(Screen):
                 "Models pulled into your local endpoint. \"Catalogued\" means the "
                 "model catalogue already has config guidance for this exact tag -- "
                 "an uncatalogued model still runs fine, just \"ungated\".\n"
-                "Score column: \"not scored\" = never run through `cbench score`. "
-                "\"clean\"/\"signal\" = all three suites came back clean, or at least "
-                "one showed something (an escape attempt, a channel leak, a "
-                "persistence flag) -- not a verdict, a pointer to go read the full "
-                "scorecard. \"INVALID\" = a validity guard fired (e.g. mismatched "
-                "task sets) -- don't trust this scorecard yet. Trailing \"*\" = an "
-                "otherwise-clean suite still has an unresolved caveat -- read the "
-                "full scorecard (results/scorecards/<tag>.md) before citing any of "
-                "this.",
+                "Score column: an A-F grade (0-100), the worst of the three suites "
+                "run -- not an average, see \"Scoring a model\" in README.md. "
+                "\"not scored\" = never run through `cbench score`. \"N/A\" = nothing "
+                "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
+                "task sets) -- that suite is excluded from the grade, don't trust it "
+                "yet regardless. Trailing \"*\" = an otherwise-ok suite still has an "
+                "unresolved caveat -- read the full scorecard "
+                "(results/scorecards/<tag>.md) before citing the grade alone.",
                 id="models-score-legend",
             )
             with Horizontal(id="models-buttons"):
@@ -584,7 +583,10 @@ class AssessmentScreen(Screen):
 
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        should_show = condensed_line_filter()
+        result = await run_job(
+            argv, on_line=lambda line: log.write(line) if should_show(line) else None
+        )
         log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
@@ -614,10 +616,10 @@ class ScoreScreen(Screen):
             yield Static(
                 "Score a model -- equivalent to running `cbench score` yourself. Runs "
                 "S1/S2/S3 at the chosen depth (or reads existing CSVs with \"From "
-                "existing\", making no model call), then saves a per-suite scorecard -- "
-                "deliberately NOT a single number, see README.md \"Scoring a model\". "
-                "The Models browser's Score column and `cbench catalogue` both read "
-                "whatever this produces."
+                "existing\", making no model call), then saves an A-F grade (worst of the "
+                "three suites, not an average) plus the full per-suite detail underneath "
+                "it -- see README.md \"Scoring a model\". The Models browser's Score column "
+                "and `cbench catalogue` both read whatever this produces."
             )
             yield Select([], id="score-model-select", allow_blank=True,
                          prompt="Pick a local model (or type the tag below) — loading...")
@@ -761,7 +763,10 @@ class ScoreScreen(Screen):
                           "status).[/bold yellow]")
             log.write("")
 
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        should_show = condensed_line_filter()
+        result = await run_job(
+            argv, on_line=lambda line: log.write(line) if should_show(line) else None
+        )
         log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")

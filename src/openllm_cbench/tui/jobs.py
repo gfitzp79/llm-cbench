@@ -104,6 +104,55 @@ async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | N
     return result
 
 
+# Lines the on-screen (live) view keeps, before a run reaches "Assessment
+# complete" -- see condensed_line_filter()'s own docstring for why this is
+# an allowlist, not a blocklist, and why it's a prefix match against
+# stripped()'d lines rather than a regex.
+_CONDENSED_KEEP_PREFIXES = (
+    "$ ", "=== ", "--- ", "Scoring '", "Full assessment:", "Assessment complete",
+    "Aggregating ", "Report:", "CSV:", "Saved:", "[run-lock]", "[!]",
+    "Model not catalogued", "Gate-checking", "Full log saved",
+)
+
+
+def condensed_line_filter():
+    """Returns a fresh `should_show(line) -> bool` closure for one run's
+    on-screen (live) RichLog -- NEVER for the saved log file, which
+    always gets every line regardless via run_job()'s own unconditional
+    result.lines.append(); this only controls what's echoed to the
+    screen while a run is in progress.
+
+    Found live: a real 3-suite/3-trial run against a real model produced
+    800+ lines on screen, and a security practitioner watching it had no
+    way to tell what mattered. Two things dominated the noise, neither of
+    them the actual outcome: a verdict line for every one of dozens of
+    task/probe rows per trial, and each suite's own full single-run
+    report -- paragraphs of methodology prose plus a results table --
+    printed fresh after every trial, repeated 3 times per suite for a
+    3-trial run. All of that is still in the saved log file (open it for
+    the play-by-play); it was never the right thing to force someone to
+    watch scroll past live. What actually renders on screen instead:
+    suite/trial headers, aggregation/report/save pointers, warnings --
+    and once the run reaches "Assessment complete", every remaining line
+    verbatim, because nothing comes after that but the final grade card
+    itself, which is the entire point of watching."""
+    seen_complete = False
+
+    def should_show(line):
+        nonlocal seen_complete
+        if seen_complete:
+            return True
+        stripped = line.strip()
+        if stripped.startswith("Assessment complete"):
+            seen_complete = True
+            return True
+        if not stripped:
+            return False
+        return any(stripped.startswith(p) for p in _CONDENSED_KEEP_PREFIXES)
+
+    return should_show
+
+
 def save_job_log(result: JobResult) -> Path:
     """Writes a completed job's full stdout/stderr (result.lines) to a
     timestamped file under results/tui-logs/, and returns its path.

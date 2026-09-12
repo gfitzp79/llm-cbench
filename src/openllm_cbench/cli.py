@@ -294,9 +294,10 @@ def _assess_body(args, suites, SUITE_INFO):
 
 def _cmd_score(argv):
     """Runs (or reads) S1/S2/S3 trials for one model and produces a
-    cross-suite scorecard -- see scoring/scorecard.py's module docstring
-    for why that's a per-suite band-plus-confidence table, deliberately
-    NOT a single composite number.
+    cross-suite scorecard -- an A-F grade (0-100), the worst of the three
+    suites, plus the full per-suite band/rate/confidence/caveats
+    underneath it. See scoring/scorecard.py's module docstring for the
+    exact formula and why worst-suite, not an average.
 
     `--depth` picks a trial count via the same `_assess_body` machinery
     `cbench assess` itself uses (this command does not re-implement running
@@ -344,8 +345,8 @@ def _cmd_score(argv):
     p = argparse.ArgumentParser(
         prog="cbench score",
         description="Run (or read existing) S1/S2/S3 trials for one model and produce a "
-                     "cross-suite scorecard -- per-suite bands and confidence, deliberately "
-                     "not a single composite number. See this command's own module docstring.",
+                     "cross-suite scorecard -- an A-F grade (0-100) plus the per-suite detail "
+                     "behind it. See this command's own module docstring.",
         epilog=safety_epilog(),
     )
     p.add_argument("--model", required=True)
@@ -656,9 +657,11 @@ def _cmd_catalogue(argv):
     print(f"\n{len(local)} model(s) total, {uncatalogued_n} uncatalogued. "
           f"`cbench discover` to catalogue the rest; `cbench score --model <tag>` to "
           f"generate or refresh a scorecard.\n"
-          f"score legend: INVALID = a validity guard fired, don't trust this scorecard yet -- "
-          f"clean*/signal* (trailing *) = an otherwise-clean/ok suite has an unresolved caveat "
-          f"(e.g. a control never fired) -- read the full scorecard before citing either.")
+          f"score legend: A-F grade (0-100), worst-of-3-suites, not an average -- "
+          f"N/A = nothing gradable yet. INVALID = a validity guard fired, that suite is "
+          f"excluded from the grade (see grade_basis in the full scorecard). Trailing "
+          f"'*' = an otherwise-ok suite still has an unresolved caveat -- read the full "
+          f"scorecard (`results/scorecards/<tag>.md`) before citing the grade alone.")
     return 0
 
 

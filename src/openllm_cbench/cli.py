@@ -655,7 +655,10 @@ def _cmd_catalogue(argv):
     uncatalogued_n = sum(1 for m in local if m["name"] not in catalogued)
     print(f"\n{len(local)} model(s) total, {uncatalogued_n} uncatalogued. "
           f"`cbench discover` to catalogue the rest; `cbench score --model <tag>` to "
-          f"generate or refresh a scorecard.")
+          f"generate or refresh a scorecard.\n"
+          f"score legend: INVALID = a validity guard fired, don't trust this scorecard yet -- "
+          f"clean*/signal* (trailing *) = an otherwise-clean/ok suite has an unresolved caveat "
+          f"(e.g. a control never fired) -- read the full scorecard before citing either.")
     return 0
 
 

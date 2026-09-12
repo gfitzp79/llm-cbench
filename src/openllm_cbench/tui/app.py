@@ -355,7 +355,10 @@ class ModelsScreen(Screen):
         log.write(f"[dim]{len(local)} local model(s); {uncatalogued_n} not yet catalogued. "
                   f"Select a row and press \"Gate + save selected\" to catalogue one. Run "
                   f"`cbench score --model <tag>` from a terminal to fill in the Score "
-                  f"column.[/dim]")
+                  f"column. Score legend: INVALID = a validity guard fired; clean*/signal* "
+                  f"(trailing *) = an otherwise-clean suite has an unresolved caveat -- read "
+                  f"the full scorecard (`results/scorecards/<tag>.md`) before citing "
+                  f"either.[/dim]")
 
     def _gate_selected(self) -> None:
         table = self.query_one("#models-table", DataTable)

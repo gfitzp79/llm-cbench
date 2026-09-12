@@ -167,7 +167,8 @@ def live_runners(patterns=RUNNER_PATTERNS, exclude_pids=()):
     examined. That ordering is load-bearing: a command-line-only match also
     matches the shell or PowerShell process running the query itself, so the
     count never reaches zero and the operator learns to ignore the guard. That
-    exact self-matching artifact was observed while investigating a live concurrent run.
+    exact self-matching artifact was observed while investigating a live
+    duplicate-batch incident (see this module's own docstring above).
 
     Returning UNKNOWN rather than [] when the probe fails is the other half of
     the same principle: a check that cannot run must not report success.
@@ -220,7 +221,8 @@ class RunLock:
 
     Do NOT "simplify" this to `if not exists: create`. That check-then-act is
     not atomic and races precisely when two launches are seconds apart, which
-    is exactly the concurrent-launch scenario.
+    is exactly the two-batches-on-one-GPU scenario this module's own
+    docstring is modelled on.
     """
 
     def __init__(self, lock_dir=DEFAULT_LOCK, label="", patterns=RUNNER_PATTERNS,
@@ -286,7 +288,8 @@ class RunLock:
             if own and pid_alive(own["pid"]):
                 msg = ("batch lock held by a LIVE process.\n"
                        "  owner pid : %s\n  label     : %s\n  started   : %s\n"
-                       "  This is the concurrent-launch failure mode. Do not launch a second batch."
+                       "  This is the exact failure mode this guard exists to prevent "
+                       "(see runlock.py's own module docstring). Do not launch a second batch."
                        % (own["pid"], own["label"] or "?", own["started"] or "?"))
                 if not self.force:
                     raise RunLockBusy(msg)

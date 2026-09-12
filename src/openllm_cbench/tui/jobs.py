@@ -102,3 +102,44 @@ async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | N
 
     result.returncode = await proc.wait()
     return result
+
+
+def save_job_log(result: JobResult) -> Path:
+    """Writes a completed job's full stdout/stderr (result.lines) to a
+    timestamped file under results/tui-logs/, and returns its path.
+
+    Exists because a RichLog widget is in-memory only -- its content is
+    gone the moment you navigate away from the screen or close the app,
+    and Textual has no built-in copy-to-clipboard that works reliably
+    across every terminal this might run in. This is the actual,
+    inspectable artifact instead: a real file, in the same results/ tree
+    every suite already writes its own output to, openable in any editor
+    and attachable to a bug report without needing to screenshot a
+    terminal.
+
+    The subcommand name (for the filename) is read straight out of
+    result.argv (cbench_command()'s own layout: [..., "-m",
+    "openllm_cbench.cli", subcommand, *args]) rather than asked for
+    separately -- one caller passing a stale or mismatched label is a
+    whole class of bug this sidesteps entirely. Never raises past this
+    point: if the file can't be written (e.g. a read-only results/ tree),
+    the caller still has result.lines in memory and this failure is
+    theirs to report, not something to crash the TUI over."""
+    import datetime
+
+    from openllm_cbench.core.paths import results_dir
+
+    try:
+        subcommand = result.argv[result.argv.index("openllm_cbench.cli") + 1]
+    except (ValueError, IndexError):
+        subcommand = "unknown"
+
+    d = results_dir("tui-logs")
+    d.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = d / f"{subcommand}_{ts}.log"
+    footer = (f"\n[exit code: {result.returncode}]\n" if not result.error
+              else f"\n[error: {result.error}]\n")
+    path.write_text(f"$ {' '.join(result.argv)}\n\n" + "\n".join(result.lines) + footer,
+                     encoding="utf-8")
+    return path

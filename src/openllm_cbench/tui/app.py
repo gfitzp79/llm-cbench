@@ -22,7 +22,9 @@ from textual.widgets import (
 )
 
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
-from openllm_cbench.tui.jobs import RUNNABLE_SUITES, build_args, cbench_command, run_job
+from openllm_cbench.tui.jobs import (
+    RUNNABLE_SUITES, build_args, cbench_command, run_job, save_job_log,
+)
 
 
 def _results_root() -> Path:
@@ -82,6 +84,7 @@ class DashboardScreen(Screen):
                 yield Button("Local models", id="goto-models")
             with Horizontal(id="dashboard-buttons-2"):
                 yield Button("Browse reports", id="goto-reports")
+                yield Button("Validate a community submission", id="goto-community")
                 yield Button("Check environment", id="run-doctor")
                 yield Button("About / extend this", id="goto-about")
             yield Static(
@@ -115,6 +118,8 @@ class DashboardScreen(Screen):
             self.app.push_screen(ModelsScreen())
         elif event.button.id == "goto-reports":
             self.app.push_screen(ReportsScreen())
+        elif event.button.id == "goto-community":
+            self.app.push_screen(CommunityValidateScreen())
         elif event.button.id == "run-doctor":
             self.run_doctor()
         elif event.button.id == "goto-about":
@@ -129,7 +134,8 @@ class DashboardScreen(Screen):
 
     @work(exclusive=True)
     async def _run_doctor_worker(self, argv, log: RichLog) -> None:
-        await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
 
 
 class RunScreen(Screen):
@@ -204,6 +210,7 @@ class RunScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -269,6 +276,7 @@ class GateScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -378,6 +386,7 @@ class ModelsScreen(Screen):
     @work(exclusive=True)
     async def _gate_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
             return
@@ -441,6 +450,7 @@ class PullScreen(Screen):
     @work(exclusive=True)
     async def _search_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -461,6 +471,7 @@ class PullScreen(Screen):
     @work(exclusive=True)
     async def _pull_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -567,6 +578,7 @@ class AssessmentScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -685,6 +697,7 @@ class ScoreScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:
             log.write(f"[bold red]{result.error}[/bold red]")
         else:
@@ -693,6 +706,88 @@ class ScoreScreen(Screen):
             if result.returncode == 0:
                 log.write("[dim]Check \"Local models\" for the updated Score column, or "
                           "\"Browse reports\" for the full scorecard.[/dim]")
+
+
+class CommunityValidateScreen(Screen):
+    """`cbench community-validate` -- a real subprocess, same as every
+    other action-taking screen. The actual shape-check lives in
+    core/community.py:validate_submission(); this screen is a folder
+    picker, a form, and a log, nothing more. See
+    community-results/README.md for the submission convention this
+    checks a folder against."""
+
+    BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield InvariantBar()
+        with Vertical(id="community-form"):
+            yield Static(
+                "Validate a community-results/ submission folder -- equivalent to running "
+                "`cbench community-validate <path>` yourself. Checks the folder is shaped "
+                "correctly (submission.json present with its required fields, CSVs present "
+                "and tagged for the claimed model) before you spend time scoring or merging "
+                "it. Read-only: makes no model or network call, and doesn't itself score "
+                "anything -- see community-results/README.md for the next step after this "
+                "passes."
+            )
+            root = Path.cwd() / "community-results"
+            with Horizontal(id="community-body"):
+                if root.exists():
+                    yield DirectoryTree(str(root), id="community-tree")
+                else:
+                    yield Static(
+                        f"No community-results/ directory at {root}.",
+                        id="community-tree-empty",
+                    )
+                with Vertical(id="community-form-inner"):
+                    yield Input(
+                        placeholder="submission folder path, e.g. "
+                                     "community-results/gemma3-12b/alice_20260912",
+                        id="community-path-input",
+                    )
+                    with Horizontal():
+                        yield Button("Validate", id="community-start", variant="primary")
+                        yield Button("Back", id="community-back")
+                    yield Static("", id="community-preview")
+                    yield RichLog(id="community-log", wrap=True, highlight=True, markup=True)
+        yield Footer()
+
+    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        if event.control.id == "community-tree":
+            self.query_one("#community-path-input", Input).value = str(event.path)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "community-back":
+            self.app.pop_screen()
+        elif event.button.id == "community-start":
+            self._start_validate()
+
+    def _start_validate(self) -> None:
+        path = self.query_one("#community-path-input", Input).value.strip()
+        log = self.query_one("#community-log", RichLog)
+        preview = self.query_one("#community-preview", Static)
+        log.clear()
+
+        if not path:
+            log.write("[bold red]A submission folder path is required -- click one in the "
+                       "tree on the left, or type it.[/bold red]")
+            return
+
+        argv = cbench_command("community-validate", [path])
+        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._run_worker(argv, log)
+
+    @work(exclusive=True)
+    async def _run_worker(self, argv, log: RichLog) -> None:
+        result = await run_job(argv, on_line=lambda line: log.write(line))
+        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
+        if result.error:
+            log.write(f"[bold red]{result.error}[/bold red]")
+        else:
+            style = "bold green" if result.returncode == 0 else "bold red"
+            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
 
 
 _ABOUT_TEXT = """\

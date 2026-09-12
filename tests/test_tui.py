@@ -25,8 +25,28 @@ textual = pytest.importorskip("textual")
 from openllm_cbench.tui.jobs import build_args, cbench_command, RUNNABLE_SUITES  # noqa: E402
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
-    ModelsScreen, PullScreen, AssessmentScreen, ScoreScreen, AboutScreen,
+    ModelsScreen, PullScreen, AssessmentScreen, ScoreScreen,
+    CommunityValidateScreen, AboutScreen,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_results_dir(tmp_path, monkeypatch):
+    """A test that presses an action button (dry-run or --from-existing,
+    so no model/network is ever contacted -- see this file's own module
+    docstring) spawns a REAL subprocess. That subprocess is a genuinely
+    separate OS process, not bounded by this test's own asyncio/pilot
+    lifecycle: it keeps running to completion (writing whatever it
+    writes) even if the test function itself has already returned and
+    torn down the app. `cbench score --from-existing` computes and saves
+    a real scorecard regardless of dry-run, and the TUI's own
+    save_job_log() now writes a log file for every action -- both were
+    found, live, landing real files in this project's own results/
+    directory from a pytest run. Point every subprocess spawned by this
+    file's tests at an isolated tmp directory instead, autouse so no
+    individual test has to remember to opt in."""
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
+    return tmp_path
 
 
 # --- jobs.py: pure argv construction -------------------------------------
@@ -433,6 +453,48 @@ def test_score_screen_from_existing_ignores_depth_and_dry_run():
             assert "--from-existing" in preview
             assert "--depth" not in preview
             assert "--dry-run" not in preview
+    asyncio.run(scenario())
+
+
+def test_dashboard_navigates_to_community_validate_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            assert isinstance(app.screen, CommunityValidateScreen)
+    asyncio.run(scenario())
+
+
+def test_community_validate_screen_requires_a_path_before_starting():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            await pilot.click("#community-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
+            assert any("path is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_community_validate_screen_builds_the_correct_command():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            path_input = app.screen.query_one("#community-path-input")
+            path_input.value = "community-results/gemma3-12b/alice_20260912"
+            await pilot.click("#community-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "community-validate" in preview
+            assert "community-results/gemma3-12b/alice_20260912" in preview
     asyncio.run(scenario())
 
 

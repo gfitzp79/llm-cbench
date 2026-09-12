@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy this file to <your-submission-folder>/submission.json and fill it in. Every field below except _comment and notes is required -- cbench community-validate refuses a submission missing any of them.",
+  "model": "gemma3:12b",
+  "_model_comment": "The exact tag your endpoint calls this model, verbatim -- the same string every CSV filename in this submission must contain (cbench community-validate checks this).",
+  "contributor": "your-github-handle-or-name",
+  "date": "2026-09-12",
+  "_date_comment": "The date you ran these trials, not the date you opened the PR.",
+  "hardware_summary": "e.g. RTX 4080 16GB VRAM, 64GB system RAM, Windows 11",
+  "endpoint": "e.g. ollama 0.5.1",
+  "_endpoint_comment": "Runtime and version -- sampling defaults and quant handling differ between runtimes and versions, and this is exactly the kind of thing ARCHITECTURE.md's own \"how not to fool yourself\" section warns can confound a comparison.",
+  "quant": "e.g. Q4_K_M",
+  "cbench_version": "output of `pip show openllm-cbench`, or the git commit hash you ran from",
+  "notes": "Optional free text -- anything unusual about the run: a config_overrides you had to set, a caveat this model needed, trials you excluded and why, etc."
+}

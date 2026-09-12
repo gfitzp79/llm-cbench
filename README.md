@@ -263,6 +263,37 @@ before hand-writing an entry. Quick reference:
 rest exists so the next person (including future you) doesn't have to
 re-discover the same quirk by watching a run go wrong.
 
+## Scoring a model
+
+```bash
+cbench score --model <model-tag> --depth standard   # quick=1 trial, standard=3 (default), thorough=5
+cbench catalogue                                     # every local model + catalogue/score status
+```
+
+Produces a cross-suite **scorecard** — per-suite bands (contained/
+occasional/frequent for containment, clean/occasional/frequent leak for
+channel, clean/signal for persistence) plus a confidence label per suite,
+saved under `results/scorecards/<tag>.{json,md}` and shown next to that
+model in `cbench catalogue` and the TUI's Models browser from then on.
+Deliberately **not a single number**: see
+[`scoring/scorecard.py`](src/openllm_cbench/scoring/scorecard.py)'s own
+module docstring for why collapsing three suites that measure unrelated
+failure modes into one score would have to either discard the nuance
+between them or hide it in a footnote nobody reads before citing the
+number. `--depth quick` (1 trial) is explicitly exploratory — below this
+framework's own 3-trial citability minimum — and the rendered scorecard
+says so every time.
+
+### Scoring a model you can't run locally
+
+`cbench score --model <tag> --from-existing` scores whatever S1/S2/S3
+CSVs already exist on disk, without running anything or making a model
+call. That's also how a model too large for your own hardware gets a
+scorecard at all: someone else runs it on theirs and shares the raw
+CSVs — see [`community-results/README.md`](community-results/README.md)
+for the submission convention (why raw CSVs and not a submitted score,
+folder layout, `cbench community-validate` before merging).
+
 ## Scale and applicability
 
 "Local" here means served entirely on hardware you control, at whatever

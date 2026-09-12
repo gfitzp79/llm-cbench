@@ -23,6 +23,7 @@ Usage:
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
     cbench catalogue                              # every local model + catalogue/score status
+    cbench community-validate community-results/<model-tag>/<contributor>_<date>
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -311,13 +312,21 @@ def _cmd_score(argv):
                                 EXTEND target.
 
     `--from-existing` skips running anything and scores whatever S1/S2/S3
-    CSVs already exist on disk for this model tag -- the same real CSVs
-    community-submitted results are, once placed where `--results-dir`
-    points (see community-results/README.md). This is how a scorecard ever
-    gets produced for a model too large to run on this machine: someone
-    else runs the suites on their own hardware, submits the raw CSVs, and
-    scoring them is this same command with --from-existing pointed at that
-    submission's folder -- not a second implementation of anything above."""
+    CSVs already exist on disk for this model tag -- the same real CSVs a
+    community submission is, once its s1_containment/s2_channel/
+    s3_persistence folders are pointed at via $OPENLLM_CBENCH_RESULTS_DIR
+    (see community-results/README.md). That has to be a real environment
+    variable set before this process starts, not a CLI flag on this
+    command: aggregate_s1/s2/s3 resolve their results directory once, at
+    import time (scoring/aggregate.py's own S1_DIR/S2_DIR/S3_DIR module
+    constants) -- setting it after this function starts running would be
+    too late to change anything, so this deliberately does not offer a
+    same-process --results-dir that would silently no-op. This is how a
+    scorecard ever gets produced for a model too large to run on this
+    machine: someone else runs the suites on their own hardware, submits
+    the raw CSVs, and scoring them is this same command with
+    --from-existing and the env var pointed at that submission -- not a
+    second implementation of anything above."""
     import argparse
 
     from openllm_cbench.core.invariant import epilog as safety_epilog
@@ -347,9 +356,11 @@ def _cmd_score(argv):
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--from-existing", action="store_true",
                     help="Score whatever S1/S2/S3 CSVs already exist for this model tag -- "
-                         "runs nothing, makes no model call. Use --results-dir (per suite, "
-                         "via $OPENLLM_CBENCH_RESULTS_DIR) to point at a specific submission's "
-                         "CSVs rather than your own results/ directory.")
+                         "runs nothing, makes no model call. To score a specific submission "
+                         "rather than your own results/ directory, set $OPENLLM_CBENCH_RESULTS_DIR "
+                         "in the shell BEFORE running this command (see community-results/README.md) "
+                         "-- there is no --results-dir flag here; the env var has to be set before "
+                         "this process starts, not after.")
     p.add_argument("--dry-run", action="store_true",
                     help="Pass --dry-run through to every suite invocation and skip scoring "
                          "entirely -- previews payloads, calls no model. Ignored with "
@@ -648,6 +659,50 @@ def _cmd_catalogue(argv):
     return 0
 
 
+def _cmd_community_validate(argv):
+    """Checks a community-results/ submission folder is shaped correctly
+    (submission.json present with its required fields, CSVs present and
+    tagged for the claimed model) before a maintainer spends any time
+    scoring or merging it -- see community-results/README.md for the
+    submission convention this checks against, and core/community.py for
+    what "shaped correctly" actually means. Makes no model or network
+    call; does not itself score anything -- see this command's own
+    printed next-step for that."""
+    import argparse
+
+    from openllm_cbench.core.community import validate_submission
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+
+    p = argparse.ArgumentParser(
+        prog="cbench community-validate",
+        description="Validate a community-results/ submission folder's shape before "
+                     "scoring or merging it. Read-only.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("path", help="Path to the submission folder, e.g. "
+                                 "community-results/gemma3-12b/alice_20260912")
+    args = p.parse_args(argv)
+
+    problems = validate_submission(args.path)
+    if not problems:
+        print(f"OK -- {args.path} looks like a valid submission.")
+        print("\nNext: review submission.json's claims against the actual CSVs by hand, then "
+              "score it -- set $OPENLLM_CBENCH_RESULTS_DIR to this folder BEFORE running "
+              "`cbench score` (has to be set before the process starts, not after -- see "
+              "`cbench score --help`):\n"
+              f"    bash/zsh:    OPENLLM_CBENCH_RESULTS_DIR={args.path} cbench score --model <tag> --from-existing\n"
+              f"    PowerShell:  $env:OPENLLM_CBENCH_RESULTS_DIR=\"{args.path}\"; "
+              f"cbench score --model <tag> --from-existing\n"
+              "(<tag> is the \"model\" field from this submission's own submission.json) "
+              "before trusting or citing anything from it.")
+        return 0
+
+    print(f"[!] {len(problems)} problem(s) with {args.path}:\n")
+    for p_ in problems:
+        print(f"  - {p_}")
+    return 1
+
+
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
@@ -701,6 +756,7 @@ _NATIVE = {
     "assess": _cmd_assess,
     "score": _cmd_score,
     "catalogue": _cmd_catalogue,
+    "community-validate": _cmd_community_validate,
     "tui": _cmd_tui,
 }
 

@@ -33,7 +33,8 @@ no model and no network — there's no excuse for skipping it.
 src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
-                       (doctor, gate, discover, search, pull, assess, tui)
+                       (doctor, gate, discover, search, pull, assess,
+                       score, catalogue, community-validate, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
     sandbox.py           in-memory fabricated sandbox contents
@@ -50,6 +51,8 @@ src/openllm_cbench/
                          never talks to ollama.com (see its own
                          docstring for why)
     hardware.py           advisory VRAM/RAM probe, never blocking
+    community.py           shape-checks a community-results/ submission
+                         folder before it's scored or merged
     invariant.py          the one safety-invariant string, shared by
                          every --help epilog and `cbench doctor`
   suites/
@@ -58,6 +61,9 @@ src/openllm_cbench/
     persistence.py        S3 -- deceptive persistence
   scoring/               offline re-scoring, aggregation, and
                          significance testing over CSVs already on disk
+    scorecard.py           cross-suite scorecard (per-suite band +
+                         confidence, deliberately not one composite
+                         number) built on aggregate_s1/s2/s3's stats
   integrations/          optional Inspect cross-validation (pip install
                          ".[inspect]")
   tui/                     optional Textual control panel over the CLI
@@ -68,6 +74,10 @@ src/openllm_cbench/
 data/
   tasks/, probes/, scenarios/    the actual task/probe/scenario JSON
   models/verified.json           packaged model-catalogue seed
+community-results/
+  README.md                      submission convention for sharing raw
+                                 trial CSVs on a model you can't run
+                                 locally -- see there before adding to it
 tests/
   test_safety_invariant.py       the core safety claim, executable,
                                  no model or network needed
@@ -118,6 +128,14 @@ existing threshold or heuristic without updating the parity fixtures in
 the same commit — a silent threshold change is worse than a bug, because
 it changes what earlier results meant without anyone noticing.
 
+### A community-submitted result for a model you can't run locally
+
+See [`community-results/README.md`](community-results/README.md) for the
+full submission convention — raw trial CSVs plus a `submission.json`,
+submitted via PR, validated with `cbench community-validate` and then
+scored the normal way (`cbench score --from-existing`) before anyone
+trusts the number. Not a place for a bare score with no data behind it.
+
 ## Conventions worth keeping
 
 - **The TUI never gets suite logic of its own.** Any new suite/scoring
@@ -126,14 +144,16 @@ it changes what earlier results meant without anyone noticing.
   <subcommand>` subprocess (`tui/jobs.py:cbench_command()`), not a direct
   import of the suite's `main()` into `tui/app.py`. If a PR adds a
   feature that only the TUI can do, that's a sign it's in the wrong file.
-  The one exception: a screen may call a `core/` function **directly**
-  (in-process, via `asyncio.to_thread` so it can't block the UI) purely
-  to *read* something for display -- the Models screen listing local
-  models via `core/discover.py` is the existing example. That's calling
-  the identical function `cbench discover` itself calls, not a second
-  implementation of it, and it has no side effect. Anything with a side
-  effect (writing the catalogue, downloading a model) still goes through
-  a real subprocess, no exception.
+  The one exception: a screen may call a `core/` or `scoring/` function
+  **directly** (in-process, via `asyncio.to_thread` so it can't block the
+  UI) purely to *read* something for display -- the Models screen listing
+  local models via `core/discover.py`, and its Score column reading a
+  saved scorecard via `scoring/scorecard.py:catalogue_compact_label()`,
+  are the existing examples. Both call the identical function `cbench
+  discover`/`cbench catalogue` themselves call, not a second
+  implementation, and neither has a side effect. Anything with a side
+  effect (writing the catalogue, downloading a model, running a suite)
+  still goes through a real subprocess, no exception.
 - **Smoke-test before opening a PR, and say what you actually did.**
   Compile/syntax check is necessary but not sufficient — this project has
   twice caught real runtime-only bugs (a variable that only resolved at

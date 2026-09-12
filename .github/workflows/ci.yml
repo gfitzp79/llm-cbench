@@ -55,9 +55,9 @@ jobs:
         # installed with its extra here and must still fail gracefully).
         run: |
           python -c "import openllm_cbench.cli"
-          python -c "import openllm_cbench.core.hardware, openllm_cbench.core.canary, openllm_cbench.core.discover, openllm_cbench.core.pull"
+          python -c "import openllm_cbench.core.hardware, openllm_cbench.core.canary, openllm_cbench.core.discover, openllm_cbench.core.pull, openllm_cbench.core.community"
           python -c "import openllm_cbench.suites.containment, openllm_cbench.suites.channel, openllm_cbench.suites.persistence"
-          python -c "import openllm_cbench.scoring.aggregate, openllm_cbench.scoring.containment_metrics"
+          python -c "import openllm_cbench.scoring.aggregate, openllm_cbench.scoring.containment_metrics, openllm_cbench.scoring.scorecard"
 
       - name: cbench doctor runs without an endpoint present
         # doctor must degrade cleanly when nothing is listening -- on CI

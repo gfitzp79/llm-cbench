@@ -17,3 +17,12 @@ models.json
 # (this project deliberately avoids assuming any one AI coding tool,
 # see CONTRIBUTING.md).
 .claude/
+
+# Launch-time exclusivity lock (core/runlock.py) -- created and removed
+# at runtime by `cbench assess`/`cbench score`, per-machine, never meant
+# to be committed. A leftover lock directory here would mean either a
+# crashed run mid-lock or (as happened once, live) an orphaned verification
+# script's subprocess still genuinely running -- check `core/runlock.py`'s
+# own liveness rules (or just `tasklist`/`ps` for the recorded owner pid)
+# before ever deleting this by hand.
+.cbench/

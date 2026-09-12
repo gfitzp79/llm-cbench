@@ -302,7 +302,17 @@ class ModelsScreen(Screen):
             yield Static(
                 "Models pulled into your local endpoint. \"Catalogued\" means the "
                 "model catalogue already has config guidance for this exact tag -- "
-                "an uncatalogued model still runs fine, just \"ungated\"."
+                "an uncatalogued model still runs fine, just \"ungated\".\n"
+                "Score column: \"not scored\" = never run through `cbench score`. "
+                "\"clean\"/\"signal\" = all three suites came back clean, or at least "
+                "one showed something (an escape attempt, a channel leak, a "
+                "persistence flag) -- not a verdict, a pointer to go read the full "
+                "scorecard. \"INVALID\" = a validity guard fired (e.g. mismatched "
+                "task sets) -- don't trust this scorecard yet. Trailing \"*\" = an "
+                "otherwise-clean suite still has an unresolved caveat -- read the "
+                "full scorecard (results/scorecards/<tag>.md) before citing any of "
+                "this.",
+                id="models-score-legend",
             )
             with Horizontal(id="models-buttons"):
                 yield Button("Refresh", id="models-refresh", variant="primary")
@@ -364,12 +374,9 @@ class ModelsScreen(Screen):
                 score if score != "not scored" else "[dim]not scored[/dim]",
             )
         log.write(f"[dim]{len(local)} local model(s); {uncatalogued_n} not yet catalogued. "
-                  f"Select a row and press \"Gate + save selected\" to catalogue one. Run "
-                  f"`cbench score --model <tag>` from a terminal to fill in the Score "
-                  f"column. Score legend: INVALID = a validity guard fired; clean*/signal* "
-                  f"(trailing *) = an otherwise-clean suite has an unresolved caveat -- read "
-                  f"the full scorecard (`results/scorecards/<tag>.md`) before citing "
-                  f"either.[/dim]")
+                  f"Select a row and press \"Gate + save selected\" to catalogue one, or "
+                  f"\"Score a model\" from the dashboard to fill in the Score column above "
+                  f"(legend above the table explains what it means).[/dim]")
 
     def _gate_selected(self) -> None:
         table = self.query_one("#models-table", DataTable)
@@ -615,6 +622,7 @@ class ScoreScreen(Screen):
             yield Select([], id="score-model-select", allow_blank=True,
                          prompt="Pick a local model (or type the tag below) — loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="score-model-input")
+            yield Static("", id="score-catalogue-status")
             with Horizontal(id="score-suite-checks"):
                 yield Checkbox("S1 containment", id="score-s1", value=True)
                 yield Checkbox("S2 channel", id="score-s2", value=True)
@@ -634,6 +642,12 @@ class ScoreScreen(Screen):
                 id="score-from-existing", value=False,
             )
             yield Checkbox("Dry run (print payloads, call no model)", id="score-dry-run", value=True)
+            yield Checkbox(
+                "Gate-check first if not catalogued (runs `cbench gate --save` before "
+                "scoring, so a net-new model isn't silently UNGATED -- recommended, "
+                "especially for a model this catalogue has never seen)",
+                id="score-gate-first", value=True,
+            )
             with Horizontal():
                 yield Button("Score", id="score-start", variant="primary")
                 yield Button("Back", id="score-back")
@@ -651,6 +665,34 @@ class ScoreScreen(Screen):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "score-model-select" and event.value is not Select.BLANK:
             self.query_one("#score-model-input", Input).value = str(event.value)
+            self._refresh_catalogue_status(str(event.value))
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "score-model-input":
+            self._refresh_catalogue_status(event.value.strip())
+
+    def _refresh_catalogue_status(self, model: str) -> None:
+        """Local-only registry read (same function `cbench discover`/
+        `cbench catalogue` already call), synchronous -- reading two small
+        JSON files off disk doesn't need a worker the way a live endpoint
+        call does. Shows catalogue status BEFORE a run starts, not just in
+        the log after one is already underway -- a model this catalogue
+        has never seen is going to be the NORM as community-submitted
+        results bring in models nobody here has gated yet, not an edge
+        case worth discovering only mid-run."""
+        status = self.query_one("#score-catalogue-status", Static)
+        if not model:
+            status.update("")
+            return
+        from openllm_cbench.core.registry import load_registry, lookup
+        entry = lookup(model, load_registry())
+        if entry is not None:
+            status.update("[green]✓ catalogued[/green] -- config guidance on file for this tag.")
+        else:
+            status.update(
+                "[bold yellow]⚠ not in your model catalogue[/bold yellow] -- this run will be "
+                "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "score-back":
@@ -692,10 +734,33 @@ class ScoreScreen(Screen):
         argv = cbench_command("score", args)
         preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
-        self._run_worker(argv, log)
+
+        # Gate first if this tag has never been seen and the checkbox says
+        # to -- a convenience, not a requirement: this framework never
+        # refuses to run against an unlisted or failed-gate model, it only
+        # warns, so a gate failure below doesn't block the score run either.
+        gate_first_argv = None
+        if self.query_one("#score-gate-first", Checkbox).value:
+            from openllm_cbench.core.registry import load_registry, lookup
+            if lookup(model, load_registry()) is None:
+                gate_first_argv = cbench_command("gate", ["--model", model, "--save"])
+
+        self._run_worker(argv, log, gate_first_argv)
 
     @work(exclusive=True)
-    async def _run_worker(self, argv, log: RichLog) -> None:
+    async def _run_worker(self, argv, log: RichLog, gate_first_argv=None) -> None:
+        if gate_first_argv:
+            log.write("[dim]Model not catalogued -- gate-checking first "
+                      "(uncheck \"Gate-check first\" to skip this):[/dim]")
+            log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
+            gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
+            log.write(f"[dim]Full log saved to {save_job_log(gate_result)}[/dim]")
+            if gate_result.error or gate_result.returncode != 0:
+                log.write("[bold yellow]Gate-check didn't complete cleanly -- proceeding to "
+                          "score anyway (this framework never blocks a run on gate "
+                          "status).[/bold yellow]")
+            log.write("")
+
         result = await run_job(argv, on_line=lambda line: log.write(line))
         log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
         if result.error:

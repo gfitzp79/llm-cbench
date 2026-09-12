@@ -178,6 +178,26 @@ def test_dashboard_navigates_to_models_screen():
     asyncio.run(scenario())
 
 
+def test_models_screen_explains_the_score_column_persistently():
+    # Regression: the Score column's meaning ("signal*", "INVALID", etc.)
+    # was explained only in a transient log line at the bottom of the
+    # screen, easy to miss or scroll past -- a real user looked at
+    # "signal*" in the table and had no idea what it meant. The
+    # explanation now has to live somewhere that doesn't scroll away.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            legend = str(app.screen.query_one("#models-score-legend").content)
+            assert "not scored" in legend
+            assert "INVALID" in legend
+            assert "clean" in legend and "signal" in legend
+            assert "caveat" in legend
+    asyncio.run(scenario())
+
+
 def test_models_screen_navigates_to_pull_screen():
     async def scenario():
         app = CBenchTUI()
@@ -378,6 +398,55 @@ def test_dashboard_navigates_to_score_screen():
     asyncio.run(scenario())
 
 
+def test_score_screen_shows_uncatalogued_warning_before_running():
+    # Regression: catalogue status ("UNGATED") was only ever visible in
+    # the log AFTER a run was already underway -- a real user had no way
+    # to know before committing to a run. This is going to be the NORM,
+    # not the exception, as community-submitted results bring in models
+    # this catalogue has never gated.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("definitely-not-a-real-model:1b"))
+            await pilot.pause()
+            status = str(app.screen.query_one("#score-catalogue-status").content)
+            assert "not in your model catalogue" in status
+            assert "UNGATED" in status
+    asyncio.run(scenario())
+
+
+def test_score_screen_shows_catalogued_status_for_a_known_model():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("gemma3:12b"))  # ships in data/models/verified.json
+            await pilot.pause()
+            status = str(app.screen.query_one("#score-catalogue-status").content)
+            assert "catalogued" in status.lower()
+            assert "not in your model catalogue" not in status
+    asyncio.run(scenario())
+
+
+def test_score_screen_gate_first_defaults_on_and_can_be_unchecked():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            from textual.widgets import Checkbox
+            assert app.screen.query_one("#score-gate-first", Checkbox).value is True
+    asyncio.run(scenario())
+
+
 def test_score_screen_requires_a_model_before_starting():
     async def scenario():
         app = CBenchTUI()
@@ -423,6 +492,11 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
             await pilot.click("#score-model-input")
             await pilot.press(*list("x:1b"))
             await pilot.click("#score-s2")  # uncheck S2, leaving S1+S3
+            # "x:1b" isn't catalogued, and gate-first (default on) needs a
+            # live endpoint regardless of --dry-run -- uncheck it so this
+            # test stays hermetic, same as every other "no live endpoint
+            # needed" test in this file.
+            await pilot.click("#score-gate-first")
             await pilot.click("#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
@@ -447,6 +521,10 @@ def test_score_screen_from_existing_ignores_depth_and_dry_run():
             await pilot.click("#score-model-input")
             await pilot.press(*list("x:1b"))
             await pilot.click("#score-from-existing")
+            # Same reason as the dry-run test above: gate-first needs a
+            # live endpoint, --from-existing doesn't -- don't let the
+            # former sneak a real network dependency into this test.
+            await pilot.click("#score-gate-first")
             await pilot.click("#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)

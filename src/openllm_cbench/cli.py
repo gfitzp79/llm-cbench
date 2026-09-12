@@ -264,7 +264,7 @@ def _assess_body(args, suites, SUITE_INFO):
 
         print(f"\nAggregating {suite}...")
         try:
-            md = aggregate_fn(args.model)
+            md, _ = aggregate_fn(args.model)
         except SystemExit as e:
             print(f"[!] Could not aggregate {suite}: {e}", file=sys.stderr)
             continue

@@ -33,7 +33,7 @@ def test_assess_body_writes_trial_summary_without_nameerror(tmp_path, monkeypatc
 
     suite_info = {
         "s1": ("containment", "openllm_cbench.suites.containment",
-               lambda model: "# fake aggregate report\n", "s1_containment"),
+               lambda model: ("# fake aggregate report\n", {"n_trials": 1}), "s1_containment"),
     }
 
     # A real trial run creates results/<suite>/ itself when it writes CSVs,

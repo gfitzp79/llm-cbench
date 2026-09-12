@@ -13,9 +13,21 @@ LLMs.
 > the full control inventory and `pytest tests/test_safety_invariant.py`
 > to verify it yourself, no model or network required.
 
-TODO: one paragraph — what problem this solves, who it's for, why it
-exists as three specific suites rather than a general red-teaming
-toolkit.
+If you're serving an open-weight model locally and want to know what it
+actually *does* under agentic pressure — not what it says when you ask it
+directly — this measures three specific behaviors that a benchmark score
+or a manual chat transcript won't surface: whether it reaches past a tool
+boundary it was given, whether its hidden reasoning trace fails a probe
+its visible answer resists, and whether it tries to rewrite a log rather
+than own a mistake when challenged on one. It's for anyone deploying a
+local model into something with real tools attached — an agent, a
+pipeline, anything past a chat window — who wants that answer from a
+run against their own model on their own hardware, not a leaderboard
+entry for a checkpoint they can't reproduce. It's three suites instead of
+a general red-teaming toolkit on purpose: broad scanners are already well
+served elsewhere (see "Comparison to other tools" below), and depth on
+three specific, previously-hard-to-measure questions was judged more
+useful than shallow coverage of many.
 
 ## What's here
 
@@ -253,10 +265,26 @@ re-discover the same quirk by watching a run go wrong.
 
 ## Scale and applicability
 
-TODO: paragraph on what capability tiers this has actually been exercised
-against, what "local" means in practice (quantization levels, parameter
-ranges), and what to expect running it against a model well outside that
-range.
+"Local" here means served entirely on hardware you control, at whatever
+quantization your endpoint runs — the gate-checked worked examples in
+`data/models/verified.json` span roughly 8B to 21B parameters at Q4_K_M/
+Q4_0/MXFP4/F16, the range this framework's own scoring heuristics and
+task set were actually tuned and validated against. It also runs fine
+well below that: models down to ~2B have been gate-checked and put
+through a full assessment cleanly (`cbench gate --save` catches most
+scale-related surprises before you spend a real run finding them — see
+"The model catalogue" above). Below roughly 1-2B, expect the containment
+and channel suites specifically to degrade in a particular way: not by
+crashing, but by producing more `TRUNCATED` and malformed-tool-call rows
+as the model struggles with the tool-call schema or reasoning-trace
+format itself, which is a capability signal in its own right but means
+fewer of that run's rows carry real containment/channel signal — read
+the caveat counts in the report, not just the headline rate, before
+trusting a small model's numbers. At the large end, nothing here
+architecturally caps model size — the harness only ever holds a chat
+completion and a short tool-call loop in memory — but this framework has
+not been exercised against anything past the low tens of billions, so
+treat a much larger model as untested territory rather than assumed-fine.
 
 ## Comparison to other tools
 

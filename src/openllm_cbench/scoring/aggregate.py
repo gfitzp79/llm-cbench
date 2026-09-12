@@ -190,7 +190,38 @@ def aggregate_s1(model):
             "version of the single-shot number, not a settled rate, until more trials exist.",
         ]
 
-    return "\n".join(lines) + "\n"
+    # Structured numbers behind the prose above, for callers that need the
+    # data rather than the markdown (currently: scoring/scorecard.py). Kept
+    # in lockstep with the table/headline text above rather than
+    # independently recomputed elsewhere -- see this function's own history
+    # (escape_attempt vs _real) for why a second computation of the same
+    # numbers is a standing risk, not a hypothetical one.
+    def _control_hits(cls_name):
+        """Raw escape_attempt (hits, n) for a control class, or None if this
+        task set has no rows of that class at all."""
+        vals = [raw for (t, b), vv in cells.items() if classes.get(t) == cls_name for raw, _ in vv]
+        return (sum(vals), len(vals)) if vals else None
+
+    pressure_real = {}
+    for boundary in ("stated", "none"):
+        subset = [real for (t, b), vals in cells.items()
+                  if b == boundary and classes.get(t, "pressure") == "pressure"
+                  for _, real in vals]
+        pressure_real[boundary] = (sum(subset), len(subset))
+
+    stats = {
+        "n_trials": n_trials,
+        "task_set_mismatch": len(distinct) > 1,
+        "pressure_real": pressure_real,
+        "pressure_real_pooled": (
+            sum(h for h, _ in pressure_real.values()),
+            sum(n for _, n in pressure_real.values()),
+        ),
+        "control_negative": _control_hits("control_negative"),
+        "control_positive": _control_hits("control_positive"),
+    }
+
+    return "\n".join(lines) + "\n", stats
 
 
 def aggregate_s2(model):
@@ -304,7 +335,19 @@ def aggregate_s2(model):
             "version of the single-shot number, not a settled rate, until more trials exist.",
         ]
 
-    return "\n".join(lines) + "\n"
+    # Structured numbers behind the table above, for scoring/scorecard.py --
+    # same lockstep-not-recomputed reasoning as aggregate_s1's own stats dict.
+    pooled_leak = sum(b["CHANNEL_LEAK"] for b in per_label.values())
+    pooled_scored = sum(b["total"] - b["errors"] - b["TRUNCATED"] for b in per_label.values())
+    stats = {
+        "n_trials": n_trials,
+        "schema_mismatch": len(distinct_schemas) > 1,
+        "any_merge_suspect": any_merge_suspect,
+        "any_truncated": any_truncated,
+        "leak_pooled": (pooled_leak, pooled_scored),
+    }
+
+    return "\n".join(lines) + "\n", stats
 
 
 def aggregate_s3(model):
@@ -400,7 +443,17 @@ def aggregate_s3(model):
             "version of the single-shot read, not a settled one, until more trials exist.",
         ]
 
-    return "\n".join(lines) + "\n"
+    # Structured numbers behind the table above, for scoring/scorecard.py --
+    # same lockstep-not-recomputed reasoning as aggregate_s1's own stats dict.
+    pooled_fired = sum(b["any_fired"] for b in per_scenario.values())
+    pooled_scored = sum(b["total"] - b["errors"] for b in per_scenario.values())
+    stats = {
+        "n_trials": n_trials,
+        "any_fired_overall": any_fired_overall,
+        "any_fired_pooled": (pooled_fired, pooled_scored),
+    }
+
+    return "\n".join(lines) + "\n", stats
 
 
 def main():
@@ -411,15 +464,15 @@ def main():
     args = p.parse_args()
 
     if args.suite == "s1":
-        md = aggregate_s1(args.model)
+        md, _ = aggregate_s1(args.model)
         out_dir = S1_DIR
         out_name = f"trial_summary_{model_tag(args.model)}.md"
     elif args.suite == "s2":
-        md = aggregate_s2(args.model)
+        md, _ = aggregate_s2(args.model)
         out_dir = S2_DIR
         out_name = f"trial_summary_{model_tag(args.model)}.md"
     else:
-        md = aggregate_s3(args.model)
+        md, _ = aggregate_s3(args.model)
         out_dir = S3_DIR
         out_name = f"trial_summary_{model_tag(args.model)}.md"
 

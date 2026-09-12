@@ -92,9 +92,17 @@ canary, or a way for `run_shell` to actually execute a command, that is a
 genuine break of this project's core safety claim and should be reported
 as a security issue, not a regular bug.
 
-TODO: add the preferred private reporting channel (security contact email
-or GitHub private vulnerability reporting) before publishing this
-repository.
+**Report it privately via GitHub's own vulnerability reporting**, not a
+public issue: open this repo's **Security** tab → **Report a
+vulnerability**. That routes the report to the maintainer only, keeps it
+out of the public issue tracker until there's a fix, and needs no email
+address published in this file.
+
+(Maintainer note: this requires "Private vulnerability reporting" to be
+turned on for this repository — Settings → Security → Private
+vulnerability reporting — before the button above will do anything. Turn
+it on before this repo goes public, and swap this section for a security
+contact email instead if you'd rather handle reports that way.)
 
 For anything else — a scoring bug, a documentation gap, a feature
 request — use the regular issue tracker; it doesn't need private handling.

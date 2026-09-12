@@ -304,7 +304,7 @@ class ModelsScreen(Screen):
 
     def on_mount(self) -> None:
         table = self.query_one("#models-table", DataTable)
-        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Catalogued")
+        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Catalogued", "Score")
         table.cursor_type = "row"
         self._refresh()
 
@@ -328,6 +328,7 @@ class ModelsScreen(Screen):
 
         from openllm_cbench.core.discover import list_local_models, format_size
         from openllm_cbench.core.registry import load_registry
+        from openllm_cbench.scoring.scorecard import catalogue_compact_label
 
         table = self.query_one("#models-table", DataTable)
         log = self.query_one("#models-log", RichLog)
@@ -345,12 +346,16 @@ class ModelsScreen(Screen):
             is_cat = m["name"] in catalogued
             if not is_cat:
                 uncatalogued_n += 1
+            score = await asyncio.to_thread(catalogue_compact_label, m["name"])
             table.add_row(
                 m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]),
                 "yes" if is_cat else "[bold yellow]no[/bold yellow]",
+                score if score != "not scored" else "[dim]not scored[/dim]",
             )
         log.write(f"[dim]{len(local)} local model(s); {uncatalogued_n} not yet catalogued. "
-                  f"Select a row and press \"Gate + save selected\" to catalogue one.[/dim]")
+                  f"Select a row and press \"Gate + save selected\" to catalogue one. Run "
+                  f"`cbench score --model <tag>` from a terminal to fill in the Score "
+                  f"column.[/dim]")
 
     def _gate_selected(self) -> None:
         table = self.query_one("#models-table", DataTable)

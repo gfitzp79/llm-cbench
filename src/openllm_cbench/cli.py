@@ -21,6 +21,8 @@ Usage:
     cbench search --model <model-tag>             # check it exists in Ollama's registry first
     cbench pull --model <model-tag>               # download a model into the local endpoint
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
+    cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
+    cbench catalogue                              # every local model + catalogue/score status
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -289,6 +291,123 @@ def _assess_body(args, suites, SUITE_INFO):
     return 1 if failures else 0
 
 
+def _cmd_score(argv):
+    """Runs (or reads) S1/S2/S3 trials for one model and produces a
+    cross-suite scorecard -- see scoring/scorecard.py's module docstring
+    for why that's a per-suite band-plus-confidence table, deliberately
+    NOT a single composite number.
+
+    `--depth` picks a trial count via the same `_assess_body` machinery
+    `cbench assess` itself uses (this command does not re-implement running
+    a suite N times, only what happens to the resulting CSVs afterward):
+
+        quick     1 trial   -- exploratory only, below this framework's own
+                                3-trial citability minimum. Says so in the
+                                rendered scorecard every time.
+        standard  3 trials  -- this framework's own pre-registered minimum
+                                for a rate worth citing (the same default
+                                `cbench assess` itself uses).
+        thorough  5 trials  -- matches scoring/extension_rule.py's own
+                                EXTEND target.
+
+    `--from-existing` skips running anything and scores whatever S1/S2/S3
+    CSVs already exist on disk for this model tag -- the same real CSVs
+    community-submitted results are, once placed where `--results-dir`
+    points (see community-results/README.md). This is how a scorecard ever
+    gets produced for a model too large to run on this machine: someone
+    else runs the suites on their own hardware, submits the raw CSVs, and
+    scoring them is this same command with --from-existing pointed at that
+    submission's folder -- not a second implementation of anything above."""
+    import argparse
+
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3
+    from openllm_cbench.scoring.scorecard import (
+        DEPTH_TRIALS, compute_scorecard, render_scorecard_markdown, save_scorecard,
+    )
+
+    SUITE_INFO = {
+        "s1": ("containment", "openllm_cbench.suites.containment", aggregate_s1, "s1_containment"),
+        "s2": ("channel", "openllm_cbench.suites.channel", aggregate_s2, "s2_channel"),
+        "s3": ("persistence", "openllm_cbench.suites.persistence", aggregate_s3, "s3_persistence"),
+    }
+
+    p = argparse.ArgumentParser(
+        prog="cbench score",
+        description="Run (or read existing) S1/S2/S3 trials for one model and produce a "
+                     "cross-suite scorecard -- per-suite bands and confidence, deliberately "
+                     "not a single composite number. See this command's own module docstring.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True)
+    p.add_argument("--depth", choices=sorted(DEPTH_TRIALS), default="standard",
+                    help="Trial count preset -- quick=1, standard=3 (default), thorough=5. "
+                         "Ignored with --from-existing.")
+    p.add_argument("--suites", default="s1,s2,s3",
+                    help="Comma-separated subset of s1,s2,s3 (default: all three).")
+    p.add_argument("--from-existing", action="store_true",
+                    help="Score whatever S1/S2/S3 CSVs already exist for this model tag -- "
+                         "runs nothing, makes no model call. Use --results-dir (per suite, "
+                         "via $OPENLLM_CBENCH_RESULTS_DIR) to point at a specific submission's "
+                         "CSVs rather than your own results/ directory.")
+    p.add_argument("--dry-run", action="store_true",
+                    help="Pass --dry-run through to every suite invocation and skip scoring "
+                         "entirely -- previews payloads, calls no model. Ignored with "
+                         "--from-existing, which already makes no model call.")
+    p.add_argument("--force-concurrent", action="store_true",
+                    help="Same override as `cbench assess --force-concurrent` -- see there.")
+    args = p.parse_args(argv)
+
+    suites = [s.strip() for s in args.suites.split(",") if s.strip()]
+    unknown = [s for s in suites if s not in SUITE_INFO]
+    if unknown:
+        print(f"[!] Unknown suite(s): {', '.join(unknown)} -- choose from s1,s2,s3", file=sys.stderr)
+        return 2
+    if not suites:
+        print("[!] --suites resolved to nothing to run.", file=sys.stderr)
+        return 2
+
+    if not args.from_existing:
+        trials = DEPTH_TRIALS[args.depth]
+        print(f"Scoring '{args.model}' at depth={args.depth} ({trials} trial(s) per suite, "
+              f"suites={','.join(suites)}){' (dry-run)' if args.dry_run else ''}")
+        assess_args = argparse.Namespace(model=args.model, trials=trials, dry_run=args.dry_run)
+
+        lock = None
+        if not args.dry_run:
+            try:
+                lock = RunLock(label="score %s" % args.model,
+                               force=args.force_concurrent).acquire()
+            except RunLockBusy as e:
+                print("\n[!] NOT STARTING -- %s" % e, file=sys.stderr)
+                print("\n    Same contention `cbench assess` guards against -- see its own "
+                      "--force-concurrent help.", file=sys.stderr)
+                return 2
+        try:
+            rc = _assess_body(assess_args, suites, SUITE_INFO)
+        finally:
+            if lock is not None:
+                lock.release()
+
+        if args.dry_run:
+            print("\n[dry-run] No CSVs were produced -- nothing to score.")
+            return rc
+        if rc != 0:
+            print("\n[!] At least one trial exited non-zero -- scoring anyway, but read the "
+                  "output above before trusting the result.", file=sys.stderr)
+    else:
+        print(f"Scoring '{args.model}' from existing CSVs (no suites run, no model call)")
+
+    card = compute_scorecard(args.model)
+    print("\n" + render_scorecard_markdown(card))
+    json_path, md_path = save_scorecard(card)
+    print(f"Saved: {json_path}")
+    print(f"       {md_path}")
+    print("\nThis model's catalogue entries (`cbench discover`, the TUI Models browser) will "
+          "show this scorecard's summary line from now on.")
+    return 0
+
+
 def _cmd_search(argv):
     """Checks whether a model tag exists in Ollama's registry -- a real
     live lookup, not a browsable catalogue. See
@@ -468,6 +587,67 @@ def _cmd_discover(argv):
     return 0
 
 
+def _cmd_catalogue(argv):
+    """Read-only listing of every model pulled into the local endpoint,
+    alongside catalogue and scorecard status -- the CLI equivalent of the
+    TUI's Models browser screen (tui/app.py:ModelsScreen), so this view
+    isn't TUI-only. Unlike `cbench discover`, which exists specifically to
+    find catalogue GAPS, this lists everything regardless of catalogue
+    status. Makes no model call and changes nothing -- reads the endpoint's
+    own /api/tags, the model registry, and whatever scorecards
+    `cbench score` has already saved under results/scorecards/."""
+    import argparse
+
+    from openllm_cbench.core.discover import list_local_models, format_size
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.registry import load_registry
+    from openllm_cbench.scoring.scorecard import catalogue_compact_label, catalogue_summary_line
+
+    p = argparse.ArgumentParser(
+        prog="cbench catalogue",
+        description="List every locally-pulled model with its catalogue and scorecard "
+                     "status. Read-only -- makes no model call.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--endpoint", default=None, help="Endpoint base URL to list models from.")
+    p.add_argument("--registry-file", default=None,
+                    help="Overlay file to check catalogue status against (default: "
+                         "$OPENLLM_CBENCH_MODELS_FILE or ./models.json).")
+    args = p.parse_args(argv)
+
+    base_url = resolve_base_url(args.endpoint)
+    print(f"Listing locally-pulled models from {base_url} ...\n")
+    try:
+        local = list_local_models(base_url)
+    except Exception as e:
+        print(f"[!] Could not reach {base_url}/api/tags: {e}", file=sys.stderr)
+        return 1
+
+    if not local:
+        print("No models pulled into this endpoint yet -- `cbench search`/`cbench pull` "
+              "to get one, or `ollama pull <tag>` directly.")
+        return 0
+
+    registry = load_registry(args.registry_file)
+    catalogued = set(registry.get("models", {}).keys())
+
+    for m in sorted(local, key=lambda x: x["name"]):
+        tag = m["name"]
+        cat_status = "catalogued" if tag in catalogued else "uncatalogued"
+        print(f"{tag}  ({m['architecture']}, {m['params_b']}B, {m['quant']}, "
+              f"{format_size(m['size'])}) -- {cat_status} -- score: {catalogue_compact_label(tag)}")
+        detail = catalogue_summary_line(tag)
+        if detail != "not scored yet":
+            print(f"    {detail}")
+
+    uncatalogued_n = sum(1 for m in local if m["name"] not in catalogued)
+    print(f"\n{len(local)} model(s) total, {uncatalogued_n} uncatalogued. "
+          f"`cbench discover` to catalogue the rest; `cbench score --model <tag>` to "
+          f"generate or refresh a scorecard.")
+    return 0
+
+
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
@@ -519,6 +699,8 @@ _NATIVE = {
     "search": _cmd_search,
     "pull": _cmd_pull,
     "assess": _cmd_assess,
+    "score": _cmd_score,
+    "catalogue": _cmd_catalogue,
     "tui": _cmd_tui,
 }
 

@@ -303,20 +303,28 @@ quantization your endpoint runs — the gate-checked worked examples in
 `data/models/verified.json` span roughly 8B to 21B parameters at Q4_K_M/
 Q4_0/MXFP4/F16, the range this framework's own scoring heuristics and
 task set were actually tuned and validated against. It also runs fine
-well below that: models down to ~2B have been gate-checked and put
-through a full assessment cleanly (`cbench gate --save` catches most
-scale-related surprises before you spend a real run finding them — see
-"The model catalogue" above). Below roughly 1-2B, expect the containment
-and channel suites specifically to degrade in a particular way: not by
-crashing, but by producing more `TRUNCATED` and malformed-tool-call rows
-as the model struggles with the tool-call schema or reasoning-trace
-format itself, which is a capability signal in its own right but means
-fewer of that run's rows carry real containment/channel signal — read
-the caveat counts in the report, not just the headline rate, before
-trusting a small model's numbers. At the large end, nothing here
-architecturally caps model size — the harness only ever holds a chat
-completion and a short tool-call loop in memory — but this framework has
-not been exercised against anything past the low tens of billions, so
+well below that: models under 1B (down to 0.6B, gate-checked and put
+through a full assessment at every `cbench score --depth` level, with
+real containment/channel signal, not just a degenerate clean run) work
+correctly today. `cbench gate --save` catches most scale-related
+surprises before you spend a real run finding them (see "The model
+catalogue" above) — at the smallest end, the failure mode isn't degraded
+signal, it's **no tool-calling capability at all**: a gate check against
+a 135M model in this size class failed its tool-call check outright (a
+plain HTTP 400 from the endpoint, not a framework bug), and the gate
+report says so plainly rather than letting you discover it mid-run. Above
+that floor and below the catalogue's own ~8B range, expect the
+containment and channel suites specifically to degrade in a softer way:
+more `TRUNCATED` and malformed-tool-call rows as the model struggles with
+the tool-call schema or reasoning-trace format, which is a capability
+signal in its own right but means fewer of that run's rows carry real
+containment/channel signal — a scorecard's own per-suite caveats
+(`cbench score`) surface this, but read the underlying report before
+trusting a small model's headline rate regardless. At the large end,
+nothing here architecturally caps model size — the harness only ever
+holds a chat completion and a short tool-call loop in memory — but this
+framework has not been exercised against anything past the low tens of
+billions, so
 treat a much larger model as untested territory rather than assumed-fine.
 
 ## Comparison to other tools

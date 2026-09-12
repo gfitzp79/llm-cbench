@@ -154,13 +154,15 @@ cbench tui   # requires: pip install "openllm-cbench[tui]"
 ```
 
 A thin control panel over the same CLI above -- forms for running a
-suite or a full assessment, gate-checking a model, browsing what's
-already pulled locally (with a picker to fill the model field for you),
-pulling a new model, and a browser for whatever `results/` already
-contains. It has no logic of its own: every action it takes is the
-literal `cbench <subcommand> ...` invocation shown on screen before it
-starts, launched as a real subprocess, not a second implementation of
-any suite. Nothing runs on startup without a click.
+suite, a full assessment, or a scorecard (`cbench score`, depth picker
+included), gate-checking a model, browsing what's already pulled locally
+(with a picker to fill the model field for you, and a Score column
+showing whatever scorecard already exists for each model), pulling a new
+model, and a browser for whatever `results/` already contains. It has no
+logic of its own: every action it takes is the literal `cbench
+<subcommand> ...` invocation shown on screen before it starts, launched
+as a real subprocess, not a second implementation of any suite. Nothing
+runs on startup without a click.
 
 ### Aggregation and trial-extension decisions
 

@@ -25,7 +25,7 @@ textual = pytest.importorskip("textual")
 from openllm_cbench.tui.jobs import build_args, cbench_command, RUNNABLE_SUITES  # noqa: E402
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
-    ModelsScreen, PullScreen, AssessmentScreen, AboutScreen,
+    ModelsScreen, PullScreen, AssessmentScreen, ScoreScreen, AboutScreen,
 )
 
 
@@ -344,6 +344,95 @@ def test_assessment_screen_rejects_a_non_numeric_trial_count():
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
             assert any("positive whole number" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_dashboard_navigates_to_score_screen():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            assert isinstance(app.screen, ScoreScreen)
+    asyncio.run(scenario())
+
+
+def test_score_screen_requires_a_model_before_starting():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
+            assert any("model tag is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_score_screen_requires_at_least_one_suite():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            for cb_id in ("#score-s1", "#score-s2", "#score-s3"):
+                await pilot.click(cb_id)  # uncheck all three (default is checked)
+            await pilot.click("#score-start")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
+            assert any("select at least one suite" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_score_screen_dry_run_builds_the_correct_score_command():
+    # Confirms the real `cbench score` argv is built correctly from the form
+    # fields -- suites joined, depth passed through, --dry-run only when
+    # checked (checked by default here).
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-s2")  # uncheck S2, leaving S1+S3
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert "score" in preview
+            assert "--model x:1b" in preview
+            assert "--suites s1,s3" in preview
+            assert "--depth standard" in preview
+            assert "--dry-run" in preview
+            assert "--from-existing" not in preview
+    asyncio.run(scenario())
+
+
+def test_score_screen_from_existing_ignores_depth_and_dry_run():
+    # --from-existing makes no model call and depth has no meaning for it --
+    # the built command must reflect that, not silently include both.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-from-existing")
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert "--from-existing" in preview
+            assert "--depth" not in preview
+            assert "--dry-run" not in preview
     asyncio.run(scenario())
 
 

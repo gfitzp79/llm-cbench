@@ -77,6 +77,7 @@ class DashboardScreen(Screen):
             with Horizontal(id="dashboard-buttons"):
                 yield Button("Run a suite", id="goto-run", variant="primary")
                 yield Button("Full assessment", id="goto-assess", variant="primary")
+                yield Button("Score a model", id="goto-score", variant="primary")
                 yield Button("Gate a model", id="goto-gate")
                 yield Button("Local models", id="goto-models")
             with Horizontal(id="dashboard-buttons-2"):
@@ -106,6 +107,8 @@ class DashboardScreen(Screen):
             self.app.push_screen(RunScreen())
         elif event.button.id == "goto-assess":
             self.app.push_screen(AssessmentScreen())
+        elif event.button.id == "goto-score":
+            self.app.push_screen(ScoreScreen())
         elif event.button.id == "goto-gate":
             self.app.push_screen(GateScreen())
         elif event.button.id == "goto-models":
@@ -572,6 +575,124 @@ class AssessmentScreen(Screen):
             if result.returncode == 0:
                 log.write("[dim]Go to \"Browse reports\" to read the trial-summary reports "
                           "linked above.[/dim]")
+
+
+class ScoreScreen(Screen):
+    """`cbench score` -- a real subprocess, same as every other
+    action-taking screen. All the actual depth->trials mapping, the
+    scorecard computation, and the run-lock live in cli.py's _cmd_score()
+    and scoring/scorecard.py, not here; this screen is a form and a log.
+    The resulting scorecard is what the Models browser's Score column
+    (ModelsScreen) reads afterward -- run this first, then check there or
+    in "Browse reports"."""
+
+    BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield InvariantBar()
+        with Vertical(id="score-form"):
+            yield Static(
+                "Score a model -- equivalent to running `cbench score` yourself. Runs "
+                "S1/S2/S3 at the chosen depth (or reads existing CSVs with \"From "
+                "existing\", making no model call), then saves a per-suite scorecard -- "
+                "deliberately NOT a single number, see README.md \"Scoring a model\". "
+                "The Models browser's Score column and `cbench catalogue` both read "
+                "whatever this produces."
+            )
+            yield Select([], id="score-model-select", allow_blank=True,
+                         prompt="Pick a local model (or type the tag below) — loading...")
+            yield Input(placeholder="model tag, e.g. gemma3:12b", id="score-model-input")
+            with Horizontal(id="score-suite-checks"):
+                yield Checkbox("S1 containment", id="score-s1", value=True)
+                yield Checkbox("S2 channel", id="score-s2", value=True)
+                yield Checkbox("S3 persistence", id="score-s3", value=True)
+            yield Select(
+                [("quick — 1 trial (exploratory only, below this framework's own "
+                  "3-trial citability minimum)", "quick"),
+                 ("standard — 3 trials (default; this framework's own pre-registered "
+                  "minimum for a rate worth citing)", "standard"),
+                 ("thorough — 5 trials (matches the extension-rule's own EXTEND target)",
+                  "thorough")],
+                id="score-depth-select", value="standard", allow_blank=False,
+            )
+            yield Checkbox(
+                "From existing (score whatever CSVs are already on disk for this tag -- "
+                "runs nothing, calls no model; depth above is ignored)",
+                id="score-from-existing", value=False,
+            )
+            yield Checkbox("Dry run (print payloads, call no model)", id="score-dry-run", value=True)
+            with Horizontal():
+                yield Button("Score", id="score-start", variant="primary")
+                yield Button("Back", id="score-back")
+            yield Static("", id="score-preview")
+            yield RichLog(id="score-log", wrap=True, highlight=True, markup=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._load_models()
+
+    @work(exclusive=True)
+    async def _load_models(self) -> None:
+        await _populate_model_select(self.query_one("#score-model-select", Select))
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "score-model-select" and event.value is not Select.BLANK:
+            self.query_one("#score-model-input", Input).value = str(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "score-back":
+            self.app.pop_screen()
+        elif event.button.id == "score-start":
+            self._start_score()
+
+    def _start_score(self) -> None:
+        model = self.query_one("#score-model-input", Input).value.strip()
+        log = self.query_one("#score-log", RichLog)
+        preview = self.query_one("#score-preview", Static)
+        log.clear()
+
+        if not model:
+            log.write("[bold red]A model tag is required.[/bold red]")
+            return
+
+        suites = []
+        if self.query_one("#score-s1", Checkbox).value:
+            suites.append("s1")
+        if self.query_one("#score-s2", Checkbox).value:
+            suites.append("s2")
+        if self.query_one("#score-s3", Checkbox).value:
+            suites.append("s3")
+        if not suites:
+            log.write("[bold red]Select at least one suite.[/bold red]")
+            return
+
+        from_existing = self.query_one("#score-from-existing", Checkbox).value
+        args = ["--model", model, "--suites", ",".join(suites)]
+        if from_existing:
+            args.append("--from-existing")
+        else:
+            depth = self.query_one("#score-depth-select", Select).value
+            args += ["--depth", str(depth)]
+            if self.query_one("#score-dry-run", Checkbox).value:
+                args.append("--dry-run")
+
+        argv = cbench_command("score", args)
+        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._run_worker(argv, log)
+
+    @work(exclusive=True)
+    async def _run_worker(self, argv, log: RichLog) -> None:
+        result = await run_job(argv, on_line=lambda line: log.write(line))
+        if result.error:
+            log.write(f"[bold red]{result.error}[/bold red]")
+        else:
+            style = "bold green" if result.returncode == 0 else "bold red"
+            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+            if result.returncode == 0:
+                log.write("[dim]Check \"Local models\" for the updated Score column, or "
+                          "\"Browse reports\" for the full scorecard.[/dim]")
 
 
 _ABOUT_TEXT = """\

@@ -9,12 +9,22 @@ import json
 
 import pytest
 
-from openllm_cbench.core.community import validate_submission
+from openllm_cbench.core.community import (
+    ATTESTATION_TEXT, ATTESTATION_VERSION, validate_submission,
+)
 
 
 def _write_meta(path, **overrides):
+    # A submission that satisfies the publication rule by default, so
+    # these shape tests keep testing shape. The policy guards themselves
+    # (no verdicts, accepted terms, completed gate check) have their own
+    # coverage in test_community_policy.py.
     meta = {"model": "test:1b", "contributor": "alice", "date": "2026-09-12",
-             "hardware_summary": "RTX 4080, 16GB VRAM", "endpoint": "ollama 0.5.1"}
+             "hardware_summary": "RTX 4080, 16GB VRAM", "endpoint": "ollama 0.5.1",
+             "gate_check": {"catalogued": True, "caveats": [], "unverified": [],
+                             "channel_separation": {"think_on": "clean", "think_off": "clean"}},
+             "attestation": {"accepted": True, "version": ATTESTATION_VERSION,
+                              "text": ATTESTATION_TEXT}}
     meta.update(overrides)
     (path / "submission.json").write_text(json.dumps(meta), encoding="utf-8")
     return meta

@@ -26,3 +26,10 @@ models.json
 # own liveness rules (or just `tasklist`/`ps` for the recorded owner pid)
 # before ever deleting this by hand.
 .cbench/
+
+# A submission carries raw CSVs only -- never a verdict. Belt-and-braces
+# alongside validate_submission(), so a hand-copied scorecard cannot be
+# committed into a submission folder by accident (gitignore guard).
+community-results/**/scorecards/
+community-results/**/trial_summary_*.md
+community-results/**/*scorecard*

@@ -863,6 +863,34 @@ def test_community_screen_package_requires_a_model_tag():
     asyncio.run(scenario())
 
 
+def test_community_screen_terms_checkbox_gates_accept_terms():
+    # Raw data travels, verdicts do not -- and a contributor accepts the
+    # terms deliberately or not at all. The box defaults off, and only
+    # ticking it may add --accept-terms to the real argv.
+    from textual.widgets import Checkbox
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            assert app.screen.query_one("#community-terms", Checkbox).value is False
+
+            app.screen.query_one("#community-model-input").value = "x:1b"
+            await pilot.click("#community-package")
+            await pilot.pause()
+            assert "--accept-terms" not in str(app.screen.query_one("#community-preview").content)
+            log_lines = [x.text for x in app.screen.query_one("#community-log").lines]
+            assert any("terms not accepted" in l.lower() for l in log_lines)
+
+            await pilot.click("#community-terms")
+            await pilot.click("#community-package")
+            await pilot.pause()
+            assert "--accept-terms" in str(app.screen.query_one("#community-preview").content)
+    asyncio.run(scenario())
+
+
 def test_community_screen_submit_previews_without_confirm():
     # Submitting opens a PUBLIC pull request under the user's own account.
     # The confirm checkbox defaults off, and without it --confirm must not

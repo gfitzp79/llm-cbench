@@ -29,6 +29,56 @@ from pathlib import Path
 
 REQUIRED_SUBMISSION_FIELDS = ("model", "contributor", "date", "hardware_summary", "endpoint")
 
+# THE PUBLICATION RULE THIS MODULE ENFORCES
+# =========================================
+# Raw measurements travel. Verdicts do not.
+#
+# A submission carries per-row CSVs and nothing else. It never carries a
+# scorecard, a grade, or a claimed rate -- anyone who wants a grade
+# computes it themselves from the CSVs with `cbench score --from-existing`,
+# on their own machine, under their own name.
+#
+# This is a deliberate publication policy, not a file-format preference:
+#
+#   - A grade is a CONCLUSION about a named commercial product. A CSV row
+#     is a MEASUREMENT taken on one machine. The first is an editorial
+#     claim someone can be wrong about in public; the second is a fact
+#     about what happened, qualified by the configuration recorded beside
+#     it. Only the second is safe for a stranger to hand a maintainer.
+#   - Results are hardware-dependent in ways that can invert a verdict.
+#     Found live: a 27.9B model on a 12GB card had every gate check time
+#     out, and the report read "Tool call check failed" -- which sounds
+#     like "this model cannot call tools". It could; the machine was too
+#     small. A submission built from that run would have published a
+#     false claim about a named product in good faith. See
+#     `gate_evidence()`, which is the guard that now blocks exactly that.
+#   - Grades collapse the confidence intervals, caveats and validity
+#     guards this framework works hard to produce. The nuance is the
+#     defensible part; the letter is the part that travels badly.
+#
+# The practical consequence: this repo hosts DATA, and each reader
+# computes their own verdict. It is not a leaderboard and must not become
+# one by accident -- which is what validate_submission() refusing a
+# scorecard file is actually protecting.
+
+# Filename fragments that indicate a verdict rather than a measurement.
+VERDICT_MARKERS = ("scorecard", "trial_summary")
+
+ATTESTATION_VERSION = 1
+ATTESTATION_TEXT = (
+    "I confirm that: (1) I have the right to share these files and they are "
+    "mine to submit; (2) they contain no confidential, personal or "
+    "proprietary material -- I have read the raw CSVs, not just this "
+    "summary; (3) the hardware, runtime and model tag recorded here are "
+    "accurate and describe the machine that actually produced these rows; "
+    "(4) I grant this project a perpetual, irrevocable licence to publish "
+    "and redistribute these files under the repository's own licence "
+    "(Apache-2.0); and (5) I understand this submission is raw data, that "
+    "no score or grade is being claimed on my behalf, and that it will be "
+    "published permanently in public git history where deletion does not "
+    "remove it."
+)
+
 # Shown before a submission is packaged, and again before it is sent.
 #
 # This is not boilerplate. A trial CSV contains the model's RAW OUTPUT,
@@ -108,7 +158,108 @@ def validate_submission(path):
                          "s3_persistence/ -- nothing here to score")
 
     problems += _checksum_problems(path, meta)
+    problems += _policy_problems(path, meta)
     return problems
+
+
+# --- Publication policy --------------------------------------------------
+
+
+def _verdict_files(folder):
+    """Any file in a submission that carries a conclusion rather than a
+    measurement -- a saved scorecard, an aggregated trial summary. See
+    this module's publication-rule comment for why these must not
+    travel."""
+    folder = Path(folder)
+    return sorted(
+        str(p.relative_to(folder)).replace("\\", "/")
+        for p in folder.rglob("*")
+        if p.is_file() and any(m in p.name.lower() for m in VERDICT_MARKERS)
+    )
+
+
+def _policy_problems(folder, meta):
+    problems = []
+
+    for rel in _verdict_files(folder):
+        problems.append(
+            f"'{rel}' is a verdict, not a measurement -- submissions carry raw CSVs only. "
+            f"Anyone who wants a grade runs `cbench score --from-existing` against these "
+            f"rows themselves. Delete it and re-validate."
+        )
+
+    for key in ("grade", "score", "rate", "band"):
+        if meta.get(key) not in (None, ""):
+            problems.append(
+                f"submission.json claims '{key}' -- a submission must not assert a result. "
+                f"Remove it; the CSVs are the claim."
+            )
+
+    att = meta.get("attestation") or {}
+    if not att.get("accepted"):
+        problems.append(
+            "contributor attestation not accepted -- re-run `cbench community-package` "
+            "with --accept-terms once you have read the terms and the raw CSVs."
+        )
+    elif att.get("version") != ATTESTATION_VERSION:
+        problems.append(
+            f"attestation is version {att.get('version')}, current terms are version "
+            f"{ATTESTATION_VERSION} -- re-package to accept the current terms."
+        )
+
+    gate = meta.get("gate_check") or {}
+    if not gate:
+        problems.append(
+            "no gate_check record -- run `cbench gate --model <tag> --save` and re-package. "
+            "A submission from a machine that could not complete the gate checks cannot be "
+            "distinguished from one where the model genuinely failed them."
+        )
+    elif gate.get("unverified"):
+        problems.append(
+            "gate check did not complete on this machine: "
+            + "; ".join(gate.get("unverified", []))
+            + ". This usually means the model is too large for available VRAM, NOT that it "
+              "failed -- which is exactly why the resulting rows must not be published as "
+              "though they measured the model. Re-run the gate where it can complete."
+        )
+
+    return problems
+
+
+def gate_evidence(model):
+    """What the local catalogue records about this model's gate check, in
+    the shape a submission stores it.
+
+    The `unverified` list is the load-bearing part. A gate check that
+    TIMED OUT is not a failed check -- it is an absent one, and rows
+    produced on that machine may reflect the machine rather than the
+    model. Publishing them as a measurement of the model is the specific
+    mistake this guard exists to prevent (see the publication-rule
+    comment at the top of this module for the live incident).
+
+    Slowness alone is deliberately NOT disqualifying: a model that spills
+    into system RAM still produces valid rows, it just takes longer.
+    Unverified is the problem; slow is a scheduling inconvenience."""
+    from openllm_cbench.core.registry import load_registry, lookup
+
+    entry = lookup(model, load_registry())
+    if entry is None:
+        return {}
+
+    caveats = list(entry.get("caveats") or [])
+    unverified = [c for c in caveats if "could NOT be verified" in c or "did not finish in time" in c]
+
+    separation = entry.get("channel_separation") or {}
+    for state, label in sorted(separation.items()):
+        if isinstance(label, str) and label.startswith("error:"):
+            unverified.append(f"channel separation at {state} ({label})")
+
+    return {
+        "catalogued": True,
+        "caveats": caveats,
+        "unverified": unverified,
+        "channel_separation": separation or None,
+    }
 
 
 # --- Integrity -----------------------------------------------------------
@@ -260,7 +411,8 @@ def detect_cbench_version():
         return None
 
 
-def build_submission_metadata(model, contributor=None, notes="", base_url=None):
+def build_submission_metadata(model, contributor=None, notes="", base_url=None,
+                               accept_terms=False):
     """Assembles submission.json's contents from what this machine can
     determine for itself. Every value is either discovered or left empty
     for the contributor to fill -- never invented. An empty required field
@@ -289,11 +441,21 @@ def build_submission_metadata(model, contributor=None, notes="", base_url=None):
         "quant": entry.get("quant") or "",
         "cbench_version": detect_cbench_version() or "",
         "notes": notes,
+        # Recorded, never asserted: what the gate check found on THIS
+        # machine, so a reviewer can tell "the model did that" from "this
+        # machine couldn't check". validate_submission() refuses a
+        # submission whose gate checks never completed.
+        "gate_check": gate_evidence(model),
+        "attestation": {
+            "accepted": bool(accept_terms),
+            "version": ATTESTATION_VERSION,
+            "text": ATTESTATION_TEXT,
+        },
     }
 
 
 def package_submission(model, contributor=None, notes="", out_root=None,
-                        results_root=None, base_url=None):
+                        results_root=None, base_url=None, accept_terms=False):
     """Builds a ready-to-submit folder from CSVs already on disk for
     `model`, and returns (folder_path, info).
 
@@ -312,7 +474,7 @@ def package_submission(model, contributor=None, notes="", out_root=None,
     from openllm_cbench.scoring.aggregate import find_csvs, model_tag
 
     tag = model_tag(model)
-    meta = build_submission_metadata(model, contributor, notes, base_url)
+    meta = build_submission_metadata(model, contributor, notes, base_url, accept_terms)
     handle = (meta["contributor"] or "anon").strip().replace(" ", "-").replace("/", "-")
 
     root = Path(out_root) if out_root else Path.cwd() / "community-results"
@@ -323,6 +485,14 @@ def package_submission(model, contributor=None, notes="", out_root=None,
     for suite_dir, prefix in SUITE_DIRS.items():
         src_dir = (Path(results_root) / suite_dir) if results_root else results_dir(suite_dir)
         csvs = find_csvs(src_dir, prefix, tag)
+        if not csvs:
+            continue
+        # find_csvs() already globs only this suite's own per-trial CSVs,
+        # but filter again explicitly: a trial_summary or scorecard must
+        # never be copied into a submission, and relying on a glob pattern
+        # to enforce a publication policy is how policies quietly stop
+        # being enforced.
+        csvs = [p for p in csvs if not any(m in p.name.lower() for m in VERDICT_MARKERS)]
         if not csvs:
             continue
         dest = folder / suite_dir

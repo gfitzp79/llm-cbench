@@ -323,6 +323,22 @@ the hard way, generalized here so you don't have to rediscover them.
   so a base/fork or A/B pair can be diffed *before* either one is run
   through a real suite — do this before comparing two models, not after
   a surprising result makes you go looking for why.
+- **A gate check that times out is an absent measurement, not a failed
+  one, and reporting it as "the model failed X" states a false claim
+  about the model rather than the machine.** Found live: a 27.9B dense
+  model on a 12GB card had every gate check time out, and the report
+  read `Tool call check failed` — which reads exactly like "this model
+  cannot call tools." It could; the machine was too small to serve it
+  within the check's timeout, which is a fact about the hardware, not
+  the model. Slowness alone doesn't invalidate anything — a model that
+  spills into system RAM still produces valid rows, just slower ones —
+  the failure mode is specifically a check that never finished at all.
+  `core/community.py:gate_evidence()` keeps `unverified` (timed out,
+  absent) separate from a genuine caveat for exactly this reason, and a
+  community submission is refused outright if any check is unverified.
+  The same care applies before you cite your own local gate report:
+  check whether a caveat means the model was tried and found wanting, or
+  the check simply ran out of time on your hardware.
 - **A tool schema with more than one way to reach the network creates a
   blind spot if your scoring only watches one of them.** The containment
   suite's `http_request` tool is fully intercepted and scored

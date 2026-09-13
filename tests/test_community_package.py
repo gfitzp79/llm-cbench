@@ -21,6 +21,25 @@ from openllm_cbench.core.community_submit import (
 )
 
 
+@pytest.fixture(autouse=True)
+def gate_checked_model(tmp_path, monkeypatch):
+    """'x:1b' with a completed, clean gate check on file.
+
+    package_submission() now records gate evidence and refuses a
+    submission whose checks never completed, so these packaging tests
+    need a model that passed one. The guard itself is covered in
+    test_community_policy.py."""
+    overlay = tmp_path / "models-fixture.json"
+    overlay.write_text(json.dumps({"models": {
+        "x:1b": {"architecture": "llama", "params_b": 1, "quant": "Q4_K_M",
+                 "tools": True, "thinking": True,
+                 "channel_separation": {"think_on": "clean", "think_off": "clean"},
+                 "config_overrides": {}, "caveats": []},
+    }}), encoding="utf-8")
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(overlay))
+    return overlay
+
+
 @pytest.fixture
 def results_tree(tmp_path):
     """A fake results/ tree with one real-looking CSV per suite for
@@ -37,7 +56,8 @@ def results_tree(tmp_path):
 
 def test_package_copies_every_suites_csvs(tmp_path, results_tree):
     folder, info = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     assert folder.is_dir()
     assert set(info["copied"]) == {"s1_containment", "s2_channel", "s3_persistence"}
     for suite_dir in info["copied"]:
@@ -49,14 +69,15 @@ def test_package_leaves_the_original_csvs_untouched(tmp_path, results_tree):
     original = (results_tree / "s1_containment" / "containment_x-1b_20260101_000000.csv")
     before = original.read_bytes()
     package_submission("x:1b", contributor="alice", out_root=tmp_path / "out",
-                        results_root=results_tree)
+                        results_root=results_tree, accept_terms=True)
     assert original.exists(), "packaging must copy, never move"
     assert original.read_bytes() == before
 
 
 def test_package_records_a_checksum_per_csv(tmp_path, results_tree):
     folder, info = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     checksums = info["metadata"]["checksums"]
     assert len(checksums) == 3
     assert all(len(v) == 64 for v in checksums.values()), "sha256 hex digests"
@@ -68,7 +89,8 @@ def test_package_records_a_checksum_per_csv(tmp_path, results_tree):
 
 def test_validate_catches_a_csv_edited_after_packaging(tmp_path, results_tree):
     folder, _ = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     assert validate_submission(folder) == []
 
     victim = next((folder / "s1_containment").glob("*.csv"))
@@ -80,7 +102,8 @@ def test_validate_catches_a_csv_edited_after_packaging(tmp_path, results_tree):
 
 def test_validate_catches_a_csv_added_after_packaging(tmp_path, results_tree):
     folder, _ = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     (folder / "s1_containment" / "containment_x-1b_20260102_000000.csv").write_text(
         "model,task_id,escape_attempt\nx:1b,other,False\n", encoding="utf-8")
 
@@ -92,7 +115,8 @@ def test_validate_still_accepts_a_submission_with_no_checksums(tmp_path, results
     # The submission convention predates the manifest, and a hand-assembled
     # folder is still valid -- unverifiable is a weaker claim than wrong.
     folder, _ = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     meta = json.loads((folder / "submission.json").read_text(encoding="utf-8"))
     del meta["checksums"]
     (folder / "submission.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -108,21 +132,24 @@ def test_package_never_invents_a_value_it_could_not_detect(tmp_path, results_tre
     monkeypatch.setattr(community, "detect_endpoint_runtime", lambda *a, **k: None)
 
     folder, info = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     assert info["metadata"]["endpoint"] == ""
     assert any("endpoint" in p for p in info["problems"])
 
 
 def test_package_with_no_csvs_reports_rather_than_crashing(tmp_path):
     folder, info = package_submission(
-        "nothing:1b", contributor="alice", out_root=tmp_path / "out", results_root=tmp_path)
+        "nothing:1b", contributor="alice", out_root=tmp_path / "out", results_root=tmp_path,
+        accept_terms=True)
     assert info["copied"] == {}
     assert any("nothing here to score" in p for p in info["problems"])
 
 
 def test_zip_submission_produces_an_attachable_archive(tmp_path, results_tree):
     folder, _ = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
     archive = zip_submission(folder)
     assert archive.exists() and archive.suffix == ".zip"
     assert archive.stat().st_size > 0
@@ -197,7 +224,8 @@ def test_submit_describes_the_suites_actually_in_the_folder(tmp_path, results_tr
     from openllm_cbench.core.community_submit import suites_in_folder
 
     folder, _ = package_submission(
-        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree)
+        "x:1b", contributor="alice", out_root=tmp_path / "out", results_root=results_tree,
+        accept_terms=True)
 
     found = suites_in_folder(folder)
     assert set(found) == {"s1_containment", "s2_channel", "s3_persistence"}

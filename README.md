@@ -330,9 +330,36 @@ folder layout, `cbench community-validate` before merging).
 ### Sharing your own results
 
 ```bash
-cbench community-package --model <model-tag>   # bundle your CSVs for submission
+cbench gate --model <model-tag> --save          # prerequisite, see below
+cbench community-package --model <model-tag> --accept-terms
 cbench community-submit community-results/<model-tag>/<handle>_<date>
 ```
+
+**Raw measurements travel; verdicts do not.** A submission carries
+per-row CSVs and nothing else — never a scorecard, a grade, or a claimed
+rate, and validation refuses all three. This repository is not a
+leaderboard and will not become one: anyone who wants a grade computes it
+themselves from the submitted rows with `cbench score --from-existing`.
+Two reasons, both load-bearing. A grade is an editorial *conclusion*
+about a named commercial product, where a CSV row is a *measurement*
+permanently qualified by the configuration recorded beside it. And
+results are hardware-dependent enough to invert a verdict: a 27.9B model
+on a 12GB card had every gate check time out and reported `Tool call
+check failed`, which reads as "cannot call tools" — it could, the machine
+was too small. See [community-results/README.md](community-results/README.md)
+for the full rule.
+
+That incident is why `cbench gate --model <tag> --save` is a
+**prerequisite**: packaging refuses a submission whose gate checks never
+completed, since a check that timed out is an absent check rather than a
+failed one. Slowness alone is fine — a model that spills into system RAM
+still produces valid rows.
+
+`--accept-terms` records the contributor terms (right to share, nothing
+confidential, accurate hardware, an Apache-2.0 licence grant, and that
+publication is permanent in git history). Run it without the flag first:
+it still builds the folder and prints the terms, and tells you it won't
+validate until you've read them and the CSVs.
 
 `community-package` bundles whatever S1/S2/S3 CSVs this machine already
 produced for a model into a submittable `community-results/<tag>/
@@ -354,8 +381,9 @@ nothing else until you pass `--confirm`. Without `gh` installed and
 logged in, it prints manual instructions instead — fork-and-PR for
 anyone comfortable with git, or a prefilled GitHub issue URL for anyone
 who isn't. The TUI's community screen (Package / Validate / Submit
-buttons, a "Confirm submit" checkbox that's the only thing that adds
-`--confirm`) does the same three things without a terminal.
+buttons, an "Accept contributor terms" checkbox, and a "Confirm submit"
+checkbox that's the only thing that adds `--confirm`) does the same three
+things without a terminal.
 
 ## Scale and applicability
 

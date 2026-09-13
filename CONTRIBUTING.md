@@ -166,7 +166,24 @@ submitted via PR, validated with `cbench community-validate` and then
 scored the normal way (`cbench score --from-existing`) before anyone
 trusts the number. Not a place for a bare score with no data behind it.
 
-`cbench community-package --model <tag>` builds the folder for you from
+**The publication rule, which is not negotiable either:** raw
+measurements travel, verdicts do not. A submission carries per-row CSVs
+and nothing else — never a scorecard, a grade, or a claimed rate, and
+`validate_submission()` refuses all of them. This repository is not a
+leaderboard and must not become one by accident. A grade is an editorial
+conclusion about a named commercial product; a CSV row is a measurement
+qualified by the configuration recorded beside it, and only the second is
+something a maintainer can stand behind on a stranger's behalf. Two
+further guards exist for the same reason: a submission must record a
+**completed** gate check (a check that timed out is an absent check, not
+a failed one — rows from that machine may describe the machine rather
+than the model), and a contributor must explicitly accept terms covering
+right-to-share, confidentiality, accurate hardware, an Apache-2.0 licence
+grant, and the permanence of git history. If you are adding anything to
+this area, read `core/community.py`'s publication-rule comment first —
+it records the live incident that motivated each guard.
+
+`cbench community-package --model <tag> --accept-terms` builds the folder for you from
 CSVs already on disk (copies, never rewrites, and records a checksum per
 file), and `cbench community-submit <folder>` opens it as a pull request
 through your own authenticated `gh` — previews by default, sends nothing

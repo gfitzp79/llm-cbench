@@ -941,7 +941,10 @@ class CommunityScreen(Screen):
                 "correctly. Read-only.\n"
                 "[bold]Submit[/bold] (`cbench community-submit`) opens it as a pull request via "
                 "your own authenticated `gh` -- previews only, until \"confirm\" below is "
-                "checked. See community-results/README.md."
+                "checked.\n"
+                "[bold]Raw data only:[/bold] a submission carries CSVs, never a grade. Anyone who "
+                "wants a score runs `cbench score --from-existing` against the rows themselves. "
+                "See community-results/README.md."
             )
             root = Path.cwd() / "community-results"
             with Horizontal(id="community-body"):
@@ -961,6 +964,12 @@ class CommunityScreen(Screen):
                         placeholder="submission folder path, e.g. "
                                      "community-results/gemma3-12b/alice_20260912",
                         id="community-path-input",
+                    )
+                    yield Checkbox(
+                        "Accept contributor terms (right to share, no confidential data, "
+                        "accurate hardware, Apache-2.0 licence grant, published permanently) "
+                        "-- required before a package can be submitted",
+                        id="community-terms", value=False,
                     )
                     yield Checkbox(
                         "Confirm submit -- actually fork, push and open a PUBLIC pull "
@@ -1020,7 +1029,14 @@ class CommunityScreen(Screen):
                        "results you want to bundle.[/bold red]")
             return
 
-        self._launch("community-package", ["--model", model, "--zip"], log, preview)
+        args = ["--model", model, "--zip"]
+        if self.query_one("#community-terms", Checkbox).value:
+            args.append("--accept-terms")
+        else:
+            log.write("[dim]Contributor terms not accepted -- the folder will be built so you "
+                       "can read it, but it won't validate until you tick the terms box and "
+                       "package again.[/dim]")
+        self._launch("community-package", args, log, preview)
 
     def _start_submit(self) -> None:
         path = self.query_one("#community-path-input", Input).value.strip()

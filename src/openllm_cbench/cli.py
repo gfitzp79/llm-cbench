@@ -23,7 +23,7 @@ Usage:
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
     cbench catalogue                              # every local model + catalogue/score status
-    cbench community-package --model <model-tag>   # bundle your CSVs for submission
+    cbench community-package --model <model-tag> --accept-terms   # bundle your CSVs
     cbench community-submit <folder>              # open it as a PR (needs `gh`; --confirm to send)
     cbench community-validate community-results/<model-tag>/<contributor>_<date>
     cbench containment --model <model-tag> --boundary both
@@ -750,7 +750,9 @@ def _cmd_community_package(argv):
     comments for why those two are deliberately not one step."""
     import argparse
 
-    from openllm_cbench.core.community import PRIVACY_NOTICE, package_submission, zip_submission
+    from openllm_cbench.core.community import (
+        ATTESTATION_TEXT, PRIVACY_NOTICE, package_submission, zip_submission,
+    )
     from openllm_cbench.core.invariant import epilog as safety_epilog
 
     p = argparse.ArgumentParser(
@@ -770,9 +772,14 @@ def _cmd_community_package(argv):
     p.add_argument("--zip", action="store_true",
                     help="Also produce a .zip of the folder, for attaching to a GitHub "
                          "issue without needing git at all.")
+    p.add_argument("--accept-terms", action="store_true",
+                    help="Record acceptance of the contributor terms this command prints. "
+                         "Without it the folder is still built so you can inspect it, but it "
+                         "will not validate and cannot be submitted.")
     args = p.parse_args(argv)
 
-    folder, info = package_submission(args.model, args.contributor, args.notes, args.out)
+    folder, info = package_submission(args.model, args.contributor, args.notes,
+                                       args.out, accept_terms=args.accept_terms)
     copied = info["copied"]
     total = sum(len(v) for v in copied.values())
     print(f"Packaged {total} CSV(s) for '{args.model}' into {folder}")
@@ -786,6 +793,33 @@ def _cmd_community_package(argv):
         print(f"Archive: {zip_submission(folder)}")
 
     print(f"\n{PRIVACY_NOTICE}\n")
+
+    gate = info["metadata"].get("gate_check") or {}
+    if gate.get("unverified"):
+        print()
+        print("[!] The gate check did not complete on this machine:")
+        for u in gate["unverified"]:
+            print(f"      - {u}")
+        print("    That usually means the model is too large for the available VRAM -- NOT")
+        print("    that it failed the check. Rows produced that way can measure the machine")
+        print("    rather than the model, so they cannot be submitted. Re-run")
+        print(f"    `cbench gate --model {args.model} --save` somewhere it completes.")
+    elif not gate:
+        print()
+        print(f"[!] '{args.model}' has no gate check on file. Run")
+        print(f"    `cbench gate --model {args.model} --save` first -- without one there is no")
+        print("    way to tell a model that failed a check from a machine that could not run one.")
+
+    print()
+    print("Contributor terms:")
+    print(f"  {ATTESTATION_TEXT}")
+    print("  ACCEPTED, recorded in submission.json (--accept-terms)." if args.accept_terms
+          else "  NOT accepted -- read the CSVs, then re-run with --accept-terms.")
+    print()
+    print("This submission carries raw CSVs only. No grade or score travels with it:")
+    print("anyone who wants one runs `cbench score --from-existing` against these rows")
+    print("themselves, on their own machine. See community-results/README.md.")
+    print()
 
     problems = info["problems"]
     if problems:
@@ -844,11 +878,21 @@ def _cmd_community_submit(argv):
         return 1
 
     meta = load_submission_metadata(args.path)
+    # Read from the folder, not from a caller: this command is handed a
+    # path, and describing a 39-CSV submission as "(none)" in the PR body
+    # is the wrong-but-plausible metadata a reviewer would have to catch
+    # by hand.
+    copied = suites_in_folder(args.path)
+
+    print("This submits raw CSVs only -- no grade or score travels with them. Whoever")
+    print("reads them computes their own verdict with `cbench score --from-existing`.")
+    print("See community-results/README.md.")
+    print()
     available, detail = detect_gh()
 
     if not available:
         print(f"Can't submit automatically: {detail}.\n")
-        print(manual_instructions(args.path, meta, args.repo))
+        print(manual_instructions(args.path, meta, args.repo, copied=copied))
         return 1
 
     print(f"{detail}.\n")

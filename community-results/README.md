@@ -53,6 +53,14 @@ community-results/
         persistence_<tag>_<timestamp>.csv
 ```
 
+`submission.json` may also carry a `checksums` key — `{relative CSV path:
+sha256}` for every CSV in the submission. `cbench community-package`
+fills this in for you; a hand-assembled submission can leave it out
+entirely (that's not an error, just unverifiable) but must not include a
+partial or stale one — `cbench community-validate` treats a checksum that
+doesn't match the file on disk, or a listed file that isn't there, as a
+real problem, same as any other shape mismatch.
+
 `<model-tag, sanitized>` is the model tag with `:` and `/` replaced by
 `-` (the same transform `scoring/aggregate.py:model_tag()` already
 applies to every filename this framework writes) — e.g. `gemma3:12b`
@@ -75,17 +83,48 @@ is still useful — the scorecard will show the suites you didn't run as
    citing — fewer trials than that is still acceptable to submit, but say
    so plainly, the same way this framework's own aggregate reports flag a
    sub-3-trial result as "wider-uncertainty ... not a settled rate."
-2. Copy `SUBMISSION_TEMPLATE.json` to
-   `community-results/<model-tag>/<your-handle>_<date>/submission.json`
-   and fill it in.
-3. Copy the real CSVs `results/s1_containment/` (etc) produced for that
-   model into the matching subfolder next to it — don't hand-edit them.
-4. `cbench community-validate community-results/<model-tag>/<your-handle>_<date>`
-   locally before opening the PR — fix anything it flags first.
-5. Open a pull request. Say in the PR description what model, what
-   endpoint/runtime, and roughly what you saw (a maintainer will run
-   `cbench score --from-existing` on it regardless, but a heads-up on
-   what to expect speeds up review).
+2. ```bash
+   cbench community-package --model <tag>
+   ```
+   builds `community-results/<model-tag>/<your-handle>_<date>/` from the
+   CSVs step 1 just produced: it copies them (never rewrites or moves
+   them), fills in `submission.json` with whatever it can detect on its
+   own (hardware, the local endpoint's runtime version, quant, this
+   harness's own version — `--contributor`/`--notes` for the rest), and
+   records a SHA-256 per CSV. It prints exactly what, if anything, still
+   needs a hand-edit before the result is valid, and runs
+   `cbench community-validate` on the result for you. It uploads nothing.
+3. ```bash
+   cbench community-submit community-results/<model-tag>/<your-handle>_<date>
+   ```
+   opens that folder as a pull request through your own authenticated
+   `gh` (the GitHub CLI) — this framework never sees, stores, or
+   transmits a credential of yours. It previews the exact command
+   sequence and the reminder that these CSVs contain the model's raw
+   output, and sends nothing until you re-run it with `--confirm`.
+   Without `gh` installed and logged in, it prints the fallback by hand
+   instead:
+   - **fork-and-PR**, for anyone with git: clone your fork, copy the
+     packaged folder in at the path shown, `git add community-results &&
+     git commit && git push`, open the PR yourself.
+   - **attach-to-an-issue**, for anyone without git: re-run
+     `cbench community-package --model <tag> --zip` for an archive, then
+     open the prefilled issue URL it gives you and drag the zip on —
+     needs nothing but a GitHub account and a browser.
+
+   The TUI's community screen (Package / Validate / Submit buttons, a
+   "Confirm submit" checkbox that's the only thing that adds `--confirm`)
+   does the same three steps without a terminal.
+4. Whichever route you used, say in the PR (or issue) description what
+   model, what endpoint/runtime, and roughly what you saw — a maintainer
+   will run `cbench score --from-existing` on it regardless, but a
+   heads-up on what to expect speeds up review.
+
+If you'd rather not use either command, the folder layout above is exactly
+what they produce — you can still copy `SUBMISSION_TEMPLATE.json` and the
+CSVs from `results/s1_containment/` (etc) into place by hand and validate
+with `cbench community-validate` before opening the PR yourself. That's
+just the harder way to reach the same folder now.
 
 ## How a maintainer reviews one
 
@@ -94,9 +133,12 @@ cbench community-validate community-results/<model-tag>/<handle>_<date>
 ```
 
 checks the submission is shaped correctly (required `submission.json`
-fields present, CSVs present and tagged for the claimed model) — see
-`core/community.py`. It does **not** run any suite or judge whether the
-numbers are believable; that's the next step:
+fields present, CSVs present and tagged for the claimed model, and — when
+a `checksums` manifest is present — that every listed CSV is still
+byte-identical to what was packaged) — see `core/community.py`. A missing
+manifest is not itself a problem; a mismatched or incomplete one is. This
+command does **not** run any suite or judge whether the numbers are
+believable; that's the next step:
 
 ```
 # bash/zsh

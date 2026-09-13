@@ -65,3 +65,43 @@ def test_banner_for_listed_model_with_caveats():
     text = banner("caveat-model:1b", reg)
     assert "watch out for X" in text
     assert "num_predict" in text
+
+
+def test_registry_heals_a_params_b_saved_in_millions(tmp_path, monkeypatch):
+    # `cbench gate --save` used to store Ollama's "751.63M" verbatim, so
+    # every small model catalogued before that fix has a non-numeric
+    # params_b on disk. Anything doing arithmetic on it (the Score
+    # screen's VRAM fit warning) silently got nothing -- for exactly the
+    # models most likely to be run on a small machine. Normalising on
+    # read heals every existing entry without rewriting anyone's file.
+    import json
+
+    from openllm_cbench.core.registry import load_registry, lookup
+
+    overlay = tmp_path / "models.json"
+    overlay.write_text(json.dumps({"models": {
+        "tiny:1b": {"architecture": "x", "params_b": "751.63M", "quant": "Q4_K_M",
+                    "tools": True, "thinking": False, "channel_separation": None,
+                    "config_overrides": {}, "caveats": []},
+    }}), encoding="utf-8")
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(overlay))
+
+    entry = lookup("tiny:1b", load_registry())
+    assert entry["params_b"] == 0.75163
+    assert isinstance(entry["params_b"], float)
+
+
+def test_registry_leaves_an_unmeasurable_params_b_alone(tmp_path, monkeypatch):
+    # "unknown" is the documented sentinel for a genuinely unmeasured
+    # entry -- healing must not invent a number for it.
+    import json
+
+    from openllm_cbench.core.registry import load_registry, lookup
+
+    overlay = tmp_path / "models.json"
+    overlay.write_text(json.dumps({"models": {
+        "mystery:1b": {"params_b": "unknown", "quant": "unknown"},
+    }}), encoding="utf-8")
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(overlay))
+
+    assert lookup("mystery:1b", load_registry())["params_b"] == "unknown"

@@ -86,6 +86,28 @@ def detect_system_ram_mb():
                         kb = int(line.split()[1])
                         return kb // 1024
         elif system == "Windows":
+            # ctypes first, not wmic: Windows 11 ships without wmic (it was
+            # deprecated and then removed), so the subprocess route silently
+            # returned nothing on exactly the machines most likely to be
+            # running a local model. GlobalMemoryStatusEx is in kernel32 on
+            # every supported Windows and needs no external binary at all.
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong),
+                            ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong),
+                            ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong),
+                            ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong),
+                            ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            stat = _MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullTotalPhys) // (1024 * 1024)
             out = _run(["wmic", "computersystem", "get", "TotalPhysicalMemory"])
             if out:
                 for line in out.splitlines():

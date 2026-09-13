@@ -28,7 +28,7 @@ from openllm_cbench.tui.jobs import (  # noqa: E402
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
     ModelsScreen, PullScreen, ScoreScreen,
-    CommunityValidateScreen, AboutScreen,
+    CommunityScreen, AboutScreen,
 )
 
 
@@ -46,8 +46,16 @@ def isolated_results_dir(tmp_path, monkeypatch):
     found, live, landing real files in this project's own results/
     directory from a pytest run. Point every subprocess spawned by this
     file's tests at an isolated tmp directory instead, autouse so no
-    individual test has to remember to opt in."""
+    individual test has to remember to opt in.
+
+    The chdir matters as much as the env var: `cbench community-package`
+    writes to ./community-results/ relative to the CWD it inherits, which
+    $OPENLLM_CBENCH_RESULTS_DIR does not cover -- so a TUI test pressing
+    "Package" landed a real submission folder in this repo. Spawned
+    subprocesses inherit the CWD, so moving it moves everything
+    cwd-relative with it."""
     monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
@@ -97,6 +105,20 @@ def test_condensed_line_filter_shows_everything_after_assessment_complete():
     assert should_show("| suite | status | band | rate | confidence | trials |")
     assert should_show("| S1 containment | ok | contained | 0% (0/20) | high | 3 |")
     assert should_show("")  # even a blank line, once past the pivot
+
+
+def test_condensed_line_filter_shows_the_grade_card_with_no_trials_run():
+    # Found live: `cbench score --from-existing` runs no trials, so
+    # "Assessment complete" never prints -- and pivoting on that line
+    # alone filtered out the grade card itself, on the one path whose
+    # entire output IS the grade card. The screen showed "Scoring ..."
+    # then "Saved: ..." with nothing in between.
+    should_show = condensed_line_filter()
+    assert should_show("Scoring 'x:1b' from existing CSVs (no suites run, no model call)")
+    assert should_show("# Grade: C (67/100)")
+    # Everything after the grade heading is the card itself -- must render.
+    assert should_show("`x:1b`  ·  confidence: **high**  ·  3/3 suite(s) scored")
+    assert should_show("| S1 containment | ok | frequent escape attempts | 33% | high | 13 |")
 
 
 def test_parse_trial_header_matches_the_real_assess_body_format():
@@ -635,6 +657,37 @@ def test_score_screen_from_existing_warns_about_only_the_missing_suites(isolated
     asyncio.run(scenario())
 
 
+def test_score_screen_survives_being_left_while_the_hardware_probe_runs(monkeypatch):
+    # Regression: _probe_hardware awaits a real subprocess in a thread,
+    # then touches the DOM. Leave the screen before it returns and
+    # query_one raises NoMatches *inside a worker*, which Textual
+    # escalates to WorkerFailed and takes the whole app down. This
+    # presented as an intermittent, unrelated-looking test failure twice
+    # before it was reproduced deliberately here.
+    import time
+
+    import openllm_cbench.core.hardware as hardware
+
+    def slow_probe():
+        time.sleep(0.4)
+        return {"gpu_vendor": "nvidia", "gpu_vram_mb": 2048,
+                "system_ram_mb": 16384, "advisory_max_params_b_q4": 1.0}
+
+    monkeypatch.setattr(hardware, "probe", slow_probe)
+
+    async def scenario():
+        app = CBenchTUI()
+        # Teardown, not screen-pop, is the trigger: the app goes away
+        # underneath the in-flight worker, and the resulting NoMatches
+        # surfaces out of run_test()'s own __aexit__.
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+        await asyncio.sleep(0.6)   # outlive the probe, after teardown
+    asyncio.run(scenario())
+
+
 def test_score_screen_shows_hardware_fit_warning_when_model_wont_fit(monkeypatch):
     import openllm_cbench.core.hardware as hardware
     monkeypatch.setattr(hardware, "probe", lambda: {
@@ -687,7 +740,7 @@ def test_dashboard_navigates_to_community_validate_screen():
             await pilot.pause()
             await pilot.click("#goto-community")
             await pilot.pause()
-            assert isinstance(app.screen, CommunityValidateScreen)
+            assert isinstance(app.screen, CommunityScreen)
     asyncio.run(scenario())
 
 
@@ -719,6 +772,97 @@ def test_community_validate_screen_builds_the_correct_command():
             preview = str(app.screen.query_one("#community-preview").content)
             assert "community-validate" in preview
             assert "community-results/gemma3-12b/alice_20260912" in preview
+    asyncio.run(scenario())
+
+
+def test_community_screen_buttons_are_clickable_with_no_community_results_dir():
+    # Found live: with no community-results/ directory (a fresh install --
+    # the common case) the empty-state placeholder replaces the
+    # DirectoryTree, expands to fill the row, and pushes the action
+    # buttons past the right edge of the terminal, where pilot.click()
+    # misses them and so does a real mouse. The isolated_results_dir
+    # fixture chdirs to an empty tmp dir, so this is that exact state.
+    from textual.widgets import Button
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            assert app.screen.query_one("#community-tree-empty") is not None
+            for btn_id in ("#community-package", "#community-start", "#community-submit"):
+                btn = app.screen.query_one(btn_id, Button)
+                assert btn.region.right <= 140, f"{btn_id} is off-screen at {btn.region}"
+    asyncio.run(scenario())
+
+
+def test_community_screen_packages_by_model_tag():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            app.screen.query_one("#community-model-input").value = "x:1b"
+            await pilot.click("#community-package")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "community-package" in preview
+            assert "--model x:1b" in preview
+    asyncio.run(scenario())
+
+
+def test_community_screen_package_requires_a_model_tag():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            await pilot.click("#community-package")
+            await pilot.pause()
+            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
+            assert any("model tag is required" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_community_screen_submit_previews_without_confirm():
+    # Submitting opens a PUBLIC pull request under the user's own account.
+    # The confirm checkbox defaults off, and without it --confirm must not
+    # appear in the argv -- a single misplaced click cannot publish.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            from textual.widgets import Checkbox
+            assert app.screen.query_one("#community-confirm", Checkbox).value is False
+            app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
+            await pilot.click("#community-submit")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "community-submit" in preview
+            assert "--confirm" not in preview
+    asyncio.run(scenario())
+
+
+def test_community_screen_submit_passes_confirm_only_when_checked():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
+            await pilot.click("#community-confirm")
+            await pilot.click("#community-submit")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "--confirm" in preview
+            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
+            assert any("public" in line.lower() for line in log_lines)
     asyncio.run(scenario())
 
 

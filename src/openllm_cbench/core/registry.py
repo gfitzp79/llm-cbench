@@ -76,7 +76,37 @@ def load_registry(overlay_path=None):
     runnable."""
     models = dict(_load_seed())
     models.update(_load_overlay(default_overlay_path(overlay_path)))
-    return {"models": models}
+    return {"models": {tag: _normalize_entry(e) for tag, e in models.items()}}
+
+
+def _normalize_entry(entry):
+    """Heals a catalogue entry read from disk into the schema's own
+    types, without rewriting the file.
+
+    Exists for `params_b`, which the schema documents as a number of
+    billions. Ollama reports sub-billion models in millions ("751.63M"),
+    and `cbench gate --save` used to store that string verbatim -- so
+    every small model catalogued before that was fixed still has a
+    non-numeric params_b on disk. Anything doing arithmetic on it (the
+    Score screen's VRAM fit warning) silently got nothing, for exactly
+    the models most likely to be run on a small machine. Normalising on
+    read fixes every existing entry at once, where a migration would fix
+    only the people who ran it.
+
+    Returns the entry unchanged if there's nothing to heal, so this stays
+    cheap on the common path."""
+    if not isinstance(entry, dict):
+        return entry
+    raw = entry.get("params_b")
+    if not isinstance(raw, str):
+        return entry
+    from openllm_cbench.core.gate import _numeric_params_b
+    healed = _numeric_params_b(raw)
+    if healed == raw:
+        return entry
+    entry = dict(entry)
+    entry["params_b"] = healed
+    return entry
 
 
 def lookup(model, registry=None):

@@ -134,9 +134,18 @@ def condensed_line_filter():
     the play-by-play); it was never the right thing to force someone to
     watch scroll past live. What actually renders on screen instead:
     suite/trial headers, aggregation/report/save pointers, warnings --
-    and once the run reaches "Assessment complete", every remaining line
+    and once the run reaches the end of the work, every remaining line
     verbatim, because nothing comes after that but the final grade card
-    itself, which is the entire point of watching."""
+    itself, which is the entire point of watching.
+
+    TWO pivot lines, not one. "Assessment complete" marks the end of a
+    run that actually ran trials -- but `cbench score --from-existing`
+    runs no trials at all, so that line never appears, and pivoting on it
+    alone meant the grade card was filtered out entirely on exactly the
+    path whose only output IS the grade card. Found live: a --from-existing
+    run showed "Scoring ..." and "Saved: ..." and nothing in between.
+    "# Grade:" is render_scorecard_markdown()'s own first line, so it
+    catches that path regardless of how the run got there."""
     seen_complete = False
 
     def should_show(line):
@@ -144,7 +153,7 @@ def condensed_line_filter():
         if seen_complete:
             return True
         stripped = line.strip()
-        if stripped.startswith("Assessment complete"):
+        if stripped.startswith("Assessment complete") or stripped.startswith("# Grade:"):
             seen_complete = True
             return True
         if not stripped:

@@ -158,8 +158,9 @@ single suite or a scorecard (`cbench score`, depth picker included),
 gate-checking a model, browsing what's already pulled locally (with a
 picker to fill the model field for you, a Score column showing whatever
 scorecard already exists for each model, and a batch "gate + save all
-uncatalogued" action), pulling a new model, validating a community
-submission, and a browser for whatever `results/` already contains.
+uncatalogued" action), pulling a new model, packaging/validating/
+submitting a community submission (see "Sharing your own results"
+below), and a browser for whatever `results/` already contains.
 
 There is deliberately no "full assessment" screen: `cbench score` runs
 the identical trials and aggregation `cbench assess` does and produces a
@@ -325,6 +326,36 @@ scorecard at all: someone else runs it on theirs and shares the raw
 CSVs — see [`community-results/README.md`](community-results/README.md)
 for the submission convention (why raw CSVs and not a submitted score,
 folder layout, `cbench community-validate` before merging).
+
+### Sharing your own results
+
+```bash
+cbench community-package --model <model-tag>   # bundle your CSVs for submission
+cbench community-submit community-results/<model-tag>/<handle>_<date>
+```
+
+`community-package` bundles whatever S1/S2/S3 CSVs this machine already
+produced for a model into a submittable `community-results/<tag>/
+<handle>_<date>/` folder: it copies the CSVs (never rewrites or moves
+them), fills in `submission.json` from what it can detect on its own
+(hardware, the local endpoint's runtime version, quant, this harness's
+own version), records a SHA-256 per CSV so later corruption or tampering
+is detectable, and validates the result. It uploads nothing. `--zip` also
+produces an archive for anyone who wants to attach it to a GitHub issue
+instead of using git.
+
+`community-submit` opens a packaged folder as a pull request through the
+contributor's own authenticated `gh` (the GitHub CLI) — this framework
+never sees, stores, or transmits a credential. It previews the exact
+command sequence and a reminder that the CSVs contain the model's raw
+output (see `PRIVACY_NOTICE` in
+[`core/community.py`](src/openllm_cbench/core/community.py)) and does
+nothing else until you pass `--confirm`. Without `gh` installed and
+logged in, it prints manual instructions instead — fork-and-PR for
+anyone comfortable with git, or a prefilled GitHub issue URL for anyone
+who isn't. The TUI's community screen (Package / Validate / Submit
+buttons, a "Confirm submit" checkbox that's the only thing that adds
+`--confirm`) does the same three things without a terminal.
 
 ## Scale and applicability
 

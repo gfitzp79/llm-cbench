@@ -34,7 +34,8 @@ src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
                        (doctor, gate, discover, search, pull, assess,
-                       score, catalogue, community-validate, tui)
+                       score, catalogue, community-validate,
+                       community-package, community-submit, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
     sandbox.py           in-memory fabricated sandbox contents
@@ -66,6 +67,17 @@ src/openllm_cbench/
     console.py             UTF-8 stdio setup, applied once at entry
     community.py           shape-checks a community-results/ submission
                          folder before it's scored or merged
+                         (`validate_submission()`, including per-CSV
+                         checksum verification), and builds one from a
+                         model's existing local CSVs
+                         (`package_submission()`) -- `PRIVACY_NOTICE` here
+                         is shown at both packaging and submit time
+    community_submit.py    opens a packaged submission as a pull request
+                         via the contributor's own authenticated `gh` --
+                         see this module's own docstring for why `gh`
+                         over a token or a hosted endpoint of our own;
+                         prints manual fork-and-PR / prefilled-issue
+                         instructions when `gh` is absent or logged out
     invariant.py          the one safety-invariant string, shared by
                          every --help epilog and `cbench doctor`
   suites/
@@ -153,6 +165,15 @@ full submission convention — raw trial CSVs plus a `submission.json`,
 submitted via PR, validated with `cbench community-validate` and then
 scored the normal way (`cbench score --from-existing`) before anyone
 trusts the number. Not a place for a bare score with no data behind it.
+
+`cbench community-package --model <tag>` builds the folder for you from
+CSVs already on disk (copies, never rewrites, and records a checksum per
+file), and `cbench community-submit <folder>` opens it as a pull request
+through your own authenticated `gh` — previews by default, sends nothing
+without `--confirm`. Hand-assembling the folder per the layout below is
+still how it works underneath, and is the documented fallback for anyone
+without `gh` (or without git at all, via `--zip` and a GitHub issue), but
+it isn't the expected path anymore.
 
 ## Conventions worth keeping
 

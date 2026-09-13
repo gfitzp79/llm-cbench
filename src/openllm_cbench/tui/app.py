@@ -106,7 +106,7 @@ class DashboardScreen(Screen):
                 yield Button("Local models", id="goto-models")
             with Horizontal(id="dashboard-buttons-2"):
                 yield Button("Browse reports", id="goto-reports")
-                yield Button("Validate a community submission", id="goto-community")
+                yield Button("Share / validate results", id="goto-community")
                 yield Button("Check environment", id="run-doctor")
                 yield Button("About / extend this", id="goto-about")
             yield Static(
@@ -139,7 +139,7 @@ class DashboardScreen(Screen):
         elif event.button.id == "goto-reports":
             self.app.push_screen(ReportsScreen())
         elif event.button.id == "goto-community":
-            self.app.push_screen(CommunityValidateScreen())
+            self.app.push_screen(CommunityScreen())
         elif event.button.id == "run-doctor":
             self.run_doctor()
         elif event.button.id == "goto-about":
@@ -589,7 +589,24 @@ class ScoreScreen(Screen):
 
         from openllm_cbench.core.hardware import probe
         self._hw_info = await _asyncio.to_thread(probe)
-        model = self.query_one("#score-model-input", Input).value.strip()
+        # The screen can be gone by the time the probe returns -- a user
+        # who opens Score and presses Escape immediately beats an
+        # nvidia-smi call comfortably, and app teardown does too.
+        # Touching the DOM after that raises NoMatches inside a worker,
+        # which Textual escalates into WorkerFailed and takes the whole
+        # app down with it. Found exactly that way: an intermittent test
+        # failure that looked like a Windows teardown flake for two runs
+        # before it reproduced deliberately.
+        #
+        # Catching NoMatches rather than checking is_mounted first: during
+        # teardown the screen still reports itself mounted while its
+        # children are already gone, so the flag says yes and the query
+        # still raises. The exception is the only honest signal.
+        from textual.css.query import NoMatches
+        try:
+            model = self.query_one("#score-model-input", Input).value.strip()
+        except NoMatches:
+            return
         if model:
             self._refresh_catalogue_status(model)
 
@@ -802,8 +819,15 @@ class ScoreScreen(Screen):
             # for this tag if it got far enough to -- re-read it so the
             # hardware fit line reflects real params_b/quant instead of
             # staying blank for the rest of this run.
+            # Same teardown hazard as _probe_hardware, and the window is
+            # much wider here: a gate check is a live endpoint call.
+            from textual.css.query import NoMatches
             fresh_entry = lookup(model, load_registry())
-            self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(fresh_entry))
+            try:
+                self.query_one("#score-hardware-status", Static).update(
+                    self._hardware_fit_line(fresh_entry))
+            except NoMatches:
+                return
             log.write("")
 
         should_show = condensed_line_filter()
@@ -826,13 +850,19 @@ class ScoreScreen(Screen):
                             "\"Browse reports\" for the full scorecard.")
 
 
-class CommunityValidateScreen(Screen):
-    """`cbench community-validate` -- a real subprocess, same as every
-    other action-taking screen. The actual shape-check lives in
-    core/community.py:validate_submission(); this screen is a folder
-    picker, a form, and a log, nothing more. See
-    community-results/README.md for the submission convention this
-    checks a folder against."""
+class CommunityScreen(Screen):
+    """The three community-submission actions -- package, validate,
+    submit -- each a real `cbench community-*` subprocess, same as every
+    other action-taking screen. All the actual logic (what a submission
+    is shaped like, what gets checksummed, how a PR is opened) lives in
+    core/community.py and core/community_submit.py; this screen is a
+    folder picker, a form, and a log.
+
+    Submit deliberately mirrors the CLI's own two-step: pressing it
+    previews the exact command sequence and sends nothing, and only the
+    explicit "confirm" checkbox adds --confirm. This is the one action in
+    the app that creates public content under the user's own name, so a
+    single misplaced click must not be able to do it."""
 
     BINDINGS = [("escape", "app.pop_screen", "Back")]
 
@@ -841,13 +871,15 @@ class CommunityValidateScreen(Screen):
         yield InvariantBar()
         with Vertical(id="community-form"):
             yield Static(
-                "Validate a community-results/ submission folder -- equivalent to running "
-                "`cbench community-validate <path>` yourself. Checks the folder is shaped "
-                "correctly (submission.json present with its required fields, CSVs present "
-                "and tagged for the claimed model) before you spend time scoring or merging "
-                "it. Read-only: makes no model or network call, and doesn't itself score "
-                "anything -- see community-results/README.md for the next step after this "
-                "passes."
+                "Share results for a model, or check someone else's submission.\n"
+                "[bold]Package[/bold] (`cbench community-package`) bundles the CSVs already "
+                "on disk for a model tag into a submittable folder, fills in submission.json, "
+                "and records a SHA-256 per file. Uploads nothing.\n"
+                "[bold]Validate[/bold] (`cbench community-validate`) checks a folder is shaped "
+                "correctly. Read-only.\n"
+                "[bold]Submit[/bold] (`cbench community-submit`) opens it as a pull request via "
+                "your own authenticated `gh` -- previews only, until \"confirm\" below is "
+                "checked. See community-results/README.md."
             )
             root = Path.cwd() / "community-results"
             with Horizontal(id="community-body"):
@@ -860,12 +892,23 @@ class CommunityValidateScreen(Screen):
                     )
                 with Vertical(id="community-form-inner"):
                     yield Input(
+                        placeholder="model tag to package, e.g. gemma3:12b",
+                        id="community-model-input",
+                    )
+                    yield Input(
                         placeholder="submission folder path, e.g. "
                                      "community-results/gemma3-12b/alice_20260912",
                         id="community-path-input",
                     )
+                    yield Checkbox(
+                        "Confirm submit -- actually fork, push and open a PUBLIC pull "
+                        "request as you (unchecked = preview the commands only)",
+                        id="community-confirm", value=False,
+                    )
                     with Horizontal():
+                        yield Button("Package", id="community-package", variant="primary")
                         yield Button("Validate", id="community-start", variant="primary")
+                        yield Button("Submit", id="community-submit")
                         yield Button("Back", id="community-back")
                     yield Static("", id="community-preview")
                     yield RichLog(id="community-log", wrap=True, highlight=True, markup=True)
@@ -880,6 +923,16 @@ class CommunityValidateScreen(Screen):
             self.app.pop_screen()
         elif event.button.id == "community-start":
             self._start_validate()
+        elif event.button.id == "community-package":
+            self._start_package()
+        elif event.button.id == "community-submit":
+            self._start_submit()
+
+    def _launch(self, subcommand, args, log, preview):
+        argv = cbench_command(subcommand, args)
+        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._run_worker(argv, log)
 
     def _start_validate(self) -> None:
         path = self.query_one("#community-path-input", Input).value.strip()
@@ -892,10 +945,42 @@ class CommunityValidateScreen(Screen):
                        "tree on the left, or type it.[/bold red]")
             return
 
-        argv = cbench_command("community-validate", [path])
-        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
-        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
-        self._run_worker(argv, log)
+        self._launch("community-validate", [path], log, preview)
+
+    def _start_package(self) -> None:
+        model = self.query_one("#community-model-input", Input).value.strip()
+        log = self.query_one("#community-log", RichLog)
+        preview = self.query_one("#community-preview", Static)
+        log.clear()
+
+        if not model:
+            log.write("[bold red]A model tag is required to package -- type the tag whose "
+                       "results you want to bundle.[/bold red]")
+            return
+
+        self._launch("community-package", ["--model", model, "--zip"], log, preview)
+
+    def _start_submit(self) -> None:
+        path = self.query_one("#community-path-input", Input).value.strip()
+        confirm = self.query_one("#community-confirm", Checkbox).value
+        log = self.query_one("#community-log", RichLog)
+        preview = self.query_one("#community-preview", Static)
+        log.clear()
+
+        if not path:
+            log.write("[bold red]A submission folder path is required -- package one first, "
+                       "then click it in the tree on the left.[/bold red]")
+            return
+
+        args = [path]
+        if confirm:
+            args.append("--confirm")
+            log.write("[bold yellow]\"Confirm submit\" is checked -- this will open a PUBLIC "
+                       "pull request under your own GitHub account.[/bold yellow]")
+        else:
+            log.write("[dim]Preview only -- nothing will be sent. Check \"Confirm submit\" "
+                       "above to actually open the pull request.[/dim]")
+        self._launch("community-submit", args, log, preview)
 
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
@@ -1014,6 +1099,13 @@ class CBenchTUI(App):
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
     #models-table { height: 12; border: solid $accent; }
+    /* Both the tree and its empty-state placeholder need the same width.
+       Without this the placeholder (shown whenever community-results/
+       doesn't exist yet -- i.e. on a fresh install, the common case)
+       expands to fill the row and pushes the action buttons off the right
+       edge of the terminal, where they cannot be clicked at all. */
+    #community-tree, #community-tree-empty { width: 40%; }
+    #community-form-inner { width: 60%; }
     #score-suite-checks { height: auto; }
     #score-suite-checks Checkbox { margin: 0 2 0 0; }
     #about-body { height: 1fr; padding: 1 2; }

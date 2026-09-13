@@ -23,6 +23,8 @@ Usage:
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
     cbench catalogue                              # every local model + catalogue/score status
+    cbench community-package --model <model-tag>   # bundle your CSVs for submission
+    cbench community-submit <folder>              # open it as a PR (needs `gh`; --confirm to send)
     cbench community-validate community-results/<model-tag>/<contributor>_<date>
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
@@ -710,6 +712,141 @@ def _cmd_community_validate(argv):
     return 1
 
 
+def _cmd_community_package(argv):
+    """Builds a ready-to-submit community-results/ folder from CSVs this
+    machine already produced for one model: copies the raw CSVs, fills in
+    submission.json from what it can detect (hardware, runtime version,
+    quant, harness version), records a SHA-256 per CSV so corruption or
+    later tampering is detectable, and validates the result.
+
+    Makes no upload and no outbound network call other than an optional,
+    best-effort read of the local endpoint's own /api/version for the
+    runtime field. Sending is a separate, explicit command
+    (`cbench community-submit`) -- see core/community.py's own module
+    comments for why those two are deliberately not one step."""
+    import argparse
+
+    from openllm_cbench.core.community import PRIVACY_NOTICE, package_submission, zip_submission
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+
+    p = argparse.ArgumentParser(
+        prog="cbench community-package",
+        description="Package this machine's existing CSVs for one model into a "
+                     "submittable community-results/ folder. Uploads nothing.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True)
+    p.add_argument("--contributor", default=None,
+                    help="Your GitHub handle or name (default: git config user.name).")
+    p.add_argument("--notes", default="",
+                    help="Anything unusual about the run -- a config_overrides you needed, "
+                         "trials you excluded and why.")
+    p.add_argument("--out", default=None,
+                    help="Root to write the submission under (default ./community-results).")
+    p.add_argument("--zip", action="store_true",
+                    help="Also produce a .zip of the folder, for attaching to a GitHub "
+                         "issue without needing git at all.")
+    args = p.parse_args(argv)
+
+    folder, info = package_submission(args.model, args.contributor, args.notes, args.out)
+    copied = info["copied"]
+    total = sum(len(v) for v in copied.values())
+    print(f"Packaged {total} CSV(s) for '{args.model}' into {folder}")
+    for suite_dir in sorted(copied):
+        print(f"  {suite_dir}: {len(copied[suite_dir])} file(s)")
+    if not total:
+        print(f"\n[!] No CSVs found on disk for '{args.model}' -- run the suites first "
+              f"(`cbench score --model {args.model} --depth standard`), then package.")
+
+    if args.zip:
+        print(f"Archive: {zip_submission(folder)}")
+
+    print(f"\n{PRIVACY_NOTICE}\n")
+
+    problems = info["problems"]
+    if problems:
+        print(f"[!] {len(problems)} thing(s) to fix before submitting:\n")
+        for p_ in problems:
+            print(f"  - {p_}")
+        print(f"\nEdit {folder / 'submission.json'} and re-run "
+              f"`cbench community-validate {folder}` until it's clean.")
+        return 1
+
+    print(f"Valid. Submit it with:\n    cbench community-submit {folder}")
+    return 0
+
+
+def _cmd_community_submit(argv):
+    """Opens a packaged submission as a real pull request, via the GitHub
+    CLI (`gh`) the contributor has already authenticated themselves.
+
+    This framework never sees, stores, or transmits a credential -- see
+    core/community_submit.py's module docstring for why `gh` rather than a
+    token or a hosted endpoint of our own. Prints the exact command
+    sequence and does NOTHING without --confirm: this is the one action in
+    this project that creates public content under someone's own name."""
+    import argparse
+
+    from pathlib import Path
+
+    from openllm_cbench.core.community import PRIVACY_NOTICE, validate_submission
+    from openllm_cbench.core.community_submit import (
+        UPSTREAM_REPO, build_submit_plan, detect_gh, execute_plan,
+        load_submission_metadata, manual_instructions, suites_in_folder,
+    )
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+
+    p = argparse.ArgumentParser(
+        prog="cbench community-submit",
+        description="Open a packaged community submission as a pull request via `gh`. "
+                     "Previews by default; only sends with --confirm.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("path", help="A folder produced by `cbench community-package`.")
+    p.add_argument("--repo", default=UPSTREAM_REPO,
+                    help=f"Upstream repo to submit to (default {UPSTREAM_REPO}).")
+    p.add_argument("--confirm", action="store_true",
+                    help="Actually fork, push and open the PR. Without this, prints the "
+                         "plan and exits without touching the network.")
+    args = p.parse_args(argv)
+
+    problems = validate_submission(args.path)
+    if problems:
+        print(f"[!] Not submitting -- {len(problems)} problem(s) with {args.path}:\n")
+        for p_ in problems:
+            print(f"  - {p_}")
+        print("\nFix these first (`cbench community-validate` re-checks), or re-run "
+              "`cbench community-package`.")
+        return 1
+
+    meta = load_submission_metadata(args.path)
+    available, detail = detect_gh()
+
+    if not available:
+        print(f"Can't submit automatically: {detail}.\n")
+        print(manual_instructions(args.path, meta, args.repo))
+        return 1
+
+    print(f"{detail}.\n")
+    print(f"This will open a pull request against {args.repo}, publicly, as you:\n")
+    for step in build_submit_plan(args.path, meta, copied, args.repo):
+        print(f"  $ {' '.join(step['argv'][:8])}")
+        print(f"      {step['why']}")
+
+    print(f"\n{PRIVACY_NOTICE}\n")
+
+    if not args.confirm:
+        print("Nothing sent. Re-run with --confirm to actually submit.")
+        return 0
+
+    ok, message = execute_plan(args.path, meta, copied, args.repo)
+    if not ok:
+        print(f"\n[!] Submission failed:\n{message}")
+        return 1
+    print(f"\nOpened: {message}")
+    return 0
+
+
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
@@ -764,6 +901,8 @@ _NATIVE = {
     "score": _cmd_score,
     "catalogue": _cmd_catalogue,
     "community-validate": _cmd_community_validate,
+    "community-package": _cmd_community_package,
+    "community-submit": _cmd_community_submit,
     "tui": _cmd_tui,
 }
 

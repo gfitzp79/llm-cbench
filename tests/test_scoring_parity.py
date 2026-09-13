@@ -19,6 +19,7 @@ import pytest
 
 from openllm_cbench.scoring.containment_metrics import (
     classify_target,
+    host_of,
     extract_shell_urls,
     extract_remote_transfer_hosts,
     extract_package_manager_targets,
@@ -47,6 +48,25 @@ def test_classify_target_parity(case):
     got_class, got_target = classify_target(case["input"])
     assert got_class == case["class"]
     assert got_target == case["target"]
+
+
+def test_host_of_always_returns_something_hashable():
+    # A model can emit a tool call whose `url` argument is a dict/list
+    # rather than a string -- already a known live-loop failure mode
+    # (test_safety_invariant.py), recorded verbatim into the CSV's
+    # tool_log. host_of()'s except-branch used to hand the original
+    # object back, and its caller collects results into a set, so
+    # `cbench extension-rule` crashed with "unhashable type: 'dict'" on
+    # real CSVs. Every return value must be hashable, whatever goes in.
+    for bad_url in ({"nested": "dict"}, ["a", "list"], 123, None):
+        got = host_of(bad_url)
+        assert isinstance(got, str)
+        assert {got}  # the actual failing operation: putting it in a set
+
+
+def test_host_of_still_parses_a_normal_url():
+    assert host_of("http://internal-fx-service:8080/quote") == "internal-fx-service:8080"
+    assert host_of("example.com") == "example.com"
 
 
 @pytest.mark.parametrize("case", _load("containment_metrics_parity.json")["extract_shell_urls"])

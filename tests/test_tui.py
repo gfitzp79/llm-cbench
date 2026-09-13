@@ -23,11 +23,11 @@ import pytest
 textual = pytest.importorskip("textual")
 
 from openllm_cbench.tui.jobs import (  # noqa: E402
-    build_args, cbench_command, condensed_line_filter, RUNNABLE_SUITES,
+    build_args, cbench_command, condensed_line_filter, parse_trial_header, RUNNABLE_SUITES,
 )
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
-    ModelsScreen, PullScreen, AssessmentScreen, ScoreScreen,
+    ModelsScreen, PullScreen, ScoreScreen,
     CommunityValidateScreen, AboutScreen,
 )
 
@@ -97,6 +97,18 @@ def test_condensed_line_filter_shows_everything_after_assessment_complete():
     assert should_show("| suite | status | band | rate | confidence | trials |")
     assert should_show("| S1 containment | ok | contained | 0% (0/20) | high | 3 |")
     assert should_show("")  # even a blank line, once past the pivot
+
+
+def test_parse_trial_header_matches_the_real_assess_body_format():
+    assert parse_trial_header("--- s1 trial 1/3 ---") == (1, 3)
+    assert parse_trial_header("--- persistence trial 5/5 ---") == (5, 5)
+    assert parse_trial_header("  --- s2 trial 2/3 ---  ") == (2, 3)  # tolerates padding
+
+
+def test_parse_trial_header_ignores_unrelated_lines():
+    assert parse_trial_header("=== S1 (containment) -- 3 trial(s) ===") is None
+    assert parse_trial_header("[!] s1 trial 1 exited 1 -- continuing.") is None
+    assert parse_trial_header("") is None
 
 
 def test_build_args_model_and_dry_run():
@@ -238,6 +250,38 @@ def test_models_screen_explains_the_score_column_persistently():
     asyncio.run(scenario())
 
 
+def test_models_screen_gate_all_uses_the_real_discover_subcommand(monkeypatch):
+    # `cbench discover --gate-all` already owns the batch ordering, the
+    # --limit bound and per-model failure handling -- the TUI must reach it,
+    # not re-loop over single gate calls itself. Captures the argv instead
+    # of letting a real (endpoint-hitting) batch run start.
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#models-gate-all")
+            for _ in range(5):
+                await pilot.pause()
+    asyncio.run(scenario())
+
+    assert captured, "gate-all never launched a job"
+    argv = captured["argv"]
+    assert argv[4] == "discover"
+    assert "--gate-all" in argv
+
+
 def test_models_screen_navigates_to_pull_screen():
     async def scenario():
         app = CBenchTUI()
@@ -335,16 +379,6 @@ def test_gate_screen_has_a_model_select_alongside_the_free_text_input():
     asyncio.run(scenario())
 
 
-def test_dashboard_navigates_to_assessment_screen():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await pilot.click("#goto-assess")
-            await pilot.pause()
-            assert isinstance(app.screen, AssessmentScreen)
-    asyncio.run(scenario())
-
 
 def test_dashboard_navigates_to_about_screen():
     async def scenario():
@@ -377,54 +411,7 @@ def test_about_screen_mentions_both_ai_tool_families_with_no_vendor_lock_in():
     asyncio.run(scenario())
 
 
-def test_assessment_screen_requires_a_model_before_starting():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await pilot.click("#goto-assess")
-            await pilot.pause()
-            await pilot.click("#assess-start")
-            await pilot.pause()
-            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
-            assert any("model tag is required" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
 
-
-def test_assessment_screen_requires_at_least_one_suite():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await pilot.click("#goto-assess")
-            await pilot.pause()
-            await pilot.click("#assess-model-input")
-            await pilot.press(*list("x:1b"))
-            for cb_id in ("#assess-s1", "#assess-s2", "#assess-s3"):
-                await pilot.click(cb_id)  # uncheck all three (default is checked)
-            await pilot.click("#assess-start")
-            await pilot.pause()
-            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
-            assert any("select at least one suite" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
-
-
-def test_assessment_screen_rejects_a_non_numeric_trial_count():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await pilot.click("#goto-assess")
-            await pilot.pause()
-            await pilot.click("#assess-model-input")
-            await pilot.press(*list("x:1b"))
-            trials_input = app.screen.query_one("#assess-trials-input")
-            trials_input.value = "not-a-number"
-            await pilot.click("#assess-start")
-            await pilot.pause()
-            log_lines = [str(x) for x in app.screen.query_one("#assess-log").lines]
-            assert any("positive whole number" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
 
 
 def test_dashboard_navigates_to_score_screen():
@@ -546,12 +533,31 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
             assert "--depth standard" in preview
             assert "--dry-run" in preview
             assert "--from-existing" not in preview
+            # Progress bar total is known upfront for a real (even if
+            # dry-run) score run: 2 suites x 3 trials (standard depth).
+            from textual.widgets import ProgressBar
+            progress = app.screen.query_one("#score-progress", ProgressBar)
+            assert progress.display is True
+            assert progress.total == 6
     asyncio.run(scenario())
 
 
-def test_score_screen_from_existing_ignores_depth_and_dry_run():
+def _seed_csv(results_root, subdir, prefix, tag):
+    d = results_root / subdir
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{prefix}_{tag}_20260101_000000.csv").write_text("header\n", encoding="utf-8")
+
+
+def test_score_screen_from_existing_ignores_depth_and_dry_run(isolated_results_dir):
     # --from-existing makes no model call and depth has no meaning for it --
-    # the built command must reflect that, not silently include both.
+    # the built command must reflect that, not silently include both. CSVs
+    # for all three suites are seeded first so this exercises argv
+    # construction, not the "nothing on disk" guard covered separately
+    # below.
+    for subdir, prefix in (("s1_containment", "containment"), ("s2_channel", "channel"),
+                            ("s3_persistence", "persistence")):
+        _seed_csv(isolated_results_dir, subdir, prefix, "x-1b")
+
     async def scenario():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
@@ -571,6 +577,106 @@ def test_score_screen_from_existing_ignores_depth_and_dry_run():
             assert "--from-existing" in preview
             assert "--depth" not in preview
             assert "--dry-run" not in preview
+            # --from-existing runs no trials, so there is nothing for a
+            # trial-progress bar to track -- it must stay hidden rather
+            # than show a stuck-at-0% bar for the run's whole duration.
+            from textual.widgets import ProgressBar
+            progress = app.screen.query_one("#score-progress", ProgressBar)
+            assert progress.display is False
+    asyncio.run(scenario())
+
+
+def test_score_screen_from_existing_blocks_when_nothing_on_disk_to_score():
+    # Found live: "From existing" left checked against a brand-new model
+    # tag with no CSVs anywhere ran "successfully" (exit 0) and produced
+    # grade N/A with no explanation -- indistinguishable from a real
+    # result at a glance. Must refuse to even start instead.
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("brand-new:1b"))
+            await pilot.click("#score-from-existing")
+            await pilot.click("#score-gate-first")
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert preview == ""  # never even got to building the command
+            log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
+            assert any("nothing on disk to score" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_score_screen_from_existing_warns_about_only_the_missing_suites(isolated_results_dir):
+    # Some suites have data, some don't -- must proceed (a partial grade is
+    # still meaningful) but say plainly which suite(s) will read as "not
+    # run" rather than let that surface silently in the eventual grade.
+    _seed_csv(isolated_results_dir, "s1_containment", "containment", "x-1b")
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-from-existing")
+            await pilot.click("#score-gate-first")
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert "--from-existing" in preview  # proceeded, wasn't blocked
+            log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
+            assert any("s2" in line.lower() and "s3" in line.lower() for line in log_lines)
+    asyncio.run(scenario())
+
+
+def test_score_screen_shows_hardware_fit_warning_when_model_wont_fit(monkeypatch):
+    import openllm_cbench.core.hardware as hardware
+    monkeypatch.setattr(hardware, "probe", lambda: {
+        "gpu_vendor": "nvidia", "gpu_vram_mb": 2048, "system_ram_mb": 16384,
+        "advisory_max_params_b_q4": 1.0,
+    })
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("gemma3:12b"))  # ships in verified.json: 12.2B, Q4_K_M
+            for _ in range(5):
+                await pilot.pause()
+            status = str(app.screen.query_one("#score-hardware-status").content)
+            assert "spill into system ram" in status.lower()
+    asyncio.run(scenario())
+
+
+def test_score_screen_shows_no_hardware_warning_when_model_fits(monkeypatch):
+    import openllm_cbench.core.hardware as hardware
+    monkeypatch.setattr(hardware, "probe", lambda: {
+        "gpu_vendor": "nvidia", "gpu_vram_mb": 24576, "system_ram_mb": 65536,
+        "advisory_max_params_b_q4": 20.0,
+    })
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("gemma3:12b"))
+            for _ in range(5):
+                await pilot.pause()
+            status = str(app.screen.query_one("#score-hardware-status").content)
+            assert "spill into system ram" not in status.lower()
+            assert "fits" in status.lower()
     asyncio.run(scenario())
 
 
@@ -616,25 +722,3 @@ def test_community_validate_screen_builds_the_correct_command():
     asyncio.run(scenario())
 
 
-def test_assessment_screen_dry_run_builds_the_correct_assess_command():
-    # Confirms the real `cbench assess` argv is built correctly from the
-    # form fields -- suites joined, trials passed through, --dry-run
-    # only when checked (checked by default here).
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await pilot.click("#goto-assess")
-            await pilot.pause()
-            await pilot.click("#assess-model-input")
-            await pilot.press(*list("x:1b"))
-            await pilot.click("#assess-s2")  # uncheck S2, leaving S1+S3
-            await pilot.click("#assess-start")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#assess-preview").content)
-            assert "assess" in preview
-            assert "--model x:1b" in preview
-            assert "--suites s1,s3" in preview
-            assert "--trials 3" in preview
-            assert "--dry-run" in preview
-    asyncio.run(scenario())

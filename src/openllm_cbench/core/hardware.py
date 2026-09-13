@@ -115,6 +115,31 @@ def recommend_band(vram_mb, quant="Q4_K_M", ctx_overhead_mb=1024):
     return round(max_params_b, 1)
 
 
+def check_model_fit(params_b, quant, vram_mb, ctx_overhead_mb=1024):
+    """Advisory only -- estimates whether a model of this size/quant is
+    likely to fit in the given VRAM budget, using the same arithmetic as
+    recommend_band() run in reverse (needed_mb from params_b/quant, rather
+    than max-params_b from vram_mb). Never blocks anything; a caller
+    decides what, if anything, to do with a `fits: False` result.
+
+    Returns {"known": bool, "fits": bool|None, "needed_mb": float|None,
+    "usable_mb": int|None}. `known` is False (and every other field None)
+    whenever params_b, quant, or vram_mb is missing -- this never guesses
+    a verdict from a partial input, since "probably fits" and "unknown"
+    are different things to show a user."""
+    # params_b comes from the model catalogue, where an entry that
+    # couldn't be measured stores the literal string "unknown" (see
+    # core/gate.py:_numeric_params_b's own fallback) rather than a
+    # number -- isinstance, not truthiness, so that string doesn't slip
+    # through and crash the arithmetic below.
+    if not isinstance(params_b, (int, float)) or not quant or not vram_mb:
+        return {"known": False, "fits": None, "needed_mb": None, "usable_mb": None}
+    bytes_per_param = BYTES_PER_PARAM.get(quant, BYTES_PER_PARAM["Q4_K_M"])
+    needed_mb = params_b * bytes_per_param * 1024
+    usable_mb = max(0, vram_mb - ctx_overhead_mb)
+    return {"known": True, "fits": needed_mb <= usable_mb, "needed_mb": needed_mb, "usable_mb": usable_mb}
+
+
 def probe():
     """Returns a dict summarizing this machine's advisory model-size band.
     Never raises -- every field degrades to None/'unknown' independently."""

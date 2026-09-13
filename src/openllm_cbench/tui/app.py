@@ -17,13 +17,14 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (
-    Button, Checkbox, DataTable, DirectoryTree, Footer, Header, Input, RichLog,
+    Button, Checkbox, DataTable, DirectoryTree, Footer, Header, Input, ProgressBar, RichLog,
     Select, Static, TextArea,
 )
 
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
 from openllm_cbench.tui.jobs import (
-    RUNNABLE_SUITES, build_args, cbench_command, condensed_line_filter, run_job, save_job_log,
+    RUNNABLE_SUITES, build_args, cbench_command, condensed_line_filter, parse_trial_header,
+    run_job, save_job_log,
 )
 
 
@@ -59,6 +60,28 @@ async def _populate_model_select(select: Select) -> None:
         "No local models found — type the tag below"
 
 
+def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
+    """The tail every action-taking screen shares once its subprocess
+    exits: save the full output to a real file and say where, then report
+    either the failure-to-start error or a colour-coded exit code, plus an
+    optional "here's where to look next" line on success only. Returns
+    True if the job actually succeeded, so a caller can chain off that
+    (ModelsScreen refreshes its table on a successful gate).
+
+    Was copy-pasted verbatim across six screens before this existed --
+    identical enough that a change to how a job reports itself had to be
+    made in six places or become inconsistent in five."""
+    log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
+    if result.error:
+        log.write(f"[bold red]{result.error}[/bold red]")
+        return False
+    style = "bold green" if result.returncode == 0 else "bold red"
+    log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+    if result.returncode == 0 and success_note:
+        log.write(f"[dim]{success_note}[/dim]")
+    return result.returncode == 0
+
+
 class InvariantBar(Static):
     """The safety invariant, visible on every screen -- every CLI --help
     epilog already carries it, so the TUI gets the same treatment rather
@@ -78,7 +101,6 @@ class DashboardScreen(Screen):
             yield Static("openllm-cbench", id="title")
             with Horizontal(id="dashboard-buttons"):
                 yield Button("Run a suite", id="goto-run", variant="primary")
-                yield Button("Full assessment", id="goto-assess", variant="primary")
                 yield Button("Score a model", id="goto-score", variant="primary")
                 yield Button("Gate a model", id="goto-gate")
                 yield Button("Local models", id="goto-models")
@@ -108,8 +130,6 @@ class DashboardScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "goto-run":
             self.app.push_screen(RunScreen())
-        elif event.button.id == "goto-assess":
-            self.app.push_screen(AssessmentScreen())
         elif event.button.id == "goto-score":
             self.app.push_screen(ScoreScreen())
         elif event.button.id == "goto-gate":
@@ -210,12 +230,7 @@ class RunScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+        _report_job_result(log, result)
 
 
 class GateScreen(Screen):
@@ -276,12 +291,7 @@ class GateScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+        _report_job_result(log, result)
 
 
 class ModelsScreen(Screen):
@@ -289,9 +299,10 @@ class ModelsScreen(Screen):
     pulled into the local endpoint, and whether the catalogue already
     knows about it. Reads the endpoint directly via core.discover (same
     function `cbench discover` calls) -- listing is read-only, no suite
-    logic here. The one action this screen can take (gate + save the
-    selected row) is a real `cbench gate --save` subprocess, same as
-    every other action anywhere else in this app."""
+    logic here. The two actions this screen can take are both real
+    subprocesses, same as every other action anywhere else in this app:
+    gate + save the selected row (`cbench gate --save`), and gate + save
+    every uncatalogued row at once (`cbench discover --gate-all`)."""
 
     BINDINGS = [("escape", "app.pop_screen", "Back")]
 
@@ -316,6 +327,7 @@ class ModelsScreen(Screen):
             with Horizontal(id="models-buttons"):
                 yield Button("Refresh", id="models-refresh", variant="primary")
                 yield Button("Gate + save selected", id="models-gate-selected")
+                yield Button("Gate + save all uncatalogued", id="models-gate-all")
                 yield Button("Search / pull a new model", id="goto-pull")
                 yield Button("Back", id="models-back")
             yield DataTable(id="models-table")
@@ -337,6 +349,8 @@ class ModelsScreen(Screen):
             self.app.push_screen(PullScreen())
         elif event.button.id == "models-gate-selected":
             self._gate_selected()
+        elif event.button.id == "models-gate-all":
+            self._gate_all()
 
     def _refresh(self) -> None:
         self.query_one("#models-log", RichLog).write("[dim]Refreshing from the local endpoint...[/dim]")
@@ -374,8 +388,10 @@ class ModelsScreen(Screen):
             )
         log.write(f"[dim]{len(local)} local model(s); {uncatalogued_n} not yet catalogued. "
                   f"Select a row and press \"Gate + save selected\" to catalogue one, or "
-                  f"\"Score a model\" from the dashboard to fill in the Score column above "
-                  f"(legend above the table explains what it means).[/dim]")
+                  f"\"Gate + save all uncatalogued\" to do all {uncatalogued_n} in one batch "
+                  f"(real model calls, one at a time). \"Score a model\" from the dashboard "
+                  f"fills in the Score column above (legend above the table explains what it "
+                  f"means).[/dim]")
 
     def _gate_selected(self) -> None:
         table = self.query_one("#models-table", DataTable)
@@ -389,16 +405,25 @@ class ModelsScreen(Screen):
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
         self._gate_worker(argv, log)
 
+    def _gate_all(self) -> None:
+        """`cbench discover --gate-all` -- the batch equivalent of pressing
+        "Gate + save selected" once per uncatalogued row. Deliberately the
+        real subcommand rather than a TUI-side loop over _gate_selected():
+        the ordering, the --limit bound, and the per-model failure handling
+        already live in cli.py's _cmd_discover(), and a second
+        implementation of them here is exactly what this app's own design
+        invariant exists to prevent."""
+        log = self.query_one("#models-log", RichLog)
+        argv = cbench_command("discover", ["--gate-all"])
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write("[dim]Gate-checking every uncatalogued model, one at a time -- real model "
+                  "calls, so this can take a while for a long list.[/dim]")
+        self._gate_worker(argv, log)
+
     @work(exclusive=True)
     async def _gate_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-            return
-        style = "bold green" if result.returncode == 0 else "bold red"
-        log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
-        if result.returncode == 0:
+        if _report_job_result(log, result):
             self._refresh()
 
 
@@ -456,12 +481,7 @@ class PullScreen(Screen):
     @work(exclusive=True)
     async def _search_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+        _report_job_result(log, result)
 
     def _start_pull(self) -> None:
         model = self.query_one("#pull-model-input", Input).value.strip()
@@ -477,125 +497,9 @@ class PullScreen(Screen):
     @work(exclusive=True)
     async def _pull_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
-            if result.returncode == 0:
-                log.write("[dim]Done. Go to \"Local models\" and gate + save it to add it "
-                          "to your catalogue.[/dim]")
-
-
-class AssessmentScreen(Screen):
-    """Full assessment of one model -- equivalent to running `cbench
-    assess` yourself, and literally is: a real subprocess, same as every
-    other action-taking screen. All orchestration (repeated trials,
-    auto-aggregation, report paths) lives in cli.py's _cmd_assess(), not
-    here -- this screen is a form and a log, nothing more."""
-
-    BINDINGS = [("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield InvariantBar()
-        with Vertical(id="assess-form"):
-            yield Static(
-                "Full assessment -- equivalent to running `cbench assess` yourself. Runs "
-                "N trials of each selected suite, then auto-aggregates each into a "
-                "trial-summary report and points you at it. S1+S2+S3 only -- this "
-                "framework's own three suites (run `cbench assess --help` for why S4/S5 "
-                "aren't included). Can take a while for a larger model or a high trial "
-                "count -- start with Dry run checked to preview what will run."
-            )
-            yield Select([], id="assess-model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below) — loading...")
-            yield Input(placeholder="model tag, e.g. gemma3:12b", id="assess-model-input")
-            with Horizontal(id="assess-suite-checks"):
-                yield Checkbox("S1 containment", id="assess-s1", value=True)
-                yield Checkbox("S2 channel", id="assess-s2", value=True)
-                yield Checkbox("S3 persistence", id="assess-s3", value=True)
-            yield Input(value="3", placeholder="trials per suite (default 3)", id="assess-trials-input")
-            yield Checkbox("Dry run (print payloads, call no model)", id="assess-dry-run", value=True)
-            with Horizontal():
-                yield Button("Start assessment", id="assess-start", variant="primary")
-                yield Button("Back", id="assess-back")
-            yield Static("", id="assess-preview")
-            yield RichLog(id="assess-log", wrap=True, highlight=True, markup=True)
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._load_models()
-
-    @work(exclusive=True)
-    async def _load_models(self) -> None:
-        await _populate_model_select(self.query_one("#assess-model-select", Select))
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "assess-model-select" and event.value is not Select.BLANK:
-            self.query_one("#assess-model-input", Input).value = str(event.value)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "assess-back":
-            self.app.pop_screen()
-        elif event.button.id == "assess-start":
-            self._start_assessment()
-
-    def _start_assessment(self) -> None:
-        model = self.query_one("#assess-model-input", Input).value.strip()
-        log = self.query_one("#assess-log", RichLog)
-        preview = self.query_one("#assess-preview", Static)
-        log.clear()
-
-        if not model:
-            log.write("[bold red]A model tag is required.[/bold red]")
-            return
-
-        suites = []
-        if self.query_one("#assess-s1", Checkbox).value:
-            suites.append("s1")
-        if self.query_one("#assess-s2", Checkbox).value:
-            suites.append("s2")
-        if self.query_one("#assess-s3", Checkbox).value:
-            suites.append("s3")
-        if not suites:
-            log.write("[bold red]Select at least one suite.[/bold red]")
-            return
-
-        trials_raw = self.query_one("#assess-trials-input", Input).value.strip() or "3"
-        try:
-            trials = int(trials_raw)
-            if trials < 1:
-                raise ValueError
-        except ValueError:
-            log.write("[bold red]Trials must be a positive whole number.[/bold red]")
-            return
-
-        args = ["--model", model, "--suites", ",".join(suites), "--trials", str(trials)]
-        if self.query_one("#assess-dry-run", Checkbox).value:
-            args.append("--dry-run")
-
-        argv = cbench_command("assess", args)
-        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
-        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
-        self._run_worker(argv, log)
-
-    @work(exclusive=True)
-    async def _run_worker(self, argv, log: RichLog) -> None:
-        should_show = condensed_line_filter()
-        result = await run_job(
-            argv, on_line=lambda line: log.write(line) if should_show(line) else None
-        )
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
-            if result.returncode == 0:
-                log.write("[dim]Go to \"Browse reports\" to read the trial-summary reports "
-                          "linked above.[/dim]")
+        _report_job_result(log, result,
+                            "Done. Go to \"Local models\" and gate + save it to add it "
+                            "to your catalogue.")
 
 
 class ScoreScreen(Screen):
@@ -619,12 +523,16 @@ class ScoreScreen(Screen):
                 "existing\", making no model call), then saves an A-F grade (worst of the "
                 "three suites, not an average) plus the full per-suite detail underneath "
                 "it -- see README.md \"Scoring a model\". The Models browser's Score column "
-                "and `cbench catalogue` both read whatever this produces."
+                "and `cbench catalogue` both read whatever this produces.\n"
+                "Depth covers 1/3/5 trials. For any other trial count, run `cbench assess "
+                "--model <tag> --trials N` in a terminal -- that runs the identical suites "
+                "and aggregation this does, just without producing a grade afterward."
             )
             yield Select([], id="score-model-select", allow_blank=True,
                          prompt="Pick a local model (or type the tag below) — loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="score-model-input")
             yield Static("", id="score-catalogue-status")
+            yield Static("", id="score-hardware-status")
             with Horizontal(id="score-suite-checks"):
                 yield Checkbox("S1 containment", id="score-s1", value=True)
                 yield Checkbox("S2 channel", id="score-s2", value=True)
@@ -654,15 +562,57 @@ class ScoreScreen(Screen):
                 yield Button("Score", id="score-start", variant="primary")
                 yield Button("Back", id="score-back")
             yield Static("", id="score-preview")
+            progress = ProgressBar(id="score-progress", show_eta=True)
+            progress.display = False
+            yield progress
             yield RichLog(id="score-log", wrap=True, highlight=True, markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
+        self._hw_info = None
         self._load_models()
+        self._probe_hardware()
 
     @work(exclusive=True)
     async def _load_models(self) -> None:
         await _populate_model_select(self.query_one("#score-model-select", Select))
+
+    @work(exclusive=True, group="hardware-probe")
+    async def _probe_hardware(self) -> None:
+        # A real subprocess call (nvidia-smi/rocm-smi) -- offloaded via
+        # to_thread so it can't stall the UI, and done once per screen
+        # visit rather than on every keystroke in the model-tag input.
+        # Advisory only, same as core/hardware.py's own module docstring:
+        # this never blocks or gates a run, it only informs the fit
+        # warning shown alongside the catalogue status.
+        import asyncio as _asyncio
+
+        from openllm_cbench.core.hardware import probe
+        self._hw_info = await _asyncio.to_thread(probe)
+        model = self.query_one("#score-model-input", Input).value.strip()
+        if model:
+            self._refresh_catalogue_status(model)
+
+    def _hardware_fit_line(self, entry) -> str:
+        """Renders a hardware fit warning for a catalogued entry's own
+        params_b/quant against this machine's detected VRAM -- blank if
+        either side of that comparison is unknown (no GPU detected, entry
+        has no params_b/quant yet, or the probe hasn't finished). Never a
+        reason to refuse a run, only to set expectations about how long
+        the progress bar's ETA below might understate."""
+        if not entry or not self._hw_info:
+            return ""
+        from openllm_cbench.core.hardware import check_model_fit
+        fit = check_model_fit(entry.get("params_b"), entry.get("quant"), self._hw_info.get("gpu_vram_mb"))
+        if not fit["known"]:
+            return ""
+        if fit["fits"]:
+            return (f"[dim]Hardware: ~{fit['needed_mb']:,.0f} MB needed, "
+                    f"~{fit['usable_mb']:,} MB usable VRAM -- fits.[/dim]")
+        return (f"[bold yellow]⚠ Hardware: this model needs an estimated ~{fit['needed_mb']:,.0f} MB "
+                f"VRAM but only ~{fit['usable_mb']:,} MB is usable on this GPU -- likely to spill into "
+                f"system RAM/CPU, commonly 5-20x slower. The progress bar's ETA assumes steady-state "
+                f"speed and will be badly wrong if that happens.[/bold yellow]")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "score-model-select" and event.value is not Select.BLANK:
@@ -695,6 +645,7 @@ class ScoreScreen(Screen):
                 "[bold yellow]⚠ not in your model catalogue[/bold yellow] -- this run will be "
                 "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
             )
+        self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(entry))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "score-back":
@@ -724,7 +675,51 @@ class ScoreScreen(Screen):
             return
 
         from_existing = self.query_one("#score-from-existing", Checkbox).value
+
+        if from_existing:
+            # "From existing" runs nothing and makes no model call by
+            # design -- but that means it can also silently produce grade
+            # N/A with exit code 0 if there was never anything on disk to
+            # read, which looks identical to a successful run at a
+            # glance. Found live: a brand-new model tag with "From
+            # existing" left checked (e.g. carried over from a previous
+            # run) scored N/A with no explanation why. Check what's
+            # actually on disk BEFORE running, not after.
+            # Read the CURRENT results dir (core.paths.results_dir() reads
+            # $OPENLLM_CBENCH_RESULTS_DIR fresh on every call), not
+            # aggregate.py's own S1_DIR/S2_DIR/S3_DIR -- those are frozen
+            # at whatever the env var was when that module first got
+            # imported (see _cmd_score's own docstring on why --from-existing
+            # needs the env var set before the process starts), which is
+            # the right call for a real `cbench score` subprocess but
+            # would silently ignore this screen's own test isolation.
+            from openllm_cbench.core.paths import results_dir
+            from openllm_cbench.scoring.aggregate import find_csvs, model_tag
+            suite_dirs = {
+                "s1": (results_dir("s1_containment"), "containment"),
+                "s2": (results_dir("s2_channel"), "channel"),
+                "s3": (results_dir("s3_persistence"), "persistence"),
+            }
+            tag = model_tag(model)
+            missing = [s for s in suites if not find_csvs(suite_dirs[s][0], suite_dirs[s][1], tag)]
+            if len(missing) == len(suites):
+                log.write(
+                    f"[bold red]\"From existing\" is checked, but no "
+                    f"{'/'.join(s.upper() for s in suites)} CSVs exist yet for '{model}' -- there is "
+                    f"nothing on disk to score. This would run nothing and produce grade N/A. Uncheck "
+                    f"\"From existing\" (and pick a depth) to actually run trials.[/bold red]"
+                )
+                return
+            elif missing:
+                log.write(
+                    f"[bold yellow]\"From existing\": no {'/'.join(s.upper() for s in missing)} CSVs "
+                    f"exist yet for '{model}' -- {'those' if len(missing) > 1 else 'that'} suite will "
+                    f"show 'not run' below; the grade will only reflect whichever suite(s) do have "
+                    f"data.[/bold yellow]"
+                )
+
         args = ["--model", model, "--suites", ",".join(suites)]
+        total_trials = None
         if from_existing:
             args.append("--from-existing")
         else:
@@ -732,10 +727,27 @@ class ScoreScreen(Screen):
             args += ["--depth", str(depth)]
             if self.query_one("#score-dry-run", Checkbox).value:
                 args.append("--dry-run")
+            from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
+            total_trials = len(suites) * DEPTH_TRIALS[depth]
 
         argv = cbench_command("score", args)
         preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+
+        progress = self.query_one("#score-progress", ProgressBar)
+        if total_trials:
+            # Total is known upfront (suites x trials-for-depth); progress
+            # advances one unit per completed trial as `--- suite trial
+            # N/M ---` headers stream past (see _run_worker). Textual's
+            # own ProgressBar computes ETA from the observed rate of
+            # .advance() calls, so it only starts reporting one once the
+            # first trial has actually finished -- exactly the "don't
+            # guess before you have a real data point" behaviour wanted
+            # here, with no hand-rolled timing code needed.
+            progress.update(total=total_trials, progress=0)
+            progress.display = True
+        else:
+            progress.display = False
 
         # Gate first if this tag has never been seen and the checkbox says
         # to -- a convenience, not a requirement: this framework never
@@ -747,35 +759,71 @@ class ScoreScreen(Screen):
             if lookup(model, load_registry()) is None:
                 gate_first_argv = cbench_command("gate", ["--model", model, "--save"])
 
-        self._run_worker(argv, log, gate_first_argv)
+        self._run_worker(model, argv, log, progress, gate_first_argv)
 
     @work(exclusive=True)
-    async def _run_worker(self, argv, log: RichLog, gate_first_argv=None) -> None:
+    async def _run_worker(self, model, argv, log: RichLog, progress: ProgressBar,
+                           gate_first_argv=None) -> None:
         if gate_first_argv:
             log.write("[dim]Model not catalogued -- gate-checking first "
                       "(uncheck \"Gate-check first\" to skip this):[/dim]")
             log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
             gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
             log.write(f"[dim]Full log saved to {save_job_log(gate_result)}[/dim]")
-            if gate_result.error or gate_result.returncode != 0:
-                log.write("[bold yellow]Gate-check didn't complete cleanly -- proceeding to "
-                          "score anyway (this framework never blocks a run on gate "
-                          "status).[/bold yellow]")
+
+            from openllm_cbench.core.gate import summarize_gate_output
+            from openllm_cbench.core.registry import load_registry, lookup
+            summary = summarize_gate_output(gate_result.lines)
+            if gate_result.error:
+                log.write(f"[bold red]Gate-check process itself failed to run: {gate_result.error} -- "
+                          f"nothing was learned about this model automatically.[/bold red]")
+            elif summary["hard_failure"]:
+                log.write(
+                    "[bold red]Gate-check could not reach the endpoint for this model "
+                    f"({summary['reason']}) -- the score run below makes the identical call and "
+                    "will most likely fail the exact same way. Check the endpoint/model tag before "
+                    "waiting on it.[/bold red]"
+                )
+            elif summary["clean"] is False and summary["caveats"]:
+                log.write(
+                    f"[bold yellow]Gate-check ran and found {len(summary['caveats'])} "
+                    "caveat(s) -- proceeding to score anyway (this framework never blocks a run "
+                    "on gate status), but read these first:[/bold yellow]"
+                )
+                for c in summary["caveats"]:
+                    log.write(f"[bold yellow]  - {c}[/bold yellow]")
+            elif summary["clean"]:
+                log.write("[green]Gate-check clean -- no caveats.[/green]")
+            else:
+                log.write("[bold yellow]Gate-check exited non-zero but printed no recognizable "
+                          "report -- proceeding to score anyway; see the full log above for "
+                          "whatever it did print.[/bold yellow]")
+            # The gate check just wrote (--save) a fresh catalogue entry
+            # for this tag if it got far enough to -- re-read it so the
+            # hardware fit line reflects real params_b/quant instead of
+            # staying blank for the rest of this run.
+            fresh_entry = lookup(model, load_registry())
+            self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(fresh_entry))
             log.write("")
 
         should_show = condensed_line_filter()
-        result = await run_job(
-            argv, on_line=lambda line: log.write(line) if should_show(line) else None
-        )
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
-            if result.returncode == 0:
-                log.write("[dim]Check \"Local models\" for the updated Score column, or "
-                          "\"Browse reports\" for the full scorecard.[/dim]")
+        trial_headers_seen = 0
+
+        def on_line(line):
+            nonlocal trial_headers_seen
+            if parse_trial_header(line) is not None:
+                if trial_headers_seen > 0:
+                    progress.advance(1)
+                trial_headers_seen += 1
+            if should_show(line):
+                log.write(line)
+
+        result = await run_job(argv, on_line=on_line)
+        if progress.display and progress.total:
+            progress.update(progress=progress.total)
+        _report_job_result(log, result,
+                            "Check \"Local models\" for the updated Score column, or "
+                            "\"Browse reports\" for the full scorecard.")
 
 
 class CommunityValidateScreen(Screen):
@@ -852,12 +900,7 @@ class CommunityValidateScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
-        if result.error:
-            log.write(f"[bold red]{result.error}[/bold red]")
-        else:
-            style = "bold green" if result.returncode == 0 else "bold red"
-            log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
+        _report_job_result(log, result)
 
 
 _ABOUT_TEXT = """\
@@ -963,7 +1006,7 @@ class CBenchTUI(App):
     #dashboard-buttons, #dashboard-buttons-2 { height: auto; }
     #dashboard-buttons Button, #dashboard-buttons-2 Button { margin: 0 1 1 0; }
     #doctor-caption { color: $text-muted; padding: 0 0 1 0; }
-    #run-form, #gate-form, #models-body, #pull-form, #assess-form { padding: 1; }
+    #run-form, #gate-form, #models-body, #pull-form, #score-form, #community-form { padding: 1; }
     RichLog { height: 1fr; border: solid $accent; }
     #reports-body { height: 1fr; }
     #reports-tree { width: 40%; }
@@ -971,8 +1014,8 @@ class CBenchTUI(App):
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
     #models-table { height: 12; border: solid $accent; }
-    #assess-suite-checks { height: auto; }
-    #assess-suite-checks Checkbox { margin: 0 2 0 0; }
+    #score-suite-checks { height: auto; }
+    #score-suite-checks Checkbox { margin: 0 2 0 0; }
     #about-body { height: 1fr; padding: 1 2; }
     """
 

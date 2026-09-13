@@ -45,12 +45,25 @@ src/openllm_cbench/
                          resolution, thinking-mode selection
     gate.py               model gate-check (capabilities, tool call,
                          channel separation at both think states,
-                         sampling params) + catalogue-entry conversion
+                         sampling params) + catalogue-entry conversion;
+                         summarize_gate_output() reads that report back
+                         out of captured output for a caller watching
+                         gate as a subprocess
     discover.py            lists locally-pulled models missing from the
                          catalogue, via the endpoint's own /api/tags --
                          never talks to ollama.com (see its own
                          docstring for why)
-    hardware.py           advisory VRAM/RAM probe, never blocking
+    pull.py                 exact-tag existence check (`cbench search`)
+                         and model download (`cbench pull`), both via
+                         the local endpoint's own /api/pull route
+    hardware.py           advisory VRAM/RAM probe, never blocking --
+                         probe()/recommend_band() for `cbench doctor`,
+                         check_model_fit() for a single model's fit
+                         against detected VRAM
+    runlock.py             launch-time exclusivity guard: refuses to
+                         start a second assessment while one holds the
+                         lock (`--force-concurrent` overrides)
+    console.py             UTF-8 stdio setup, applied once at entry
     community.py           shape-checks a community-results/ submission
                          folder before it's scored or merged
     invariant.py          the one safety-invariant string, shared by
@@ -69,8 +82,13 @@ src/openllm_cbench/
   tui/                     optional Textual control panel over the CLI
                          (pip install ".[tui]") -- jobs.py builds the
                          real `cbench <subcommand> ...` argv and runs it
-                         as a subprocess; app.py has no suite logic of
-                         its own, only screens and forms
+                         as a subprocess, then reads that subprocess's
+                         own streamed output back (condensed_line_filter
+                         for what reaches the screen, parse_trial_header
+                         for the trial-progress bar); app.py has no
+                         suite logic of its own, only screens and forms,
+                         plus the _report_job_result() tail every
+                         action-taking screen shares
 data/
   tasks/, probes/, scenarios/    the actual task/probe/scenario JSON
   models/verified.json           packaged model-catalogue seed
@@ -146,14 +164,22 @@ trusts the number. Not a place for a bare score with no data behind it.
   feature that only the TUI can do, that's a sign it's in the wrong file.
   The one exception: a screen may call a `core/` or `scoring/` function
   **directly** (in-process, via `asyncio.to_thread` so it can't block the
-  UI) purely to *read* something for display -- the Models screen listing
-  local models via `core/discover.py`, and its Score column reading a
-  saved scorecard via `scoring/scorecard.py:catalogue_compact_label()`,
-  are the existing examples. Both call the identical function `cbench
-  discover`/`cbench catalogue` themselves call, not a second
-  implementation, and neither has a side effect. Anything with a side
-  effect (writing the catalogue, downloading a model, running a suite)
-  still goes through a real subprocess, no exception.
+  UI) purely to *read* something for display. The existing examples: the
+  Models screen listing local models via `core/discover.py` and its Score
+  column reading a saved scorecard via
+  `scoring/scorecard.py:catalogue_compact_label()`; the Score screen's
+  catalogue status (`core/registry.py:lookup()`), its hardware fit
+  warning (`core/hardware.py:probe()` / `check_model_fit()`), its
+  "From existing" pre-flight check that any CSV exists at all for the
+  tag (`scoring/aggregate.py:find_csvs()`), and its read-back of a
+  gate subprocess's own printed report
+  (`core/gate.py:summarize_gate_output()`). Every one of those calls the
+  identical function the CLI itself calls, not a second implementation,
+  and none has a side effect. Anything with a side effect (writing the
+  catalogue, downloading a model, running a suite) still goes through a
+  real subprocess, no exception -- including the batch "Gate + save all
+  uncatalogued" action, which is `cbench discover --gate-all` rather than
+  a TUI-side loop over the single-model gate.
 - **Smoke-test before opening a PR, and say what you actually did.**
   Compile/syntax check is necessary but not sufficient — this project has
   twice caught real runtime-only bugs (a variable that only resolved at

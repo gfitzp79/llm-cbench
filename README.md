@@ -154,28 +154,57 @@ cbench tui   # requires: pip install "openllm-cbench[tui]"
 ```
 
 A thin control panel over the same CLI above -- forms for running a
-suite, a full assessment, or a scorecard (`cbench score`, depth picker
-included), gate-checking a model, browsing what's already pulled locally
-(with a picker to fill the model field for you, and a Score column
-showing whatever scorecard already exists for each model), pulling a new
-model, and a browser for whatever `results/` already contains. It has no
+single suite or a scorecard (`cbench score`, depth picker included),
+gate-checking a model, browsing what's already pulled locally (with a
+picker to fill the model field for you, a Score column showing whatever
+scorecard already exists for each model, and a batch "gate + save all
+uncatalogued" action), pulling a new model, validating a community
+submission, and a browser for whatever `results/` already contains.
+
+There is deliberately no "full assessment" screen: `cbench score` runs
+the identical trials and aggregation `cbench assess` does and produces a
+grade on top, so a separate button for it was two doors into one room.
+The one thing `assess` still has that `score` doesn't is an arbitrary
+`--trials N` (score offers 1/3/5 via `--depth`) -- run it from a terminal
+for that case; the Score screen says so on the screen itself. It has no
 logic of its own: every action it takes is the literal `cbench
 <subcommand> ...` invocation shown on screen before it starts, launched
 as a real subprocess, not a second implementation of any suite. Nothing
 runs on startup without a click.
 
+The Score screen specifically: an uncatalogued model gets gate-checked
+first by default, and the result is shown as one of three distinct
+things, not one vague "didn't complete cleanly" line -- couldn't reach
+the endpoint at all (a real problem, likely to recur in the score run
+right after), ran fine and found specific caveats (named verbatim, e.g.
+"no tool-calling support"), or clean. It never blocks the run either
+way -- that's a deliberate project policy, not an oversight -- it only
+makes the reason legible. If this machine's GPU is smaller than the
+model's own params/quant suggest it needs, a hardware warning says so
+before the run starts (advisory, from `core/hardware.py`'s own
+best-effort probe). A real (non-`--from-existing`) run also gets a
+progress bar, driven by the same `--- suite trial N/M ---` lines already
+in the log, with an ETA that only starts reporting once the first trial
+has actually finished. And "From existing" refuses to start at all if
+there's nothing on disk yet for the tag you typed, rather than silently
+producing grade N/A with exit code 0 -- indistinguishable from a real
+result until you go looking.
+
 ### Aggregation and trial-extension decisions
 
 ```bash
 cbench aggregate --suite s1 --model <model-tag>
-cbench extension-rule --base <base-tag> --variant <variant-tag>
+cbench extension-rule --pair <base-tag> <variant-tag>
 ```
 
-`cbench assess` above runs these automatically; run them directly if
-you already have trial CSVs on disk (e.g. from separate manual runs) and
-just want them aggregated. Every subcommand's real flags live in that
-module, not duplicated in `cli.py` — run `cbench <subcommand> --help`
-for the full list.
+`cbench assess` above runs the aggregation step automatically; run
+`cbench aggregate` directly if you already have trial CSVs on disk (e.g.
+from separate manual runs) and just want them aggregated.
+`cbench extension-rule` is always a separate, deliberate call — it
+compares a base/variant pair against each other, which is a different
+question from summarizing one model's trials, and nothing runs it for
+you. Every subcommand's real flags live in that module, not duplicated
+in `cli.py` — run `cbench <subcommand> --help` for the full list.
 
 ## The model catalogue
 
@@ -257,7 +286,8 @@ before hand-writing an entry. Quick reference:
 
 | Field | Acted on by | Meaning |
 |---|---|---|
-| `architecture`, `params_b`, `quant`, `tools`, `thinking` | Nothing — informational | What `cbench gate` found; useful context for a human reading the catalogue |
+| `architecture`, `tools`, `thinking` | Nothing — informational | What `cbench gate` found; useful context for a human reading the catalogue |
+| `params_b`, `quant` | No suite — but the TUI's hardware fit warning reads both | What `cbench gate` found. `params_b` is always a count in **billions**: a model whose endpoint reports it in millions (e.g. `134.52M`) is converted on the way in, not suffix-stripped. The Score screen estimates VRAM need from these two (`core/hardware.py:check_model_fit()`) and warns before a run if this machine looks too small — advisory only, it never blocks anything. An entry that couldn't be measured stores the literal string `"unknown"`, and the fit check stays silent rather than guessing. |
 | `thinking_mode` | The channel suite | `"effort"` → auto-selects an `--effort all` sweep instead of `--think`. `"ignores_think"` → auto-selects `--think false` only. Omit for an ordinary boolean toggle. |
 | `channel_separation` | Nothing — informational | `{"think_on": ..., "think_off": ...}`, each `"clean"` / `"UNRELIABLE"` / `null`. Put the actual consequence in `caveats` too — this field alone doesn't change any suite's behavior. |
 | `config_overrides` | Every suite, before its own hardcoded default | Recognized keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (containment), `max_task_turns` (persistence). An explicit CLI flag still wins over this. |

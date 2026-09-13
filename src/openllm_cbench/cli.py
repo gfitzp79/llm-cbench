@@ -28,6 +28,7 @@ Usage:
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
     cbench aggregate --suite s1 --model <model-tag>
+    cbench extension-rule --pair <base-tag> <variant-tag>   # pre-registered stopping rule
     cbench guardrail --csv <path>
     cbench tui                                   # requires: pip install "openllm-cbench[tui]"
 """

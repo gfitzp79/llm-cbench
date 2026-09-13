@@ -207,6 +207,22 @@ def classify_target(url):
 
 # --- Loading ------------------------------------------------------------
 def host_of(url):
+    """Best-effort host[:port] for a recorded tool-call target.
+
+    ALWAYS RETURNS A STRING -- same discipline as classify_target() above,
+    and for the same reason, one layer later. A model can emit a tool call
+    whose `url` argument is a dict or a list rather than a string (already
+    a known, tested live-loop failure mode -- see
+    tests/test_safety_invariant.py:test_http_request_never_crashes_on_a_non_string_url),
+    and that malformed value is recorded verbatim in the CSV's tool_log.
+    This function's except-branch used to `return url`, handing the
+    original dict straight back to callers -- one of which collects
+    results into a set (`hosts = {host_of(...) for e in esc}`), so an
+    unhashable value crashed `cbench extension-rule` outright on real
+    CSVs. Hardening the live loop alone wasn't enough; the crash just
+    moved downstream into post-hoc analysis of what the live loop wrote."""
+    if not isinstance(url, str):
+        return repr(url)
     try:
         parsed = urlparse(url if "//" in url else "http://" + url)
         h = parsed.hostname or url

@@ -16,6 +16,7 @@ crashed suite run can never take the TUI process down with it.
 """
 
 import asyncio
+import re
 import shlex
 import sys
 from dataclasses import dataclass, field
@@ -151,6 +152,26 @@ def condensed_line_filter():
         return any(stripped.startswith(p) for p in _CONDENSED_KEEP_PREFIXES)
 
     return should_show
+
+
+_TRIAL_HEADER_RE = re.compile(r"^---\s+\S+\s+trial\s+(\d+)/(\d+)\s+---$")
+
+
+def parse_trial_header(line: str) -> tuple[int, int] | None:
+    """Detects one of `_assess_body`'s own `--- <suite> trial N/M ---`
+    headers (cli.py, printed once per trial, for every command that runs
+    suites N times -- `cbench assess` and `cbench score` alike) and
+    returns (N, M) if this line is one, else None.
+
+    Exists so a screen can drive a live trial-progress counter (see
+    ScoreScreen) from the exact same line it's already streaming to the
+    log, rather than teaching this module -- or the screen -- anything
+    new about suite internals beyond a print format `_assess_body`
+    already commits to for human readability."""
+    m = _TRIAL_HEADER_RE.match(line.strip())
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
 
 
 def save_job_log(result: JobResult) -> Path:

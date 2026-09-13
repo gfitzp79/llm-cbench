@@ -200,22 +200,33 @@ def run_gate(model, base_url=None):
 
 def _numeric_params_b(param_size):
     """Ollama's /api/show reports parameter_size as a string like '14.8B'
-    (or '20.9B', 'unknown', etc). verified.json's own schema documents
-    `params_b` as a plain number -- found live that this
-    function used to pass the raw string straight through, so every
-    hand-written seed entry used a bare number (12, 20, 8) while every
-    --save-produced entry used a 'B'-suffixed string, an inconsistency
-    within the same file with no functional effect (nothing parses this
-    field) but a real one to a human reading the catalogue. Falls back to
-    the original string unchanged if it doesn't match the expected shape,
-    rather than guessing."""
+    (or '20.9B', 'unknown', etc) for most models -- but a small enough
+    model (found live: smollm2:135m) gets reported in millions instead,
+    e.g. '134.52M', not '0.13B'. verified.json's own schema documents
+    `params_b` as a plain number of *billions* regardless, so an 'M'
+    value is divided by 1000 on the way in, not just suffix-stripped the
+    way a 'B' value is -- treating '134.52M' as if it meant 134.52B would
+    be a three-order-of-magnitude error in anything that reads this field
+    (e.g. core/hardware.py's VRAM-fit check).
+
+    Falls back to the original string unchanged if it doesn't match
+    either expected shape, rather than guessing -- this is also how a
+    genuinely unmeasured entry's literal 'unknown' string round-trips
+    unchanged, and callers that need a real number must check
+    isinstance(..., (int, float)) rather than truthiness, since a
+    fallen-back string is still truthy."""
     if not isinstance(param_size, str):
         return param_size
     s = param_size.strip()
-    if s.upper().endswith("B"):
+    upper = s.upper()
+    divisor = 1.0
+    if upper.endswith("B"):
         s = s[:-1]
+    elif upper.endswith("M"):
+        s = s[:-1]
+        divisor = 1000.0
     try:
-        n = float(s)
+        n = float(s) / divisor
         return int(n) if n == int(n) else n
     except ValueError:
         return param_size
@@ -298,3 +309,49 @@ def render_gate_report(result):
         for c in result["caveats"]:
             L.append(f"- {c}")
     return "\n".join(L) + "\n"
+
+
+def summarize_gate_output(lines):
+    """Extracts a compact verdict from `cbench gate`'s own printed report
+    (render_gate_report()'s exact text, captured verbatim as subprocess
+    output by a caller like the TUI) without re-running the check or
+    re-implementing it a second time.
+
+    Exists because a caller watching gate as a subprocess only has an
+    exit code (0/1, from run_gate()['clean']) and a wall of text to go
+    on -- and a nonzero exit code alone conflates two very different
+    situations a human reading it needs to tell apart: the endpoint
+    genuinely couldn't be reached at all (a hard failure -- a real run
+    against this model right after would hit the identical wall), versus
+    the check ran fine and found real caveats (e.g. no tool-calling
+    support) -- a softer, more specific finding this framework's own
+    policy is to warn about, never block on.
+
+    Returns {"hard_failure": bool, "reason": str|None, "clean": bool|None,
+    "caveats": list[str]}. `clean` is None if neither a "Clean." nor a
+    "Caveats found" line was seen at all (e.g. the process crashed before
+    printing a report). Never raises -- an unrecognized or future-changed
+    report shape just yields empty/None fields rather than guessing."""
+    hard_failure = False
+    reason = None
+    clean = None
+    caveats = []
+    collecting = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("**Could not reach the endpoint's model-info route**"):
+            hard_failure = True
+            reason = stripped.split(":", 1)[1].strip() if ":" in stripped else stripped
+            collecting = False
+        elif stripped.startswith("**Clean.**"):
+            clean = True
+            collecting = False
+        elif stripped.startswith("**Caveats found"):
+            clean = False
+            collecting = True
+        elif collecting:
+            if stripped.startswith("- "):
+                caveats.append(stripped[2:])
+            elif stripped:
+                collecting = False
+    return {"hard_failure": hard_failure, "reason": reason, "clean": clean, "caveats": caveats}

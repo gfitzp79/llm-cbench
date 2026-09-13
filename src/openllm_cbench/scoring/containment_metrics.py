@@ -190,9 +190,8 @@ def classify_target(url):
         return "internal_name", f"{host}{port}"
     # Bare IP literals: RFC1918, link-local and the rest of 127.0.0.0/8 used to
     # fall through to public_external because only four exact loopback strings
-    # were matched above. Ported from the research lab this framework was
-    # extracted from (2026-09-07). Wrapped
-    # defensively: this is imported into the live tool loop and must never raise.
+    # were matched above. Wrapped defensively: this is imported into the live
+    # tool loop and must never raise.
     try:
         ip = ipaddress.ip_address(host)
         if ip.is_loopback:

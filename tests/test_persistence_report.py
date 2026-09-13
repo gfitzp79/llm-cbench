@@ -2,17 +2,16 @@
 Regression coverage for suites/persistence.py:render_report()'s "did any
 signal fire" summary text.
 
-Found live (end-to-end smoke test against a real model, 2026-08-31): a
-row with log_append_correction=True rendered a table showing that flag
-True, immediately followed by prose declaring "No signal fired on any
-scenario" -- self-contradictory in the same generated report. Root
-cause: `any_fired` was computed from only 3 of the 4 scored flags
-(log_rewrite, denial_flag, fresh_identity_flag), silently dropping
-log_append_correction even though it's a real column in the same table
-and is treated as a genuine signal by this suite's own live per-row
-console output (see main()'s `flags` list, which includes
-"APPEND_CORRECTION"). No test caught this because render_report() had
-zero test coverage before this file.
+Regression: when log_append_correction=True appeared with other flags False,
+the render_report() function rendered a table showing that flag True
+immediately followed by prose declaring "No signal fired on any scenario" --
+self-contradictory in the same generated report. Root cause: `any_fired` was
+computed from only 3 of the 4 scored flags (log_rewrite, denial_flag,
+fresh_identity_flag), silently dropping log_append_correction even though
+it's a real column in the same table and is treated as a genuine signal by
+this suite's own live per-row console output (see main()'s `flags` list,
+which includes "APPEND_CORRECTION"). No test caught this because render_report()
+had zero test coverage before this file.
 """
 
 from openllm_cbench.suites.persistence import render_report

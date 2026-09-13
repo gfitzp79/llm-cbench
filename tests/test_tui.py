@@ -688,6 +688,42 @@ def test_score_screen_survives_being_left_while_the_hardware_probe_runs(monkeypa
     asyncio.run(scenario())
 
 
+def test_score_screen_warns_about_an_uncatalogued_model_too_big_for_the_gpu(monkeypatch):
+    # Found live on muse-glimmer:30b: the fit warning read the CATALOGUE
+    # only, so it stayed silent for any model not catalogued yet -- i.e.
+    # the freshly-pulled 30B that is exactly the one about to spill into
+    # system RAM and make every step take minutes. The endpoint already
+    # knows its size; use that.
+    import openllm_cbench.core.discover as discover
+    import openllm_cbench.core.hardware as hardware
+
+    monkeypatch.setattr(hardware, "probe", lambda: {
+        "gpu_vendor": "nvidia", "gpu_vram_mb": 12282, "system_ram_mb": 32486,
+        "advisory_max_params_b_q4": 20.0,
+    })
+    monkeypatch.setattr(discover, "list_local_models", lambda: [
+        {"name": "huge:30b", "size": 18157010252, "architecture": "x",
+         "params_b": 27.9, "quant": "Q4_K_M"},
+    ])
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            for _ in range(8):
+                await pilot.pause()
+            app.screen.query_one("#score-model-input").value = "huge:30b"
+            for _ in range(8):
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+            cat = str(app.screen.query_one("#score-catalogue-status").content)
+            hw = str(app.screen.query_one("#score-hardware-status").content)
+            assert "not in your model catalogue" in cat, "precondition: uncatalogued"
+            assert "spill into system RAM" in hw, f"no warning for an oversized model: {hw!r}"
+    asyncio.run(scenario())
+
+
 def test_score_screen_shows_hardware_fit_warning_when_model_wont_fit(monkeypatch):
     import openllm_cbench.core.hardware as hardware
     monkeypatch.setattr(hardware, "probe", lambda: {

@@ -137,29 +137,137 @@ def recommend_band(vram_mb, quant="Q4_K_M", ctx_overhead_mb=1024):
     return round(max_params_b, 1)
 
 
-def check_model_fit(params_b, quant, vram_mb, ctx_overhead_mb=1024):
-    """Advisory only -- estimates whether a model of this size/quant is
-    likely to fit in the given VRAM budget, using the same arithmetic as
-    recommend_band() run in reverse (needed_mb from params_b/quant, rather
-    than max-params_b from vram_mb). Never blocks anything; a caller
-    decides what, if anything, to do with a `fits: False` result.
+def check_model_fit(params_b, quant, vram_mb, ctx_overhead_mb=1024, size_mb=None):
+    """Advisory only -- estimates whether a model is likely to fit in the
+    given VRAM budget, using the same arithmetic as recommend_band() run
+    in reverse (needed_mb from params_b/quant, rather than max-params_b
+    from vram_mb). Never blocks anything; a caller decides what, if
+    anything, to do with a `fits: False` result.
+
+    `size_mb` is the model's REAL on-disk size when the caller knows it
+    (the endpoint reports it per model). It is preferred over the
+    params/quant estimate whenever available, because it's a measurement
+    rather than a calculation: it already accounts for whatever the
+    quantisation actually did, embedded tokenizer/vision weights, and
+    everything else this module's rough BYTES_PER_PARAM table can only
+    approximate.
 
     Returns {"known": bool, "fits": bool|None, "needed_mb": float|None,
-    "usable_mb": int|None}. `known` is False (and every other field None)
-    whenever params_b, quant, or vram_mb is missing -- this never guesses
-    a verdict from a partial input, since "probably fits" and "unknown"
-    are different things to show a user."""
+    "usable_mb": int|None, "source": "size"|"estimate"|None}. `known` is
+    False (and every other field None) when there's nothing to compare --
+    this never guesses a verdict from a partial input, since "probably
+    fits" and "unknown" are different things to show a user."""
+    if size_mb and vram_mb:
+        usable_mb = max(0, vram_mb - ctx_overhead_mb)
+        return {"known": True, "fits": size_mb <= usable_mb, "needed_mb": size_mb,
+                "usable_mb": usable_mb, "source": "size"}
     # params_b comes from the model catalogue, where an entry that
     # couldn't be measured stores the literal string "unknown" (see
     # core/gate.py:_numeric_params_b's own fallback) rather than a
     # number -- isinstance, not truthiness, so that string doesn't slip
     # through and crash the arithmetic below.
     if not isinstance(params_b, (int, float)) or not quant or not vram_mb:
-        return {"known": False, "fits": None, "needed_mb": None, "usable_mb": None}
+        return {"known": False, "fits": None, "needed_mb": None, "usable_mb": None,
+                "source": None}
     bytes_per_param = BYTES_PER_PARAM.get(quant, BYTES_PER_PARAM["Q4_K_M"])
     needed_mb = params_b * bytes_per_param * 1024
     usable_mb = max(0, vram_mb - ctx_overhead_mb)
-    return {"known": True, "fits": needed_mb <= usable_mb, "needed_mb": needed_mb, "usable_mb": usable_mb}
+    return {"known": True, "fits": needed_mb <= usable_mb, "needed_mb": needed_mb,
+            "usable_mb": usable_mb, "source": "estimate"}
+
+
+# --- Fit assessment ------------------------------------------------------
+#
+# Turns "how big is this model vs this GPU" into a recommendation a user
+# can act on BEFORE spending an hour finding out. Advisory, like
+# everything else in this module -- it never blocks a run.
+#
+# The mixture-of-experts distinction is the part that makes this worth
+# having rather than a bare size comparison. An MoE's weights must all be
+# resident (or paged), so it needs the SAME memory as a dense model of
+# the same total size -- but only a fraction of them are touched per
+# token, so when it does spill, it degrades far less badly than a dense
+# model of that size. Ranking a 30B-A3B MoE as "just as bad as" a dense
+# 30B is wrong in the direction that matters: it talks someone out of a
+# model that would actually have been usable.
+
+_ACTIVE_PARAMS_RE = re.compile(r"[-_:]a(\d+(?:\.\d+)?)b\b", re.IGNORECASE)
+
+
+def parse_active_params_b(tag):
+    """Active (per-token) parameter count in billions from a tag that
+    advertises one -- the `a3b` in `qwen3:30b-a3b` is the community
+    convention for "30B total, 3B active". Returns None when the tag
+    says nothing, which is the common case for a dense model."""
+    if not tag:
+        return None
+    m = _ACTIVE_PARAMS_RE.search(tag)
+    return float(m.group(1)) if m else None
+
+
+def is_moe(architecture=None, tag=None):
+    """Whether this looks like a mixture-of-experts model. Two
+    independent signals, either sufficient: the endpoint's own
+    architecture string (`qwen3moe`, `nemotron_h_moe`), and an active
+    param count in the tag. Neither is authoritative -- a new MoE family
+    that names itself nothing like "moe" and ships no `aNb` tag reads as
+    dense here, which is the safe direction to be wrong in (it predicts a
+    worse outcome than reality)."""
+    if architecture and "moe" in str(architecture).lower():
+        return True
+    return parse_active_params_b(tag) is not None
+
+
+def fit_assessment(vram_mb, tag="", architecture=None, params_b=None, quant=None,
+                    size_mb=None, ctx_overhead_mb=1024):
+    """Recommendation for running `tag` on a GPU with `vram_mb`.
+
+    Returns a dict with `tier` ("fits" | "tight" | "spills" | "unknown"),
+    a short `headline` for a table cell, and a full-sentence `note` for a
+    warning line, plus the raw numbers behind them. Prefers a real
+    on-disk `size_mb` over the params/quant estimate -- see
+    check_model_fit()."""
+    fit = check_model_fit(params_b, quant, vram_mb, ctx_overhead_mb, size_mb=size_mb)
+    moe = is_moe(architecture, tag)
+    active = parse_active_params_b(tag)
+
+    if not fit["known"]:
+        return {"tier": "unknown", "moe": moe, "active_params_b": active,
+                "needed_mb": None, "usable_mb": None, "source": None,
+                "headline": "unknown",
+                "note": ""}
+
+    needed, usable = fit["needed_mb"], fit["usable_mb"]
+    base = {"moe": moe, "active_params_b": active, "needed_mb": needed,
+            "usable_mb": usable, "source": fit["source"]}
+    measured = "on disk" if fit["source"] == "size" else "estimated"
+
+    if needed <= usable * 0.85:
+        return {**base, "tier": "fits", "headline": "fits",
+                "note": (f"Hardware: ~{needed:,.0f} MB {measured}, ~{usable:,} MB usable "
+                         f"VRAM -- fits, should run at full GPU speed.")}
+
+    if needed <= usable:
+        return {**base, "tier": "tight", "headline": "tight",
+                "note": (f"Hardware: ~{needed:,.0f} MB {measured} against ~{usable:,} MB usable "
+                         f"VRAM -- fits, but with almost no headroom. A long context or a "
+                         f"second process on this GPU will push it into system RAM mid-run.")}
+
+    over = needed - usable
+    if moe:
+        active_note = (f"only ~{active:g}B of ~{params_b:g}B parameters are active per token"
+                        if active and params_b else
+                        "only a fraction of its parameters are active per token")
+        speed = (f"It's a mixture-of-experts model, so {active_note} -- it degrades far less "
+                 f"than a dense model this size would. Expect slower, not unusable.")
+    else:
+        speed = ("It's a dense model, so every parameter is read for every token -- expect "
+                 "roughly 5-20x slower than a model that fits, which turns a minutes-long "
+                 "run into an hours-long one.")
+
+    return {**base, "tier": "spills", "headline": "spills (MoE)" if moe else "spills",
+            "note": (f"Hardware: ~{needed:,.0f} MB {measured} but only ~{usable:,} MB of VRAM "
+                     f"is usable -- about {over:,.0f} MB will spill into system RAM. {speed}")}
 
 
 def probe():

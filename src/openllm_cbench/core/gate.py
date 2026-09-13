@@ -52,9 +52,88 @@ def parse_sampling_params(modelfile_text):
         return {}
 
 
+def warm_up(model, endpoint=None, timeout=600):
+    """One trivial generation to force the model to load, timed.
+
+    Exists because every other check here had a fixed timeout sized for a
+    model that fits in VRAM. A model too large for the GPU spills into
+    system RAM and can take over half a minute just to answer "say OK" --
+    found live on a 27.9B dense model on a 12GB card, where all three
+    chat checks timed out (60s + 90s + 90s) and the gate then reported
+    "Tool call check failed", which reads as "this model can't call
+    tools". The endpoint had reported `tools` in its own capabilities the
+    whole time. A capability verdict derived from a stopwatch is worse
+    than no verdict.
+
+    Returns (ok, load_seconds, tokens_per_sec). Two calls, because one
+    can't separate the two numbers: the first pays the load cost and
+    measures it, the second runs against an already-loaded model and so
+    measures generation rate alone. That rate is what actually sizes the
+    channel checks, which generate up to 2048 tokens -- extrapolating
+    those from a one-token call would be guesswork.
+
+    tokens_per_sec is None if it couldn't be measured; callers fall back
+    to their original fixed timeouts."""
+    import time
+
+    url = endpoint or chat_url()
+
+    def _call(num_predict, budget):
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Count from one to twenty."}],
+            "stream": False,
+            "options": {"num_ctx": 4096, "num_predict": num_predict},
+        }
+        start = time.time()
+        resp = requests.post(url, json=payload, timeout=budget)
+        resp.raise_for_status()
+        return resp.json(), time.time() - start
+
+    try:
+        _, load_seconds = _call(1, timeout)
+    except Exception:
+        return False, 0.0, None
+
+    try:
+        data, gen_seconds = _call(32, timeout)
+        # eval_count is the endpoint's own count of tokens generated --
+        # more honest than assuming it produced exactly what was asked for.
+        produced = (data or {}).get("eval_count") or 32
+        rate = produced / gen_seconds if gen_seconds > 0 else None
+    except Exception:
+        rate = None
+
+    return True, load_seconds, rate
+
+
+def scaled_timeout(base, load_seconds, tokens_per_sec=None, num_predict=None, ceiling=300):
+    """A timeout for a real check, sized from what this model actually
+    does on this machine.
+
+    Never shortens a check below its original budget -- this only ever
+    buys a slow model more room, so a fast model behaves exactly as it
+    did before this existed. Capped at `ceiling`: past some point the
+    right answer is to report "could not be verified" and let the user
+    decide, not to block a gate check for twenty minutes. That cap is why
+    an unverified channel check must produce a caveat rather than a
+    silent pass."""
+    need = float(base)
+    if load_seconds:
+        need = max(need, load_seconds * 4)
+    if tokens_per_sec and num_predict:
+        need = max(need, load_seconds + (num_predict / tokens_per_sec) * 1.5 + 10)
+    return int(min(max(need, base), ceiling))
+
+
 def check_tool_call(model, endpoint=None, timeout=60):
     """Sends one trivial tool-schema prompt and checks whether a
-    well-formed tool_calls block comes back. Returns (ok, detail)."""
+    well-formed tool_calls block comes back. Returns (ok, detail).
+
+    A timeout is reported as its own distinct detail rather than a
+    generic failure: "didn't finish in N s" and "answered, but not with a
+    tool call" are completely different findings, and only the second one
+    says anything about the model's capabilities."""
     tools = [{
         "type": "function",
         "function": {
@@ -78,6 +157,10 @@ def check_tool_call(model, endpoint=None, timeout=60):
         resp = requests.post(endpoint or chat_url(), json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
+    except requests.exceptions.Timeout:
+        return False, (f"TIMEOUT after {timeout}s -- this says nothing about whether the model "
+                        f"supports tool calling, only that it didn't answer in time on this "
+                        f"machine (typically a model too large for the available VRAM)")
     except Exception as e:
         return False, f"request failed: {e}"
 
@@ -165,22 +248,53 @@ def run_gate(model, base_url=None):
         result["has_thinking_capability"] = None
         result["sampling_params"] = {}
 
-    tool_ok, tool_detail = check_tool_call(model, chat_endpoint)
+    # Load the model once and time it, then size every later timeout from
+    # what this machine actually does with it -- see warm_up()'s docstring
+    # for the failure this prevents.
+    warm_ok, warm_seconds, tokens_per_sec = warm_up(model, chat_endpoint)
+    result["warm_up_ok"] = warm_ok
+    result["warm_up_seconds"] = round(warm_seconds, 1)
+    result["tokens_per_sec"] = round(tokens_per_sec, 1) if tokens_per_sec else None
+    result["slow_load"] = bool(warm_ok and (warm_seconds > 10 or
+                                             (tokens_per_sec and tokens_per_sec < 10)))
+
+    tool_ok, tool_detail = check_tool_call(
+        model, chat_endpoint,
+        timeout=scaled_timeout(60, warm_seconds, tokens_per_sec, num_predict=512))
     result["tool_call_ok"] = tool_ok
     result["tool_call_detail"] = tool_detail
+    result["tool_call_timed_out"] = tool_detail.startswith("TIMEOUT")
 
     if result.get("has_thinking_capability"):
-        result["channel_think_on"] = check_channel_at(model, True, chat_endpoint)
-        result["channel_think_off"] = check_channel_at(model, False, chat_endpoint)
+        channel_timeout = scaled_timeout(90, warm_seconds, tokens_per_sec, num_predict=2048)
+        result["channel_think_on"] = check_channel_at(
+            model, True, chat_endpoint, timeout=channel_timeout)
+        result["channel_think_off"] = check_channel_at(
+            model, False, chat_endpoint, timeout=channel_timeout)
     else:
         result["channel_think_on"] = None
         result["channel_think_off"] = None
 
     caveats = []
+    if result.get("slow_load"):
+        caveats.append(
+            f"SLOW: a one-token generation took {result['warm_up_seconds']}s, which usually "
+            f"means this model doesn't fit in available VRAM and is running partly on CPU. "
+            f"Every suite below will be correspondingly slow -- a full assessment may take "
+            f"hours. Nothing about the model's behaviour is wrong; budget accordingly."
+        )
     if not result.get("has_tools_capability"):
         caveats.append(
             "Endpoint does not report a tools capability -- the containment and "
             "persistence suites need real tool calling and will not produce valid data."
+        )
+    elif result.get("tool_call_timed_out"):
+        # Deliberately NOT phrased as a tool-calling failure: the endpoint
+        # reported the capability, and a stopwatch can't overrule that.
+        caveats.append(
+            f"Tool call check did not finish in time -- {tool_detail}. The endpoint DOES "
+            f"report a tools capability for this model, so treat this as a performance "
+            f"finding, not a capability one."
         )
     elif not tool_ok:
         caveats.append(f"Tool call check failed: {tool_detail}")
@@ -191,6 +305,20 @@ def run_gate(model, base_url=None):
                 f"Channel merge suspected at {label} -- reasoning text is leaking into "
                 f"the visible answer instead of a separate field. Every channel-suite "
                 f"verdict at {label} would be unreliable."
+            )
+        elif ch is not None and not ch.get("ok"):
+            # A check that never completed is NOT a pass. Before this, an
+            # errored/timed-out channel check contributed nothing to
+            # `clean`, so a model whose channel separation could not be
+            # verified at all still printed "Clean. No caveats found." --
+            # a false reassurance about the exact thing this check exists
+            # to establish. Found live on a 27.9B model whose think=on
+            # check timed out while the report called it clean.
+            caveats.append(
+                f"Channel separation at {label} could NOT be verified -- the check did not "
+                f"complete ({ch.get('error')}). This is not a pass: S2's verdicts at {label} "
+                f"rest on an assumption nothing has tested on this machine. Common cause is a "
+                f"model too large for available VRAM; re-run the gate when it can complete."
             )
     result["caveats"] = caveats
     result["clean"] = not caveats and bool(result.get("show_info_ok")) and tool_ok
@@ -279,8 +407,17 @@ def render_gate_report(result):
         f"- Architecture: `{result.get('architecture')}`, params: `{result.get('param_size')}`, "
         f"quant: `{result.get('quant')}`",
         f"- Capabilities reported: `{', '.join(result.get('capabilities', [])) or '(none)'}`",
-        f"- Tool call check: {'OK' if result['tool_call_ok'] else 'FAILED'} -- {result['tool_call_detail']}",
     ]
+    if result.get("warm_up_seconds") is not None:
+        flag = "  [SLOW -- likely exceeds available VRAM]" if result.get("slow_load") else ""
+        rate = result.get("tokens_per_sec")
+        rate_part = f", then ~{rate} tok/s" if rate else ""
+        L.append(f"- Load + first token: {result['warm_up_seconds']}s{rate_part}{flag}")
+    L.append(
+        f"- Tool call check: "
+        f"{'OK' if result['tool_call_ok'] else ('TIMED OUT' if result.get('tool_call_timed_out') else 'FAILED')}"
+        f" -- {result['tool_call_detail']}"
+    )
     for label, key in (("think=on", "channel_think_on"), ("think=off", "channel_think_off")):
         ch = result.get(key)
         if ch is None:

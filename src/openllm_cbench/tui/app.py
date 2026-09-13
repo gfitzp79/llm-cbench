@@ -35,7 +35,7 @@ def _results_root() -> Path:
     return Path(override) if override else Path.cwd() / "results"
 
 
-async def _populate_model_select(select: Select) -> None:
+async def _populate_model_select(select: Select) -> dict:
     """Fills a model-picker Select with locally-pulled tags, via
     core.discover.list_local_models() -- the identical function `cbench
     discover` itself calls, not a reimplementation. Runs the blocking
@@ -43,7 +43,13 @@ async def _populate_model_select(select: Select) -> None:
     silent on failure (unreachable endpoint, etc) -- the picker just
     stays empty and the paired free-text Input still works regardless,
     same "degrade, don't block" discipline as everywhere else in this
-    app."""
+    app.
+
+    Returns {tag -> the endpoint's own record} so a caller can reuse what
+    was already fetched. That record carries params_b/quant/size for
+    models the CATALOGUE has never seen, which is the only way the
+    hardware fit warning can fire for a model someone just pulled -- the
+    exact case it matters most."""
     import asyncio
 
     from openllm_cbench.core.discover import list_local_models
@@ -53,11 +59,12 @@ async def _populate_model_select(select: Select) -> None:
     except Exception:
         select.set_options([])
         select.prompt = "Could not list local models — type the tag below"
-        return
+        return {}
     options = [(m["name"], m["name"]) for m in sorted(local, key=lambda x: x["name"])]
     select.set_options(options)
     select.prompt = "Pick a local model (or type the tag below)" if options else \
         "No local models found — type the tag below"
+    return {m["name"]: m for m in local}
 
 
 def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
@@ -336,8 +343,9 @@ class ModelsScreen(Screen):
 
     def on_mount(self) -> None:
         table = self.query_one("#models-table", DataTable)
-        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Catalogued", "Score")
+        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Fit", "Catalogued", "Score")
         table.cursor_type = "row"
+        self._hw_info = None
         self._refresh()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -374,18 +382,43 @@ class ModelsScreen(Screen):
         registry = await asyncio.to_thread(load_registry)
         catalogued = set(registry.get("models", {}).keys())
 
+        from openllm_cbench.core.hardware import fit_assessment, probe
+        if self._hw_info is None:
+            self._hw_info = await asyncio.to_thread(probe)
+        vram_mb = (self._hw_info or {}).get("gpu_vram_mb")
+
         table.clear()
         uncatalogued_n = 0
+        spills_n = 0
         for m in sorted(local, key=lambda x: x["name"]):
             is_cat = m["name"] in catalogued
             if not is_cat:
                 uncatalogued_n += 1
             score = await asyncio.to_thread(catalogue_compact_label, m["name"])
+            assessment = fit_assessment(
+                vram_mb, tag=m["name"], architecture=m.get("architecture"),
+                params_b=m.get("params_b"), quant=m.get("quant"),
+                size_mb=round(m["size"] / (1024 * 1024)) if m.get("size") else None,
+            )
+            if assessment["tier"] == "spills":
+                spills_n += 1
+            fit_cell = {
+                "fits": "[green]fits[/green]",
+                "tight": "[yellow]tight[/yellow]",
+                "spills": f"[bold red]{assessment['headline']}[/bold red]",
+                "unknown": "[dim]?[/dim]",
+            }[assessment["tier"]]
             table.add_row(
-                m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]),
+                m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]), fit_cell,
                 "yes" if is_cat else "[bold yellow]no[/bold yellow]",
                 score if score != "not scored" else "[dim]not scored[/dim]",
             )
+        if spills_n:
+            log.write(f"[bold yellow]{spills_n} model(s) won't fit in this GPU's "
+                       f"{vram_mb:,} MB of VRAM and will run partly on CPU -- much slower, but "
+                       f"still valid. \"spills (MoE)\" degrades far less than a dense model of "
+                       f"the same size, since only a fraction of its parameters are active per "
+                       f"token.[/bold yellow]")
         log.write(f"[dim]{len(local)} local model(s); {uncatalogued_n} not yet catalogued. "
                   f"Select a row and press \"Gate + save selected\" to catalogue one, or "
                   f"\"Gate + save all uncatalogued\" to do all {uncatalogued_n} in one batch "
@@ -570,12 +603,27 @@ class ScoreScreen(Screen):
 
     def on_mount(self) -> None:
         self._hw_info = None
+        self._local_models = {}
         self._load_models()
         self._probe_hardware()
 
     @work(exclusive=True)
     async def _load_models(self) -> None:
-        await _populate_model_select(self.query_one("#score-model-select", Select))
+        from textual.css.query import NoMatches
+        try:
+            select = self.query_one("#score-model-select", Select)
+        except NoMatches:
+            return
+        self._local_models = await _populate_model_select(select)
+        # The endpoint's own record is what makes the fit warning work for
+        # an uncatalogued model, so re-render the status line once it
+        # lands -- the user may already have typed a tag by then.
+        try:
+            model = self.query_one("#score-model-input", Input).value.strip()
+        except NoMatches:
+            return
+        if model:
+            self._refresh_catalogue_status(model)
 
     @work(exclusive=True, group="hardware-probe")
     async def _probe_hardware(self) -> None:
@@ -610,26 +658,40 @@ class ScoreScreen(Screen):
         if model:
             self._refresh_catalogue_status(model)
 
-    def _hardware_fit_line(self, entry) -> str:
-        """Renders a hardware fit warning for a catalogued entry's own
-        params_b/quant against this machine's detected VRAM -- blank if
-        either side of that comparison is unknown (no GPU detected, entry
-        has no params_b/quant yet, or the probe hasn't finished). Never a
-        reason to refuse a run, only to set expectations about how long
-        the progress bar's ETA below might understate."""
-        if not entry or not self._hw_info:
+    def _hardware_fit_line(self, model, entry) -> str:
+        """Renders a hardware fit warning against this machine's detected
+        VRAM -- blank only when neither side of the comparison is
+        knowable. Never a reason to refuse a run, only to set
+        expectations: a model that spills into system RAM turns a
+        20-minute run into an overnight one, and makes the progress bar's
+        ETA meaningless.
+
+        Reads the CATALOGUE first, then falls back to the endpoint's own
+        record of locally-pulled models. That fallback is the whole point:
+        the warning used to read the catalogue alone, so it stayed silent
+        for any model not catalogued yet -- i.e. the freshly-pulled 30B
+        someone is about to discover the hard way is too big for their
+        GPU. Found live on exactly that case."""
+        if not self._hw_info:
             return ""
-        from openllm_cbench.core.hardware import check_model_fit
-        fit = check_model_fit(entry.get("params_b"), entry.get("quant"), self._hw_info.get("gpu_vram_mb"))
-        if not fit["known"]:
+        from openllm_cbench.core.hardware import fit_assessment
+
+        local = (self._local_models or {}).get(model, {})
+        size_bytes = local.get("size")
+        assessment = fit_assessment(
+            self._hw_info.get("gpu_vram_mb"),
+            tag=model,
+            architecture=(entry or {}).get("architecture") or local.get("architecture"),
+            params_b=(entry or {}).get("params_b") or local.get("params_b"),
+            quant=(entry or {}).get("quant") or local.get("quant"),
+            size_mb=round(size_bytes / (1024 * 1024)) if size_bytes else None,
+        )
+        if assessment["tier"] == "unknown":
             return ""
-        if fit["fits"]:
-            return (f"[dim]Hardware: ~{fit['needed_mb']:,.0f} MB needed, "
-                    f"~{fit['usable_mb']:,} MB usable VRAM -- fits.[/dim]")
-        return (f"[bold yellow]⚠ Hardware: this model needs an estimated ~{fit['needed_mb']:,.0f} MB "
-                f"VRAM but only ~{fit['usable_mb']:,} MB is usable on this GPU -- likely to spill into "
-                f"system RAM/CPU, commonly 5-20x slower. The progress bar's ETA assumes steady-state "
-                f"speed and will be badly wrong if that happens.[/bold yellow]")
+        if assessment["tier"] == "fits":
+            return f"[dim]{assessment['note']}[/dim]"
+        colour = "bold yellow" if assessment["tier"] == "spills" else "yellow"
+        return f"[{colour}]⚠ {assessment['note']}[/{colour}]"
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "score-model-select" and event.value is not Select.BLANK:
@@ -662,7 +724,7 @@ class ScoreScreen(Screen):
                 "[bold yellow]⚠ not in your model catalogue[/bold yellow] -- this run will be "
                 "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
             )
-        self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(entry))
+        self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(model, entry))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "score-back":
@@ -825,7 +887,7 @@ class ScoreScreen(Screen):
             fresh_entry = lookup(model, load_registry())
             try:
                 self.query_one("#score-hardware-status", Static).update(
-                    self._hardware_fit_line(fresh_entry))
+                    self._hardware_fit_line(model, fresh_entry))
             except NoMatches:
                 return
             log.write("")

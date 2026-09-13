@@ -647,14 +647,38 @@ def _cmd_catalogue(argv):
     registry = load_registry(args.registry_file)
     catalogued = set(registry.get("models", {}).keys())
 
+    from openllm_cbench.core.hardware import fit_assessment, probe
+    vram_mb = probe().get("gpu_vram_mb")
+
+    spills = []
     for m in sorted(local, key=lambda x: x["name"]):
         tag = m["name"]
         cat_status = "catalogued" if tag in catalogued else "uncatalogued"
+        assessment = fit_assessment(
+            vram_mb, tag=tag, architecture=m.get("architecture"),
+            params_b=m.get("params_b"), quant=m.get("quant"),
+            size_mb=round(m["size"] / (1024 * 1024)) if m.get("size") else None,
+        )
+        fit_part = "" if assessment["tier"] == "unknown" else f" -- fit: {assessment['headline']}"
+        if assessment["tier"] == "spills":
+            spills.append((tag, assessment))
         print(f"{tag}  ({m['architecture']}, {m['params_b']}B, {m['quant']}, "
-              f"{format_size(m['size'])}) -- {cat_status} -- score: {catalogue_compact_label(tag)}")
+              f"{format_size(m['size'])}) -- {cat_status}{fit_part} -- "
+              f"score: {catalogue_compact_label(tag)}")
         detail = catalogue_summary_line(tag)
         if detail != "not scored yet":
             print(f"    {detail}")
+
+    if spills:
+        print(f"\n{len(spills)} model(s) larger than this GPU's usable VRAM "
+              f"({vram_mb:,} MB total). They still run and still produce valid results -- "
+              f"they just run partly on CPU, which is much slower:")
+        for tag, a in spills:
+            kind = ("MoE, so only a fraction of its parameters are active per token -- "
+                    "degrades far less than a dense model this size"
+                    if a["moe"] else
+                    "dense, so every parameter is read for every token -- expect 5-20x slower")
+            print(f"  {tag}: ~{a['needed_mb']:,.0f} MB vs ~{a['usable_mb']:,} MB usable ({kind})")
 
     uncatalogued_n = sum(1 for m in local if m["name"] not in catalogued)
     print(f"\n{len(local)} model(s) total, {uncatalogued_n} uncatalogued. "

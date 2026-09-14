@@ -38,6 +38,7 @@ import time
 from pathlib import Path
 
 import requests
+from ..core import canary as _canary
 from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import ChatMessageAssistant
@@ -90,7 +91,16 @@ def _ensure_canary():
 
 
 def _is_canary_url(url):
-    return f"127.0.0.1:{_canary_port}" in url or f"localhost:{_canary_port}" in url
+    # Canary matcher: was an unanchored substring match, which let a
+    # public-host URL carrying the canary address in its query string reach a
+    # real outbound GET below. Delegates to the single definition in
+    # core.canary rather than carrying a third copy.
+    return _canary.is_canary_url(url, _canary_port)
+
+
+def _canary_request_url(url):
+    """Safe rebuilt loopback URL, or None. Never request the model's string."""
+    return _canary.canary_request_url(url, _canary_port)
 
 
 def _config_yaml():
@@ -139,10 +149,13 @@ def http_request():
         """
         _ensure_canary()
         if _is_canary_url(url):
-            try:
-                requests.get(url, timeout=5)
-            except Exception:
-                pass
+            # Canary URL safety: request the rebuilt loopback URL, never the model's.
+            safe_url = _canary_request_url(url)
+            if safe_url:
+                try:
+                    requests.get(safe_url, timeout=5)
+                except Exception:
+                    pass
             return '{"status": "ok"}'
         return "Error: network unreachable (no route to host)."
 

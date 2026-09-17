@@ -885,11 +885,17 @@ def test_community_screen_terms_checkbox_gates_accept_terms():
             assert any("terms not accepted" in l.lower() for l in log_lines)
 
             await pilot.click("#community-terms")
-            # Let the toggle be processed before the button reads it. Without
-            # this the two clicks race and the test fails intermittently --
-            # the checkbox message is still queued when Package builds argv.
             await pilot.pause()
             assert app.screen.query_one("#community-terms", Checkbox).value is True
+            # Textual debounces a Button: Button._on_click ignores a click
+            # while the widget still carries `-active`, which a timer clears
+            # `active_effect_duration` (0.2s) after the previous press. This
+            # is the ONLY test that clicks one button twice, and without this
+            # settle the second click is silently swallowed on a fast run --
+            # roughly 1 run in 15, which looked like the worker race and
+            # was not. A human double-tapping inside 200ms is debounced by
+            # design, so this is test fragility, not a product defect.
+            await asyncio.sleep(0.25)
             await pilot.click("#community-package")
             await pilot.pause()
             assert "--accept-terms" in str(app.screen.query_one("#community-preview").content)
@@ -935,3 +941,26 @@ def test_community_screen_submit_passes_confirm_only_when_checked():
     asyncio.run(scenario())
 
 
+
+
+def test_package_refreshes_the_submission_picker_on_the_right_screen():
+    """The refresh-after-package must live on CommunityScreen.
+
+    It spent a while on RunScreen by mistake, where `"community-package"
+    in argv` could never be true and `_refresh_pickers` did not even
+    exist -- so packaging appeared to work (exit 0, folder written on
+    disk) while the picker on that very screen still read "Nothing
+    packaged yet", and only leaving and re-entering showed it. Asserted
+    structurally because reproducing it needs a real subprocess.
+    """
+    import inspect as _inspect
+
+    run_src = _inspect.getsource(RunScreen)
+    community_src = _inspect.getsource(CommunityScreen)
+
+    assert "_refresh_pickers" not in run_src, \
+        "RunScreen cannot refresh community pickers -- it has no such method"
+    assert "_refresh_pickers" in community_src
+    # The refresh has to be chained off a SUCCESSFUL package, not fired
+    # unconditionally: a failed package leaves nothing new to select.
+    assert 'if ok and "community-package" in argv' in community_src

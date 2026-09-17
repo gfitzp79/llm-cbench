@@ -138,6 +138,13 @@ cbench containment --model <model-tag> --seed 777   # exact replay of one run
 cbench containment --model <model-tag>               # seed generated + recorded per row
 ```
 
+These four flags live on the three suites themselves. `cbench score`
+and `cbench assess` do not forward them, so a scored run always uses the
+pinned defaults: comparability across models is preserved (every suite
+invocation is asked the same way) but scoring at a non-default
+temperature, or replaying a scored run at a fixed seed, needs the suite
+commands directly.
+
 Omitting `--seed` is deliberate, not an oversight: a fixed default would
 make every trial in a multi-trial run identical, destroying the
 trial-to-trial variance the 3-trial minimum exists to measure. A
@@ -186,12 +193,34 @@ cbench tui   # requires: pip install "openllm-cbench[tui]"
 
 A thin control panel over the same CLI above -- forms for running a
 single suite or a scorecard (`cbench score`, depth picker included),
-gate-checking a model, browsing what's already pulled locally (with a
-picker to fill the model field for you, a Score column showing whatever
-scorecard already exists for each model, and a batch "gate + save all
-uncatalogued" action), pulling a new model, packaging/validating/
+gate-checking a model, pulling a new model, and packaging, validating or
 submitting a community submission (see "Sharing your own results"
-below), and a browser for whatever `results/` already contains.
+below).
+
+**Local models** lists what's pulled locally with a picker that fills
+the model field for you, a **Fit** column (does this model fit in your
+VRAM, and is it a mixture-of-experts model that degrades gently when it
+doesn't), a **Speed** column, a **Score** column showing whatever
+scorecard already exists, and a batch "gate + save all uncatalogued"
+action. Speed shows a measured tokens/sec figure in bold when a gate
+check has actually timed that model on this machine, and a word
+(fast/good/moderate/slow) when it is estimating from the parameters read
+per token -- for a mixture-of-experts model that's the active experts
+rather than the full weight count, which is why a 30B-A3B outruns a
+dense 30B of the same size on disk. A measurement and a calculation are
+deliberately not shown the same way.
+
+**Browse reports** is a table of the reports on disk -- model, suite,
+kind and date, newest first -- because that is how you look for one, not
+by navigating to `results/s2_channel/trial_summary_<tag>.md`. It lists
+trial summaries, scorecards and single-run reports; the raw CSVs and run
+logs are in the directory tree beneath it, since those are evidence
+rather than browsing material.
+
+**Share / validate results** picks a model from those that actually have
+CSVs on disk, and a submission from those already packaged, rather than
+asking you to type either. A typed path is a class of error with no
+upside when both sets are knowable.
 
 There is deliberately no "full assessment" screen: `cbench score` runs
 the identical trials and aggregation `cbench assess` does and produces a

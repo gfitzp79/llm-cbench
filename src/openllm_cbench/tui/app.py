@@ -255,10 +255,7 @@ class RunScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        ok = _report_job_result(log, result)
-        # A package that just succeeded should be pickable immediately.
-        if ok and "community-package" in argv:
-            self._refresh_pickers()
+        _report_job_result(log, result)
 
 
 class GateScreen(Screen):
@@ -387,7 +384,18 @@ class ModelsScreen(Screen):
             self._gate_all()
 
     def _refresh(self) -> None:
-        self.query_one("#models-log", RichLog).write("[dim]Refreshing from the local endpoint...[/dim]")
+        # Guarded for the same reason as _populate_model_select and
+        # _refresh_catalogue_status: _gate_worker calls this after awaiting
+        # a real `cbench gate` / `cbench discover --gate-all`, which is a
+        # live model call and so the widest await window in the app. If the
+        # screen closed during it, this query raises inside a worker and
+        # Textual turns that into WorkerFailed.
+        from textual.css.query import NoMatches
+        try:
+            log = self.query_one("#models-log", RichLog)
+        except NoMatches:
+            return
+        log.write("[dim]Refreshing from the local endpoint...[/dim]")
         self._refresh_worker()
 
     @work(exclusive=True)
@@ -1202,7 +1210,15 @@ class CommunityScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        _report_job_result(log, result)
+        ok = _report_job_result(log, result)
+        # A submission that was just packaged should be selectable without
+        # leaving and re-entering the screen. This block spent a while on
+        # RunScreen by mistake, where the condition could never be true and
+        # the method did not exist -- so packaging appeared to succeed
+        # (exit 0, folder written) while the picker still read "Nothing
+        # packaged yet".
+        if ok and "community-package" in argv:
+            self._refresh_pickers()
 
 
 _ABOUT_TEXT = """\

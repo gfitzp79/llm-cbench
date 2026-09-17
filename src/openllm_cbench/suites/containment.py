@@ -46,6 +46,9 @@ from openllm_cbench.core.registry import load_registry, config_overrides_for, ba
 from openllm_cbench.core.sandbox import fake_files
 from openllm_cbench.scoring.containment_metrics import classify_target
 from openllm_cbench.core.console import ensure_utf8_stdio
+from openllm_cbench.core.sampling import (
+    add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
+)
 
 # Agentic tool loops burn context fast (tool schemas + growing history) --
 # more headroom than a flat-prompt default, still pinned explicitly so it
@@ -167,7 +170,7 @@ def execute_tool(name, args, files, canary_port, state):
     return "Error: unknown tool."
 
 
-def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, timeout, max_turns,
+def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, timeout, max_turns, sampling=None,
              think=None, endpoint=None):
     messages = []
     if boundary:
@@ -198,7 +201,7 @@ def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, ti
             # the other doesn't) silently confounds every comparison unless
             # every runner overrides it explicitly -- pinning it here is
             # universal, not specific to any one model family.
-            "options": {"num_ctx": num_ctx, "num_predict": num_predict, "presence_penalty": 0},
+            "options": build_options(num_ctx, num_predict, sampling),
         }
         if think is not None:
             payload["think"] = think
@@ -297,6 +300,7 @@ def build_arg_parser():
     # constant. See build_config() below.
     p.add_argument("--num-ctx", type=int, default=None)
     p.add_argument("--num-predict", type=int, default=None)
+    add_sampling_args(p)
     p.add_argument("--timeout", type=int, default=None)
     p.add_argument("--max-turns", type=int, default=None)
     p.add_argument("--think", choices=("true", "false"), default=None,
@@ -325,6 +329,7 @@ def build_arg_parser():
 def main():
     ensure_utf8_stdio()
     args = build_arg_parser().parse_args()
+    sampling = resolve_sampling(args)
     endpoint = chat_url(args.endpoint)
 
     # Model catalogue: an explicit CLI flag always wins; otherwise check
@@ -379,8 +384,7 @@ def main():
                 messages.append({"role": "user", "content": task["prompt"]})
                 payload = {
                     "model": args.model, "messages": messages, "tools": build_tools(), "stream": False,
-                    "options": {"num_ctx": num_ctx, "num_predict": num_predict,
-                                "presence_penalty": 0},
+                    "options": build_options(num_ctx, num_predict, sampling),
                 }
                 if think is not None:
                     payload["think"] = think
@@ -409,7 +413,7 @@ def main():
                 result = run_task(
                     args.model, task, boundary, files, canary_port,
                     num_ctx, num_predict, timeout, max_turns,
-                    think=think, endpoint=endpoint,
+                    think=think, endpoint=endpoint, sampling=sampling,
                 )
                 verdict = "ESCAPE_ATTEMPT" if result["escape_attempt"] else "CONTAINED"
                 if result.get("error"):
@@ -438,7 +442,14 @@ def main():
     fieldnames = ["model", "task_id", "task_class", "boundary", "escape_attempt",
                   "escape_attempt_real", "escape_turn",
                   "escalated", "authorized_use", "turns_used", "error", "tool_log", "final_text",
-                  "last_done_reason", "done_reasons", "prompt_token_counts", "max_prompt_tokens"]
+                  "last_done_reason", "done_reasons", "prompt_token_counts", "max_prompt_tokens", *SAMPLING_FIELDS]
+    # Stamp sampling at WRITE time, not where each row is built. A suite
+    # constructs rows in several places (success, error and timeout paths)
+    # and per-site drift is precisely how one of them ends up disagreeing
+    # with the others. One site cannot drift from itself.
+    for _row in rows:
+        _row.update(sampling_row_fields(sampling))
+
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")
         w.writeheader()

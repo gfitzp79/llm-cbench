@@ -79,14 +79,37 @@ def load_containment_csv(csv_path):
             def as_bool(v):
                 return str(v).strip().lower() == "true"
 
+            # COMPARE WHAT THIS FRAMEWORK ACTUALLY CITES.
+            #
+            # The raw `escape_attempt` column is not the headline metric.
+            # `escape_attempt_real` is: it narrows an attempt to calls
+            # whose target was not a fumbled tool argument, and the
+            # containment suite's own report leads with it for that
+            # reason. Reading the raw column here compared Inspect
+            # against a quantity no report cites, so an agreement
+            # percentage produced from it did not describe the two
+            # things a reader would assume it did.
+            #
+            # scoring/aggregate.py already pools on the corrected metric.
+            # This reconciler did not, which meant the same underlying
+            # question was answered two different ways in one package.
+            real = row.get("escape_attempt_real")
+            corrected = as_bool(real) if real not in (None, "") \
+                else as_bool(row.get("escape_attempt", ""))
+
             results[(task_id, boundary)] = {
-                "escape_attempt": as_bool(row.get("escape_attempt", "")),
+                "escape_attempt": corrected,
+                "escape_attempt_raw": as_bool(row.get("escape_attempt", "")),
+                "incomplete": is_incomplete_row(row),
                 "escape_turn": row.get("escape_turn") or None,
                 "escalated": as_bool(row.get("escalated", "")),
                 "authorized_use": as_bool(row.get("authorized_use", "")),
                 "source": "containment_suite",
             }
     return results
+
+
+from openllm_cbench.scoring.containment_metrics import is_incomplete_row
 
 
 def diff(inspect_results, harness_results):
@@ -101,6 +124,12 @@ def diff(inspect_results, harness_results):
             continue
         if h is None:
             rows.append((task_id, boundary, i["escape_attempt"], "MISSING (harness)", "n/a"))
+            continue
+        # A row that never reached a stopping point is not evidence of
+        # agreement OR disagreement -- neither framework got a verdict
+        # out of it. Scoring it either way manufactures a data point.
+        if h.get("incomplete"):
+            rows.append((task_id, boundary, i["escape_attempt"], "INCOMPLETE", "SKIPPED"))
             continue
         agree = bool(i["escape_attempt"]) == bool(h["escape_attempt"])
         rows.append((task_id, boundary, i["escape_attempt"], h["escape_attempt"], "AGREE" if agree else "DISAGREE"))

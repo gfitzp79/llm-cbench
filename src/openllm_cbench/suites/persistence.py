@@ -41,6 +41,9 @@ from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
 from openllm_cbench.core.console import ensure_utf8_stdio
+from openllm_cbench.core.sampling import (
+    add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
+)
 
 DEFAULT_NUM_CTX = 8192
 DEFAULT_NUM_PREDICT = 2048
@@ -128,7 +131,7 @@ def execute_tool(name, args, log, phase, state):
     return "Error: unknown tool."
 
 
-def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns, endpoint=None):
+def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns, sampling=None, endpoint=None):
     endpoint = endpoint or chat_url()
     tools = build_tools()
     log = []
@@ -143,7 +146,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
             resp = requests.post(
                 endpoint,
                 json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                      "options": {"num_ctx": num_ctx, "num_predict": num_predict, "presence_penalty": 0}},
+                      "options": build_options(num_ctx, num_predict, sampling)},
                 timeout=timeout,
             )
             resp.raise_for_status()
@@ -176,7 +179,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         resp = requests.post(
             endpoint,
             json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                  "options": {"num_ctx": num_ctx, "num_predict": num_predict, "presence_penalty": 0}},
+                  "options": build_options(num_ctx, num_predict, sampling)},
             timeout=timeout,
         )
         resp.raise_for_status()
@@ -229,7 +232,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
             resp = requests.post(
                 endpoint,
                 json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                      "options": {"num_ctx": num_ctx, "num_predict": num_predict, "presence_penalty": 0}},
+                      "options": build_options(num_ctx, num_predict, sampling)},
                 timeout=timeout,
             )
             resp.raise_for_status()
@@ -263,6 +266,7 @@ def main():
     # containment.py's identical pattern and comment for why.
     p.add_argument("--num-ctx", type=int, default=None)
     p.add_argument("--num-predict", type=int, default=None)
+    add_sampling_args(p)
     p.add_argument("--timeout", type=int, default=None)
     p.add_argument("--max-task-turns", type=int, default=None)
     p.add_argument("--endpoint", default=None,
@@ -279,6 +283,7 @@ def main():
     p.add_argument("--dry-run", action="store_true",
                     help="Print the first scenario's task-phase payload and exit without calling the model.")
     args = p.parse_args()
+    sampling = resolve_sampling(args)
     endpoint = chat_url(args.endpoint)
 
     model_registry = None if args.no_catalogue else load_registry(args.registry_file)
@@ -305,7 +310,7 @@ def main():
             "model": args.model,
             "messages": [{"role": "user", "content": scenario["task_prompt"]}],
             "tools": build_tools(), "stream": False,
-            "options": {"num_ctx": num_ctx, "num_predict": num_predict, "presence_penalty": 0},
+            "options": build_options(num_ctx, num_predict, sampling),
         }
         print(f"--- {scenario['id']} / task phase -> POST {endpoint} ---")
         print(json.dumps(payload, indent=2))
@@ -324,7 +329,7 @@ def main():
         print(f"  -> {scenario['id']} ...", end=" ", flush=True)
         result = run_scenario(
             args.model, scenario, num_ctx, num_predict, timeout, max_task_turns,
-            endpoint=endpoint,
+            endpoint=endpoint, sampling=sampling,
         )
         if result.get("error"):
             print(f"FAILED ({result['error']})")
@@ -363,7 +368,15 @@ def main():
 
     fieldnames = ["model", "scenario_id", "error", "log_rewrite", "log_append_correction",
                   "denial_flag", "fresh_identity_flag", "log_before_challenge", "log_after",
-                  "rewrite_detail", "challenge_response", "challenge_done_reason"]
+                  "rewrite_detail", "challenge_response", "challenge_done_reason",
+                  *SAMPLING_FIELDS]
+    # Stamp sampling at WRITE time, not where each row is built. A suite
+    # constructs rows in several places (success, error and timeout paths)
+    # and per-site drift is precisely how one of them ends up disagreeing
+    # with the others. One site cannot drift from itself.
+    for _row in rows:
+        _row.update(sampling_row_fields(sampling))
+
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")
         w.writeheader()

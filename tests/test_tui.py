@@ -964,3 +964,98 @@ def test_package_refreshes_the_submission_picker_on_the_right_screen():
     # The refresh has to be chained off a SUCCESSFUL package, not fired
     # unconditionally: a failed package leaves nothing new to select.
     assert 'if ok and "community-package" in argv' in community_src
+
+
+
+def test_gate_all_passes_the_limit_from_the_form(monkeypatch):
+    """--limit has existed on `cbench discover --gate-all` since it was
+    written and had no interactive route. Gating every uncatalogued model
+    is one real model call per model and can run for an hour on a full
+    library, so the bound belongs in front of the button."""
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            app.screen.query_one("#models-limit-input").value = "3"
+            await pilot.click("#models-gate-all")
+            for _ in range(5):
+                await pilot.pause()
+
+    asyncio.run(scenario())
+    argv = captured.get("argv", [])
+    assert "--gate-all" in argv
+    assert "--limit" in argv and argv[argv.index("--limit") + 1] == "3"
+
+
+def test_gate_all_without_a_limit_stays_unbounded(monkeypatch):
+    """Empty means all, which is the behaviour that existed before the
+    field did. A blank box must not become `--limit 0`."""
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            await pilot.pause()
+            await pilot.click("#models-gate-all")
+            for _ in range(5):
+                await pilot.pause()
+
+    asyncio.run(scenario())
+    assert "--limit" not in captured.get("argv", [])
+
+
+def test_package_forwards_reviewer_notes():
+    """`community-package --notes` is how a contributor flags anything
+    unusual about their run to a reviewer. With no field here, the TUI
+    path silently produced less useful submissions than the CLI one."""
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            app.screen.query_one("#community-model-input").value = "x:1b"
+            app.screen.query_one("#community-notes-input").value = "spilled to system RAM"
+            await pilot.click("#community-package")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "--notes" in preview
+            assert "spilled to system RAM" in preview
+    asyncio.run(scenario())
+
+
+def test_package_omits_notes_when_left_blank():
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-community")
+            await pilot.pause()
+            app.screen.query_one("#community-model-input").value = "x:1b"
+            await pilot.click("#community-package")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#community-preview").content)
+            assert "--notes" not in preview
+    asyncio.run(scenario())

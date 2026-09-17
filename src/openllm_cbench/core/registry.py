@@ -141,6 +141,27 @@ def thinking_mode_for(model, registry=None):
     return (entry or {}).get("thinking_mode")
 
 
+def delimiters_for(model, registry=None):
+    """Returns this model's catalogued reasoning-delimiter markers, or an
+    empty tuple if it is unlisted or has none.
+
+    Accepts both spellings of the field: a flat `delimiters` (what `gate
+    --save` writes) and a nested `reasoning.delimiters` (the catalogue
+    schema's own shape, and what a hand-written entry copied from the
+    documentation will use). Refusing one of them would make the
+    documented schema and the generated one disagree, which is a bug
+    report waiting to be filed."""
+    entry = lookup(model, registry) or {}
+    raw = entry.get("delimiters")
+    if raw is None:
+        raw = (entry.get("reasoning") or {}).get("delimiters") \
+            if isinstance(entry.get("reasoning"), dict) else None
+    if raw is None:
+        return ()
+    from openllm_cbench.core.delimiters import parse_catalogued_delimiters
+    return parse_catalogued_delimiters(raw)
+
+
 def save_entry(model, entry, overlay_path=None):
     """Writes/replaces one model's entry in the local overlay file,
     creating the file if it doesn't exist yet. Does not touch the

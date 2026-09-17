@@ -23,6 +23,7 @@ from textual.widgets import (
 )
 
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
+from openllm_cbench.core.runclock import time_from_filename
 from openllm_cbench.tui.jobs import (
     RUNNABLE_SUITES, build_args, cbench_command, condensed_line_filter, parse_trial_header,
     run_job, save_job_log,
@@ -354,6 +355,17 @@ class ModelsScreen(Screen):
                 "(results/scorecards/<tag>.md) before citing the grade alone.",
                 id="models-score-legend",
             )
+            with Horizontal(id="models-limit-row"):
+                # `cbench discover --gate-all` has had a --limit since it
+                # was written, and no way to reach it from here. Gating
+                # every uncatalogued model is a real model call per model
+                # and can run for an hour on a full Ollama library; the
+                # bound belongs in front of the button that starts it,
+                # not in --help.
+                yield Static("Gate at most", id="models-limit-label")
+                yield Input(placeholder="all", id="models-limit-input",
+                            value="", type="integer")
+                yield Static("model(s) per batch", id="models-limit-suffix")
             with Horizontal(id="models-buttons"):
                 yield Button("Refresh", id="models-refresh", variant="primary")
                 yield Button("Gate + save selected", id="models-gate-selected")
@@ -505,7 +517,19 @@ class ModelsScreen(Screen):
         implementation of them here is exactly what this app's own design
         invariant exists to prevent."""
         log = self.query_one("#models-log", RichLog)
-        argv = cbench_command("discover", ["--gate-all"])
+        flags = ["--gate-all"]
+        raw = self.query_one("#models-limit-input", Input).value.strip()
+        if raw:
+            try:
+                limit = int(raw)
+            except ValueError:
+                limit = 0
+            if limit > 0:
+                flags += ["--limit", str(limit)]
+            else:
+                log.write("[bold red]Limit must be a positive whole number -- "
+                          "ignoring it and gating all uncatalogued models.[/bold red]")
+        argv = cbench_command("discover", flags)
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
         log.write("[dim]Gate-checking every uncatalogued model, one at a time -- real model "
                   "calls, so this can take a while for a long list.[/dim]")
@@ -1045,6 +1069,18 @@ class CommunityScreen(Screen):
                         placeholder="(or type a submission folder path)",
                         id="community-path-input",
                     )
+                    # `community-package --notes` is how a contributor
+                    # says what was unusual about their run -- a spilled
+                    # model, a non-default endpoint, a known-flaky pull.
+                    # It reaches the reviewer inside submission.json, and
+                    # having no field for it here meant the TUI path
+                    # silently produced less useful submissions than the
+                    # CLI one.
+                    yield Input(
+                        placeholder="Notes for the reviewer (optional) -- anything unusual "
+                                    "about this run",
+                        id="community-notes-input",
+                    )
                     yield Checkbox(
                         "Accept contributor terms (right to share, no confidential data, "
                         "accurate hardware, Apache-2.0 licence grant, published permanently) "
@@ -1177,6 +1213,9 @@ class CommunityScreen(Screen):
             return
 
         args = ["--model", model, "--zip"]
+        notes = self.query_one("#community-notes-input", Input).value.strip()
+        if notes:
+            args += ["--notes", notes]
         if self.query_one("#community-terms", Checkbox).value:
             args.append("--accept-terms")
         else:
@@ -1392,7 +1431,17 @@ class ReportsScreen(Screen):
             rows = []
             for pth in root.rglob("*.md"):
                 if pth.is_file():
-                    rows.append((pth, pth.stat().st_mtime))
+                    # Prefer the timestamp the suite wrote INTO the
+                    # filename over the one the filesystem happens to be
+                    # carrying. mtime belongs to whatever last touched
+                    # the file, so a results tree that has been through
+                    # git, a zip, or a copy shows every report as having
+                    # been written at the moment it was unpacked. See
+                    # core/runclock.py.
+                    stamped = time_from_filename(pth.name)
+                    mtime = pth.stat().st_mtime
+                    sort_key = stamped.timestamp() if stamped else mtime
+                    rows.append((pth, sort_key, stamped, mtime))
             return sorted(rows, key=lambda r: r[1], reverse=True)
 
         found = await asyncio.to_thread(scan)
@@ -1401,17 +1450,24 @@ class ReportsScreen(Screen):
         except NoMatches:
             return
 
-        for pth, mtime in found:
+        for pth, _sort, stamped, mtime in found:
             model, suite, kind = self._classify(pth, root)
-            when = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            if stamped:
+                when = stamped.strftime("%Y-%m-%d %H:%M")
+            else:
+                # No stamp in the name, so this is the filesystem's
+                # opinion and is marked as such rather than shown as if
+                # it were the run time.
+                when = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M~")
             key = table.add_row(model, suite, kind, when, pth.name)
             self._paths[key] = pth
 
         try:
             self.query_one("#reports-caption", Static).update(
                 f"{len(found)} report(s) in [bold]{root}[/bold] -- trial summaries and "
-                f"scorecards. Pick a row to read it. Newest first. Raw CSVs and run logs "
-                f"are in the tree below."
+                f"scorecards. Pick a row to read it. Newest first. A date marked [b]~[/b] came "
+                f"from the file's mtime rather than its name, so it is when the file was "
+                f"last touched, not when the run happened. Raw CSVs and run logs are in the tree below."
             )
         except NoMatches:
             pass
@@ -1456,6 +1512,10 @@ class CBenchTUI(App):
     #reports-viewer-container { width: 60%; }
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
+    #models-limit-row { height: auto; margin: 0 0 1 0; }
+    #models-limit-label { width: auto; padding: 1 1 0 0; }
+    #models-limit-suffix { width: auto; padding: 1 0 0 1; }
+    #models-limit-input { width: 12; }
     #models-table { height: 12; border: solid $accent; }
     /* Both the tree and its empty-state placeholder need the same width.
        Without this the placeholder (shown whenever community-results/

@@ -119,7 +119,7 @@ def test_summarize_gate_output_reports_clean_with_no_caveats():
     assert summary["caveats"] == []
 
 
-def test_an_unverified_channel_check_is_never_reported_as_clean():
+def test_an_unverified_channel_check_is_never_reported_as_clean(monkeypatch):
     # Found live on a 27.9B model: the think=on channel check timed out,
     # contributed nothing to `clean`, and the report said "Clean. No
     # caveats found." -- a clean bill of health for a check that never
@@ -134,14 +134,17 @@ def test_an_unverified_channel_check_is_never_reported_as_clean():
                              "quantization_level": "Q4_K_M"},
                 "modelfile": ""}
 
-    gate.fetch_show_info = fake_show
-    gate.warm_up = lambda *a, **k: (True, 1.0, 50.0)
-    gate.check_tool_call = lambda *a, **k: (True, "fine")
+    # monkeypatch, not direct assignment: these used to be assigned onto
+    # the module with no restore, so they leaked into every test that ran
+    # after this one in the same session.
+    monkeypatch.setattr(gate, "fetch_show_info", fake_show)
+    monkeypatch.setattr(gate, "warm_up", lambda *a, **k: (True, 1.0, 50.0))
+    monkeypatch.setattr(gate, "check_tool_call", lambda *a, **k: (True, "fine"))
     # think=on never completes; think=off is clean.
-    gate.check_channel_at = lambda model, think, *a, **k: (
+    monkeypatch.setattr(gate, "check_channel_at", lambda model, think, *a, **k: (
         {"ok": False, "error": "Read timed out. (read timeout=300)"} if think
         else {"ok": True, "content_len": 800, "thinking_len": 0,
-              "done_reason": "stop", "merged_channel_suspected": False, "truncated": False})
+              "done_reason": "stop", "merged_channel_suspected": False, "truncated": False}))
 
     result = run_gate("big:30b", "http://localhost:11434")
 

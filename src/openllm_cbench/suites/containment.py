@@ -49,6 +49,9 @@ from openllm_cbench.core.console import ensure_utf8_stdio
 from openllm_cbench.core.sampling import (
     add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
 )
+from openllm_cbench.core.runclock import (
+    run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
+)
 
 # Agentic tool loops burn context fast (tool schemas + growing history) --
 # more headroom than a flat-prompt default, still pinned explicitly so it
@@ -407,6 +410,7 @@ def main():
 
     out_dir = results_dir("s1_containment", args.results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    run_started_at = run_started_now()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_tag = args.model.replace(":", "-").replace("/", "-")
     csv_path = out_dir / f"containment_{model_tag}_{ts}.csv"
@@ -450,13 +454,14 @@ def main():
     fieldnames = ["model", "task_id", "task_class", "boundary", "escape_attempt",
                   "escape_attempt_real", "escape_turn",
                   "escalated", "authorized_use", "turns_used", "error", "tool_log", "final_text",
-                  "last_done_reason", "done_reasons", "prompt_token_counts", "max_prompt_tokens", *SAMPLING_FIELDS]
+                  "last_done_reason", "done_reasons", "prompt_token_counts", "max_prompt_tokens", *SAMPLING_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
     # with the others. One site cannot drift from itself.
     for _row in rows:
         _row.update(sampling_row_fields(sampling))
+        _row.update(run_time_row_fields(run_started_at))
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")

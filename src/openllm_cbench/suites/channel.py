@@ -59,6 +59,7 @@ from openllm_cbench.core.registry import (
     load_registry as load_model_registry,
     config_overrides_for,
     thinking_mode_for,
+    delimiters_for,
     banner as model_registry_banner,
 )
 from openllm_cbench.scoring.probes import (
@@ -69,8 +70,14 @@ from openllm_cbench.scoring.probes import (
     load_registry,
 )
 from openllm_cbench.core.console import ensure_utf8_stdio
+from openllm_cbench.core.delimiters import (
+    MERGE_DELIMITERS, merge_evidence, merge_suspected, parse_catalogued_delimiters,
+)
 from openllm_cbench.core.sampling import (
     add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
+)
+from openllm_cbench.core.runclock import (
+    run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
 )
 
 DEFAULT_NUM_CTX = 4096
@@ -158,63 +165,18 @@ def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampli
             data.get("done_reason", "") or "", "")
 
 
-# Reasoning delimiters this guard recognises, as (label, markers).
+# The merge guard now lives in core/delimiters.py, because the gate check
+# carried a second, older copy of it and the two had silently diverged.
+# These names are kept as this module's spelling of them: every call site
+# in the suite and its tests reads `channel_merge_*`, and renaming them
+# would be churn with no reader benefit.
 #
-# WHY A FAMILY AND NOT JUST <think>: the guard was hard-coded to
-# `<think>`, so a model that delimits its reasoning any other way slipped
-# straight past it -- and the scorer then graded the reasoning trace as
-# if it were the answer, marking the model worse than it behaved. At
-# least one shipping model family uses `[BEGIN FINAL RESPONSE]`, and
-# harness-level formats like `<|channel|>` appear in others.
-#
-# MEASURED BEFORE SHIPPING, on a 2970-row corpus: extending to this
-# family flags 78 of 1067 thinking-empty rows against the single-marker
-# guard's 30 -- a 2.6x recall increase -- at 2 false positives in 1903
-# demonstrably-split rows, i.e. 0.11%. The regression test pins that
-# ceiling, because a guard that starts firing on split rows destroys the
-# metric it protects.
-#
-# Deliberately NOT included: a generic phrase heuristic ("we must",
-# "let me", ... over a length threshold). Measured on the same corpus it
-# caught 8 further rows at 7 false positives -- roughly break-even -- and
-# it is English-specific, which is the wrong bet for a tool whose users
-# mostly run non-English models. A near-break-even signal folded into the
-# same boolean would make the flag mean less than it does now.
-MERGE_DELIMITERS = (
-    ("think_tag", ("<think>", "</think>")),
-    ("final_response_marker", ("[begin final response]", "[end final response]")),
-    ("channel_marker", ("<|channel|>",)),
-    ("reasoning_tag", ("<reasoning>", "</reasoning>")),
-)
-
-
-def channel_merge_evidence(content, thinking):
-    """Returns the delimiter-family label that fired, or "" if none did.
-
-    Separate from the boolean so the CSV can record WHICH branch fired.
-    The boolean says only that something is wrong; a run full of
-    `final_response_marker` hits and a run full of `think_tag` hits are
-    different problems with different fixes, and collapsing them loses
-    exactly the information needed to tell them apart."""
-    if thinking.strip():
-        return ""
-    c = content.lower()
-    for label, markers in MERGE_DELIMITERS:
-        if any(m in c for m in markers):
-            return label
-    return ""
-
-
-def channel_merge_suspected(content, thinking):
-    """True if the API returned no separate thinking trace but the content
-    still carries a reasoning delimiter -- a sign this model/runtime pair
-    isn't actually splitting the two channels, which would make every
-    CLEAN/CHANNEL_LEAK verdict from this run unreliable. Most relevant for
-    a GGUF pulled directly from a third-party repository rather than
-    served from the runtime's own built-in template library, where
-    channel-splitting behavior isn't guaranteed the way it is for a
-    natively supported model."""
-    return bool(channel_merge_evidence(content, thinking))
+# The suite passes this model's CATALOGUED delimiters through, which is
+# what makes `reasoning.delimiters` in models.json actually do something:
+# gate-check a model whose convention nothing built in recognises, write
+# the marker down once, and every later run of this suite knows it.
+channel_merge_evidence = merge_evidence
+channel_merge_suspected = merge_suspected
 
 
 def combine(content_verdict, thinking_verdict):
@@ -333,6 +295,13 @@ def main():
 
     prompts = load_prompts(args.prompts_file)
     registry = load_registry()
+    # This model's catalogued reasoning delimiters, if it has any. Empty
+    # for an unlisted model, which falls through to the built-in family.
+    catalogued_delims = delimiters_for(args.model, registry=model_registry) \
+        if model_registry is not None else ()
+    if catalogued_delims:
+        print(f"Catalogued reasoning delimiters for this model: "
+              f"{', '.join(catalogued_delims)}")
     variants = think_variants(args)
 
     if args.dry_run:
@@ -378,6 +347,7 @@ def main():
 
     out_dir = results_dir("s2_channel", args.results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    run_started_at = run_started_now()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_tag = args.model.replace(":", "-").replace("/", "-")
     csv_path = out_dir / f"channel_{model_tag}_{ts}.csv"
@@ -406,8 +376,8 @@ def main():
                 })
                 continue
 
-            merge_evidence = channel_merge_evidence(content, thinking)
-            merged = bool(merge_evidence)
+            merge_evidence_label = channel_merge_evidence(content, thinking, catalogued_delims)
+            merged = bool(merge_evidence_label)
             if merged and not merge_warned:
                 print(
                     f"\n  [!] WARNING: the thinking field came back empty but a <think> tag is "
@@ -432,7 +402,7 @@ def main():
                 "thinking_verdict": result["thinking_verdict"],
                 "combined_verdict": combined,
                 "merged_channel_suspected": merged,
-                "merge_evidence": merge_evidence,
+                "merge_evidence": merge_evidence_label,
                 "truncation_suspected": truncated,
                 "content_note": result["content_note"],
                 "thinking_note": result["thinking_note"],
@@ -446,13 +416,14 @@ def main():
                   "thinking_verdict", "combined_verdict", "merged_channel_suspected",
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
-                  *SAMPLING_FIELDS]
+                  *SAMPLING_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
     # with the others. One site cannot drift from itself.
     for _row in rows:
         _row.update(sampling_row_fields(sampling))
+        _row.update(run_time_row_fields(run_started_at))
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")

@@ -131,6 +131,9 @@ def _cmd_gate(argv):
     return 0 if result.get("clean") else 1
 
 
+from openllm_cbench.core.sampling import add_sampling_args
+
+
 def _cmd_assess(argv):
     """Runs a full assessment of one model: N trials each of the selected
     suites, then auto-aggregates each suite's trials into a trial-summary
@@ -177,6 +180,7 @@ def _cmd_assess(argv):
     p.add_argument("--trials", type=int, default=3,
                     help="Trials per suite (default 3 -- this framework's own pre-registered "
                          "minimum for a rate worth citing; see ARCHITECTURE.md).")
+    add_sampling_args(p)
     p.add_argument("--dry-run", action="store_true",
                     help="Pass --dry-run through to every suite invocation -- prints each "
                          "payload, calls no model, and skips aggregation since there would "
@@ -242,6 +246,33 @@ def _cmd_assess(argv):
             lock.release()
 
 
+def _sampling_argv(args, trial):
+    """The sampling flags to hand one suite invocation, given the
+    assess/score-level args and which trial this is.
+
+    Temperature, top-p and top-k pass straight through when the user set
+    them. The SEED does not: `--seed 7` with three trials means "make
+    this whole run reproducible", not "run the same trial three times",
+    so trial N gets `seed + N - 1`. Handing all three the same seed
+    produces three identical transcripts and a confidence interval
+    computed over three copies of one sample, which is worse than no
+    interval at all because it looks like evidence.
+
+    Omitting a flag entirely is deliberate where the user did not set it:
+    the suite's own resolve_sampling() then applies the pinned default
+    and generates a fresh per-trial seed, which is the existing
+    behaviour and the right one."""
+    out = []
+    for flag in ("temperature", "top_p", "top_k"):
+        value = getattr(args, flag, None)
+        if value is not None:
+            out += ["--" + flag.replace("_", "-"), str(value)]
+    seed = getattr(args, "seed", None)
+    if seed is not None:
+        out += ["--seed", str(int(seed) + trial - 1)]
+    return out
+
+
 def _assess_body(args, suites, SUITE_INFO):
     from openllm_cbench.core.paths import results_dir as _results_dir
     from openllm_cbench.scoring.aggregate import model_tag
@@ -254,6 +285,7 @@ def _assess_body(args, suites, SUITE_INFO):
         for trial in range(1, args.trials + 1):
             print(f"\n--- {suite} trial {trial}/{args.trials} ---")
             trial_args = ["--model", args.model]
+            trial_args += _sampling_argv(args, trial)
             if args.dry_run:
                 trial_args.append("--dry-run")
             rc = _dispatch_passthrough(module_path, trial_args)
@@ -354,6 +386,7 @@ def _cmd_score(argv):
     p.add_argument("--depth", choices=sorted(DEPTH_TRIALS), default="standard",
                     help="Trial count preset -- quick=1, standard=3 (default), thorough=5. "
                          "Ignored with --from-existing.")
+    add_sampling_args(p)
     p.add_argument("--suites", default="s1,s2,s3",
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--from-existing", action="store_true",
@@ -384,7 +417,10 @@ def _cmd_score(argv):
         trials = DEPTH_TRIALS[args.depth]
         print(f"Scoring '{args.model}' at depth={args.depth} ({trials} trial(s) per suite, "
               f"suites={','.join(suites)}){' (dry-run)' if args.dry_run else ''}")
-        assess_args = argparse.Namespace(model=args.model, trials=trials, dry_run=args.dry_run)
+        assess_args = argparse.Namespace(
+            model=args.model, trials=trials, dry_run=args.dry_run,
+            temperature=args.temperature, top_p=args.top_p,
+            top_k=args.top_k, seed=args.seed)
 
         lock = None
         if not args.dry_run:

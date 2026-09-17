@@ -24,6 +24,7 @@ import re
 
 import requests
 
+from openllm_cbench.core.delimiters import merge_evidence
 from openllm_cbench.core.endpoint import chat_url, show_url
 
 _PARAM_RE = re.compile(r"^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$", re.MULTILINE)
@@ -179,7 +180,8 @@ def check_tool_call(model, endpoint=None, timeout=60):
     return True, "well-formed tool call round-tripped correctly"
 
 
-def check_channel_at(model, think_value, endpoint=None, num_predict=2048, timeout=90):
+def check_channel_at(model, think_value, endpoint=None, num_predict=2048, timeout=90,
+                     extra_markers=()):
     """One chat call at a specific think state. Returns a dict with
     content, thinking, done_reason, and a merged_channel_suspected flag --
     same signature the channel suite's own runtime guard uses, so a gate
@@ -202,13 +204,21 @@ def check_channel_at(model, think_value, endpoint=None, num_predict=2048, timeou
     content = msg.get("content", "") or ""
     thinking = msg.get("thinking", "") or ""
     done_reason = data.get("done_reason", "") or ""
-    merged_suspected = (not thinking.strip()) and ("<think>" in content.lower() or "</think>" in content.lower())
+    # Was a hard-coded `<think>` test whose docstring claimed it matched
+    # the channel suite's guard. It did, until the suite's guard grew to
+    # a four-delimiter family and this copy did not -- so a model using
+    # any other convention gate-checked CLEAN and was catalogued that
+    # way, then had every row of the channel suite flagged. One
+    # definition now, in core/delimiters.py.
+    merged_evidence = merge_evidence(content, thinking, extra_markers)
+    merged_suspected = bool(merged_evidence)
     return {
         "ok": True,
         "content_len": len(content),
         "thinking_len": len(thinking),
         "done_reason": done_reason,
         "merged_channel_suspected": merged_suspected,
+        "merge_evidence": merged_evidence,
         "truncated": done_reason == "length" and not content.strip(),
     }
 
@@ -267,10 +277,21 @@ def run_gate(model, base_url=None):
 
     if result.get("has_thinking_capability"):
         channel_timeout = scaled_timeout(90, warm_seconds, tokens_per_sec, num_predict=2048)
+        # If this model is already catalogued with its own reasoning
+        # delimiters, the gate honours them. A re-gate that ignored what
+        # an operator had already gate-checked and written down would
+        # keep reporting clean on exactly the model they had recorded as
+        # needing special handling.
+        try:
+            from openllm_cbench.core.registry import delimiters_for
+            extra = delimiters_for(model)
+        except Exception:
+            extra = ()
+        result["catalogued_delimiters"] = list(extra)
         result["channel_think_on"] = check_channel_at(
-            model, True, chat_endpoint, timeout=channel_timeout)
+            model, True, chat_endpoint, timeout=channel_timeout, extra_markers=extra)
         result["channel_think_off"] = check_channel_at(
-            model, False, chat_endpoint, timeout=channel_timeout)
+            model, False, chat_endpoint, timeout=channel_timeout, extra_markers=extra)
     else:
         result["channel_think_on"] = None
         result["channel_think_off"] = None
@@ -302,7 +323,9 @@ def run_gate(model, base_url=None):
         ch = result.get(key)
         if ch and ch.get("merged_channel_suspected"):
             caveats.append(
-                f"Channel merge suspected at {label} -- reasoning text is leaking into "
+                f"Channel merge suspected at {label} "
+                f"(delimiter family: {ch.get('merge_evidence') or 'unknown'}) -- "
+                f"reasoning text is leaking into "
                 f"the visible answer instead of a separate field. Every channel-suite "
                 f"verdict at {label} would be unreliable."
             )

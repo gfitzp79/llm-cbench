@@ -138,12 +138,24 @@ cbench containment --model <model-tag> --seed 777   # exact replay of one run
 cbench containment --model <model-tag>               # seed generated + recorded per row
 ```
 
-These four flags live on the three suites themselves. `cbench score`
-and `cbench assess` do not forward them, so a scored run always uses the
-pinned defaults: comparability across models is preserved (every suite
-invocation is asked the same way) but scoring at a non-default
-temperature, or replaying a scored run at a fixed seed, needs the suite
-commands directly.
+`cbench score` and `cbench assess` take the same four flags and pass
+them down to every suite invocation they make, so a whole scorecard can
+be produced at a chosen temperature or replayed from a chosen seed.
+
+**An explicit `--seed` is offset by the trial index**, so trial 1 of
+`--seed 7` runs at 7, trial 2 at 8, and so on. This is the one place the
+flags are not passed through verbatim, and it matters: handing the same
+seed to all three trials of `--depth standard` makes them byte-identical,
+so the run costs three times as long and reports a confidence interval
+computed over three copies of one sample. The run as a whole stays
+reproducible, and the trials inside it stay distinct.
+
+Every row also carries `run_started_at`, the wall-clock time the run
+began, with a UTC offset. It is recorded rather than inferred because a
+file's mtime belongs to whatever tool last touched it -- `git clone`,
+a copy, or a zip round-trip all rewrite it, and a results tree that has
+been through any of them will otherwise claim every run happened at the
+moment it was unpacked. See `docs/METHODOLOGY_TECHNICAL.md` section 6.1.
 
 Omitting `--seed` is deliberate, not an oversight: a fixed default would
 make every trial in a multi-trial run identical, destroying the
@@ -351,12 +363,19 @@ before hand-writing an entry. Quick reference:
 | `params_b`, `quant` | No suite — but the TUI's hardware fit warning reads both | What `cbench gate` found. `params_b` is always a count in **billions**: a model whose endpoint reports it in millions (e.g. `134.52M`) is converted on the way in, not suffix-stripped. The Score screen estimates VRAM need from these two (`core/hardware.py:check_model_fit()`) and warns before a run if this machine looks too small — advisory only, it never blocks anything. An entry that couldn't be measured stores the literal string `"unknown"`, and the fit check stays silent rather than guessing. |
 | `thinking_mode` | The channel suite | `"effort"` → auto-selects an `--effort all` sweep instead of `--think`. `"ignores_think"` → auto-selects `--think false` only. Omit for an ordinary boolean toggle. |
 | `channel_separation` | Nothing — informational | `{"think_on": ..., "think_off": ...}`, each `"clean"` / `"UNRELIABLE"` / `null`. Put the actual consequence in `caveats` too — this field alone doesn't change any suite's behavior. |
+| `delimiters` | The channel suite **and** `cbench gate` | This model's reasoning delimiters, for a model that marks its reasoning in a way none of the four built-in conventions recognise. Written the way you read them, open and close joined by an ellipsis: `["<odd>...</odd>"]`. Both halves are matched separately, because a model emits the opening marker and then runs out of budget far more often than it emits the exact joined string. A hit is recorded as `catalogued` in the CSV's `merge_evidence` column rather than attributed to a built-in family, so you can tell an operator's confirmed convention from a guess. The nested `reasoning.delimiters` spelling is accepted too. |
 | `config_overrides` | Every suite, before its own hardcoded default | Recognized keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (containment), `max_task_turns` (persistence). An explicit CLI flag still wins over this. |
 | `caveats` | Nothing directly — printed verbatim | Shown in every suite's startup banner and in `cbench gate`'s report when this tag is used. Free text; this is where "think=off is unreliable for this model" belongs. |
 
-`config_overrides` is the only field any suite actually *acts on* — the
-rest exists so the next person (including future you) doesn't have to
-re-discover the same quirk by watching a run go wrong.
+`config_overrides`, `thinking_mode` and `delimiters` are the fields
+something actually *acts on*. The rest exists so the next person
+(including future you) doesn't have to re-discover the same quirk by
+watching a run go wrong.
+
+`delimiters` is worth filling in the moment you find a model that needs
+it. Both the gate check and the channel suite read it, so a convention
+you confirm once is honoured everywhere afterwards -- including on a
+re-gate, which would otherwise keep reporting the model clean.
 
 ## Scoring a model
 
@@ -507,6 +526,23 @@ inventory, and "how not to fool yourself with this tool"),
 passing). None of it assumes a specific vendor -- the same TUI screen
 ("About / extend this") has this section's short version for when
 you're already in `cbench tui`.
+
+## Methodology
+
+Two documents describe how this framework tests, what makes a result from
+it worth citing, and where it is known to be weak:
+
+- **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** -- what each suite
+  measures, what "good" looks like (controls, exclusion rules, pinned
+  sampling), how to read a result, and what this instrument has got wrong
+  and changed as a result.
+- **[docs/METHODOLOGY_TECHNICAL.md](docs/METHODOLOGY_TECHNICAL.md)** --
+  the estimators, exclusion rules with their mandatory companion checks,
+  validity gates, pre-registration rules and reproduction steps.
+
+Neither carries any measurements. This repository ships a tool, not
+anyone's results, and section 4 of the first document explains why that
+distinction is load-bearing rather than tidy-minded.
 
 ## Contributing
 

@@ -55,16 +55,33 @@ async def _populate_model_select(select: Select) -> dict:
 
     from openllm_cbench.core.discover import list_local_models
 
+    from textual.css.query import NoMatches
+
+    def _fill(options, prompt):
+        """Mutating a Select after an await can outlive the screen.
+
+        set_options() queries the Select's OWN children (SelectOverlay),
+        so checking that the Select itself still resolves proves nothing
+        -- its children are already gone when a screen is torn down
+        mid-fetch, and the NoMatches raised here becomes a WorkerFailed
+        that takes the app down. Seen as an intermittent failure in two
+        unrelated-looking tests before it was traced. Every screen with a
+        model picker funnels through this one function, so the guard
+        belongs here rather than at each call site."""
+        try:
+            select.set_options(options)
+            select.prompt = prompt
+        except NoMatches:
+            pass
+
     try:
         local = await asyncio.to_thread(list_local_models)
     except Exception:
-        select.set_options([])
-        select.prompt = "Could not list local models — type the tag below"
+        _fill([], "Could not list local models — type the tag below")
         return {}
     options = [(m["name"], m["name"]) for m in sorted(local, key=lambda x: x["name"])]
-    select.set_options(options)
-    select.prompt = "Pick a local model (or type the tag below)" if options else \
-        "No local models found — type the tag below"
+    _fill(options, "Pick a local model (or type the tag below)" if options else
+          "No local models found — type the tag below")
     return {m["name"]: m for m in local}
 
 
@@ -743,10 +760,25 @@ class ScoreScreen(Screen):
         the log after one is already underway -- a model this catalogue
         has never seen is going to be the NORM as community-submitted
         results bring in models nobody here has gated yet, not an edge
-        case worth discovering only mid-run."""
-        status = self.query_one("#score-catalogue-status", Static)
+        case worth discovering only mid-run.
+
+        Tolerates the screen being gone. Two separate workers call this
+        after an await (_probe_hardware after timing an nvidia-smi call,
+        _load_models after listing the endpoint's models), so the screen
+        can be torn down between the await returning and this running.
+        The guard was originally written at both call sites and NOT here,
+        which fixed neither: both funnel into this function, and its own
+        query_one raised from inside the guarded caller. A duplicated
+        predicate has to be fixed where it actually lives."""
+        from textual.css.query import NoMatches
+        try:
+            status = self.query_one("#score-catalogue-status", Static)
+            hardware = self.query_one("#score-hardware-status", Static)
+        except NoMatches:
+            return
         if not model:
             status.update("")
+            hardware.update("")
             return
         from openllm_cbench.core.registry import load_registry, lookup
         entry = lookup(model, load_registry())
@@ -757,7 +789,7 @@ class ScoreScreen(Screen):
                 "[bold yellow]⚠ not in your model catalogue[/bold yellow] -- this run will be "
                 "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
             )
-        self.query_one("#score-hardware-status", Static).update(self._hardware_fit_line(model, entry))
+        hardware.update(self._hardware_fit_line(model, entry))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "score-back":
@@ -1064,18 +1096,25 @@ class CommunityScreen(Screen):
         for tag, suites in models:
             n = sum(suites.values())
             opts.append((f"{tag}  ({n} CSV(s) across {len(suites)} suite(s))", tag))
-        model_select.set_options(opts)
-        model_select.prompt = ("Model to package" if opts else
-                                "No model has results on disk yet — score one first")
 
         sub_opts = [
             (f"{d['model']}  {d['date']}  ({'terms accepted' if d['accepted'] else 'terms NOT accepted'})",
              str(d["path"]))
             for d in submissions
         ]
-        sub_select.set_options(sub_opts)
-        sub_select.prompt = ("Packaged submission to validate/submit" if sub_opts else
-                              "Nothing packaged yet — use Package first")
+
+        # Same teardown hazard as _populate_model_select: set_options()
+        # queries the Select's own children, which are gone if the screen
+        # closed while the scan above was running.
+        try:
+            model_select.set_options(opts)
+            model_select.prompt = ("Model to package" if opts else
+                                    "No model has results on disk yet — score one first")
+            sub_select.set_options(sub_opts)
+            sub_select.prompt = ("Packaged submission to validate/submit" if sub_opts else
+                                  "Nothing packaged yet — use Package first")
+        except NoMatches:
+            return
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.value is Select.BLANK:

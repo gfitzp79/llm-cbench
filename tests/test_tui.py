@@ -885,6 +885,11 @@ def test_community_screen_terms_checkbox_gates_accept_terms():
             assert any("terms not accepted" in l.lower() for l in log_lines)
 
             await pilot.click("#community-terms")
+            # Let the toggle be processed before the button reads it. Without
+            # this the two clicks race and the test fails intermittently --
+            # the checkbox message is still queued when Package builds argv.
+            await pilot.pause()
+            assert app.screen.query_one("#community-terms", Checkbox).value is True
             await pilot.click("#community-package")
             await pilot.pause()
             assert "--accept-terms" in str(app.screen.query_one("#community-preview").content)

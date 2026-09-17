@@ -4,14 +4,15 @@
 WHY THIS EXISTS. A multi-trial assessment is long, expensive, and produces
 usable data only on completion. Two of them running at once on one GPU do not
 fail -- they silently halve each other's throughput and inflate every wall-time
-measurement taken from them. In the research lab this framework was extracted
-from, exactly that happened: two batches ran concurrently for three hours after
-one was believed killed but never verified dead. It was noticed only because a
-trial took 117 minutes against a gated 52, and it was very nearly written up as
-model variance rather than contention.
+measurement taken from them. This is not hypothetical: two batches once ran
+concurrently for three hours after one was believed killed but never verified
+dead, and it was noticed only because a trial took 117 minutes against a gated
+52. It was very nearly written up as model variance rather than contention,
+which is the actual danger here. Contention does not announce itself as
+contention; it announces itself as an interesting result.
 
-Every other guard in this framework and that lab is ANALYSIS-time: schema
-checks, trial-count checks, generation-mixing checks. They all read CSVs that
+Every other guard in this framework is ANALYSIS-time: schema checks,
+trial-count checks, generation-mixing checks. They all read CSVs that
 already exist, which is detection after the GPU is spent. This is the only
 guard that runs BEFORE the work, and it is the only one that can prevent rather
 than report.

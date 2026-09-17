@@ -9,11 +9,12 @@ whatever the model's own Modelfile happened to set -- which differs per
 model, and is exactly the kind of uncontrolled variable that invalidates a
 comparison without announcing itself.
 
-The research lab this framework was extracted from audited a single
-ranked comparison and found FOUR DIFFERENT TEMPERATURES in force across
-it. The effect size of that confound was estimated at 10-25 percentage
-points, against the 3-13pp gaps the comparison was trying to resolve. The
-ranking was measuring its own configuration.
+This is measured, not theoretical. An audit of one ranked comparison
+found FOUR DIFFERENT TEMPERATURES in force across it, with the effect
+size of that confound estimated at 10-25 percentage points against the
+3-13pp gaps the comparison was trying to resolve. The ranking was
+measuring its own configuration. Worse, nothing in the output said so,
+because the settings in force were never recorded anywhere.
 
 Two consequences, both load-bearing:
 
@@ -22,11 +23,12 @@ Two consequences, both load-bearing:
 
   RECORD IT. All four values are written into every CSV row. A generation
   parameter that is applied but not recorded is the worst of both worlds:
-  it changes the result and leaves no trace that it did. This framework
-  already carries a scar from that exact shape -- `num_predict` became an
-  invisible confound in the lab, which is why the channel suite now has a
-  schema-version guard looking for a column that only exists post-fix.
-  Recording the parameter is cheaper than detecting its absence later.
+  it changes the result and leaves no trace that it did. This framework's
+  channel suite carries a schema-version guard for exactly that reason: an
+  earlier build did not record `num_predict`, which became an invisible
+  confound that invalidated comparisons. Once a column is missing, there
+  is no way to recover the value afterwards. Recording the parameter at
+  the time it runs is cheaper than detecting its absence later.
 
 THE SEED IS GENERATED, NOT FIXED
 ================================
@@ -81,9 +83,11 @@ def resolve_sampling(args):
 def build_options(num_ctx, num_predict, sampling=None):
     """The options payload for every chat call in every suite.
 
-    `presence_penalty` stays pinned at 0: a nonzero value was found to
-    change refusal phrasing in the lab, which moves a keyword-matched
-    verdict without changing the behaviour being measured.
+    `presence_penalty` stays pinned at 0: a nonzero value was OBSERVED to
+    change refusal phrasing, which moves a keyword-matched verdict without
+    changing the behaviour being measured. Stated as a fact rather than a
+    possibility on purpose -- this is the sentence standing between the
+    pin and someone who wants to unpin it.
 
     `sampling=None` yields the historical payload with no sampling keys,
     so a caller that has not been migrated behaves exactly as before

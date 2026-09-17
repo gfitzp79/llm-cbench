@@ -277,10 +277,9 @@ An mtime is not a property of the run. It is a property of whatever tool last
 touched the file. `git checkout`, `git clone` and `git merge` all rewrite it,
 as does a copy, a zip round-trip, or a sync client. A results tree that has
 been through version control carries the checkout's timestamp, not the
-generation time. In the programme this framework was extracted from, 110 of 337
-result CSVs ended up stamped with a merge commit's time, which silently
-invalidated every conclusion an audit tool had drawn from reading mtimes as end
-times.
+generation time. An audit tool that reads mtime as a run's end time is
+unreliable for any result passing through version control, and will silently
+invalidate conclusions drawn from those timestamps.
 
 The fix is to record wall time when the run happens. Every suite row carries
 `run_started_at`, an ISO-8601 local timestamp with a UTC offset, written at the
@@ -303,8 +302,8 @@ one:
   apart, so the threshold is not a close call, but it must be looked at rather
   than assumed.
 - A detector that never reads clean trains operators to ignore it. A version
-  that flagged any overlap at all produced 68 findings of which 67 were false,
-  which is worse than no detector, because the one real finding was in there.
+  that flagged any overlap at all produced 68 findings of which 67 were false.
+  That is worse than no detector, because the one real finding was in there.
 
 **When contention is detected:** wall-time numbers from those runs are void.
 Row data usually survives but must be checked, not assumed. The specific hazard
@@ -327,8 +326,9 @@ row into an error row.
    mandated sensitivities together. Any one alone is not a result.
 
 **Gate before every battery, and after any change to flags, budget, model or
-task file.** Multi-hour losses in this programme came from committing battery
-time to a configuration that a ten-minute isolation probe would have settled.
+task file.** More than one multi-hour run has been lost to a configuration a
+ten-minute isolation probe would have settled. The cost asymmetry is the whole
+argument: the gate is cheap every time, and the loss it prevents is total.
 
 **A gate run that produces a complete artifact is real data and counts as a
 trial.** Not counting it produces an over-count when the battery then runs its

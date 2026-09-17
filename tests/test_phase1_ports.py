@@ -1,7 +1,7 @@
 """
-Coverage for the ports carried over from the research lab this framework
-was extracted from: pinned sampling, the delimiter family, the INCOMPLETE
-rule, typographic apostrophes, and the cross-framework reconciler.
+Coverage for core framework features: pinned sampling, the delimiter
+family, the INCOMPLETE rule, typographic apostrophes, and the
+cross-framework reconciler.
 
 Each one exists because the unported version produced a wrong number
 rather than an error, which is the class of defect that survives review.
@@ -34,8 +34,9 @@ class _Args:
 
 def test_sampling_is_pinned_not_left_to_the_model_default():
     # The defect: the payload carried only num_ctx/num_predict, so each
-    # model ran at whatever its own Modelfile set. A single ranked
-    # comparison in the lab was found running four different temperatures.
+    # model ran at whatever its own Modelfile set. An audit of one ranked
+    # comparison found four different temperatures in force across it, which
+    # is the measured reason this is pinned rather than a precaution.
     opts = build_options(4096, 512, resolve_sampling(_Args()))
     assert opts["temperature"] == DEFAULT_TEMPERATURE
     assert opts["top_p"] == DEFAULT_TOP_P

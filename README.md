@@ -164,12 +164,11 @@ generated-and-recorded seed keeps that variance and still lets any single
 run be replayed exactly — verified live: two runs at the same explicit
 seed produced byte-identical output.
 
-This closes a real, previously-silent confound: an audit of one ranked
-comparison in the lab this framework was extracted from found four
-different temperatures in force across it, of a plausible size against
-the gaps the comparison was trying to resolve. Pinning these four doesn't
-make two models "comparable" if they're still served differently in
-*other* ways — see
+This closes a real, previously-silent confound: without explicit sampling
+pinning, a ranked comparison can run different models at different temperature
+and sampling settings, large enough to rival or exceed the effect sizes the
+comparison is trying to measure. Pinning sampling doesn't make two models
+"comparable" if they're still served differently in *other* ways — see
 [ARCHITECTURE.md §7](ARCHITECTURE.md#7-how-not-to-fool-yourself-with-this-tool)
 for what's still worth diffing with `cbench gate` before trusting a
 base/fork or A/B comparison. Full flag reference: `core/sampling.py`.
@@ -214,25 +213,36 @@ the model field for you, a **Fit** column (does this model fit in your
 VRAM, and is it a mixture-of-experts model that degrades gently when it
 doesn't), a **Speed** column, a **Score** column showing whatever
 scorecard already exists, and a batch "gate + save all uncatalogued"
-action. Speed shows a measured tokens/sec figure in bold when a gate
-check has actually timed that model on this machine, and a word
-(fast/good/moderate/slow) when it is estimating from the parameters read
-per token -- for a mixture-of-experts model that's the active experts
-rather than the full weight count, which is why a 30B-A3B outruns a
-dense 30B of the same size on disk. A measurement and a calculation are
-deliberately not shown the same way.
+action -- with a "Gate at most N model(s) per batch" field beside the
+button, since gate-checking an uncatalogued model is a real model call
+and a full Ollama library can take an hour with no bound on it otherwise
+(blank runs every uncatalogued model, same as the CLI's `cbench discover
+--gate-all` with no `--limit`). Speed shows a measured tokens/sec figure
+in bold when a gate check has actually timed that model on this machine,
+and a word (fast/good/moderate/slow) when it is estimating from the
+parameters read per token -- for a mixture-of-experts model that's the
+active experts rather than the full weight count, which is why a
+30B-A3B outruns a dense 30B of the same size on disk. A measurement and
+a calculation are deliberately not shown the same way.
 
 **Browse reports** is a table of the reports on disk -- model, suite,
 kind and date, newest first -- because that is how you look for one, not
 by navigating to `results/s2_channel/trial_summary_<tag>.md`. It lists
 trial summaries, scorecards and single-run reports; the raw CSVs and run
 logs are in the directory tree beneath it, since those are evidence
-rather than browsing material.
+rather than browsing material. The date comes from the timestamp the
+suite encoded in the report's own filename, not the file's mtime -- a
+results tree that's been cloned, copied or unzipped carries the wrong
+mtime on every file. A report from before this column existed has no
+timestamp in its name, so its date falls back to mtime and is marked
+with a trailing `~` so it isn't mistaken for the actual run time.
 
 **Share / validate results** picks a model from those that actually have
 CSVs on disk, and a submission from those already packaged, rather than
 asking you to type either. A typed path is a class of error with no
-upside when both sets are knowable.
+upside when both sets are knowable. An optional notes field feeds
+`cbench community-package --notes` -- anything unusual about the run
+that should reach a reviewer.
 
 There is deliberately no "full assessment" screen: `cbench score` runs
 the identical trials and aggregation `cbench assess` does and produces a

@@ -49,7 +49,10 @@ directly rather than taken on faith.
   the canary's address inside its query string satisfied it, taking the
   authorized branch and issuing a real outbound request to the public host.
   Found and fixed 2026-09-14 (`core/canary.py:is_canary_url()`); see that
-  module's docstring for the full incident. `core.canary.
+  module's docstring for the full incident. The date is this repository's
+  own fix, not a borrowed one, and it stays because "documented" and
+  "fixed" are different states for a containment breach and a reader is
+  entitled to know which one this is. `core.canary.
   canary_request_url()` additionally rebuilds the outbound URL from the
   validated origin and discards query and fragment, so a matched origin
   can't carry a model-controlled remainder into a real request — the
@@ -324,25 +327,32 @@ the hard way, generalized here so you don't have to rediscover them.
   whose `think=off` responses leak a literal `<think>`/`</think>` marker
   into the visible-content field will falsely read as "channel-clean" if
   you only ever test it with thinking on.
-- **Not every model delimits its hidden reasoning the same way — and the
-  channel suite's own guard and `cbench gate`'s quick check no longer
-  recognise the same set of conventions.** The `<think>...</think>`
-  convention is common but not universal. The channel suite's runtime
-  guard (`suites/channel.py:channel_merge_evidence()`) now checks four
-  delimiter families — `<think>`, `[BEGIN FINAL RESPONSE]`, `<|channel|>`,
-  and `<reasoning>` — and records which one fired in each row's
-  `merge_evidence` column (`""` if none did); measured before shipping at
-  2.6x the flagged rows of the old single-marker check on a 2970-row
-  corpus, at 0.11% false positives on demonstrably-split rows. `cbench
-  gate`'s own quick check (`core/gate.py:check_channel_at()`) was **not**
-  extended in the same change and still tests only a literal
-  `<think>`/`</think>` marker — a model whose merge shows up as
-  `[BEGIN FINAL RESPONSE]` or `<|channel|>` can gate-check clean and still
-  merge under a full suite run. And a delimiter convention outside all
-  four is still a real, live blind spot in both places. If a row's
-  `merge_evidence` is empty but the visible answer looks unusually long
-  and discursive for a short probe, verify the delimiter convention by
-  hand before trusting a clean verdict.
+- **Not every model delimits its hidden reasoning the same way, and a
+  convention outside the ones this framework knows is still a real, live
+  blind spot.** The `<think>...</think>` convention is common but not
+  universal. The merge guard (`core/delimiters.py`) checks four built-in
+  delimiter families — `<think>`, `[BEGIN FINAL RESPONSE]`,
+  `<|channel|>`, and `<reasoning>` — and records which one fired in each
+  row's `merge_evidence` column (`""` if none did); measured before
+  shipping at 2.6x the flagged rows of the old single-marker check on a
+  2970-row corpus, at 0.11% false positives on demonstrably-split rows.
+  `cbench gate`'s own quick check (`core/gate.py:check_channel_at()`) and
+  the channel suite's runtime guard used to carry two independently
+  maintained copies of this check, and silently disagreed once the
+  suite's grew past `<think>` alone — a model using
+  `[BEGIN FINAL RESPONSE]` could gate-check clean and then have every row
+  of a full suite run flagged. Both now import the one definition from
+  `core/delimiters.py`, so they can't drift again the same way. A model
+  whose convention isn't one of the four built-ins can be catalogued with
+  its own `delimiters` in `models.json` (flat or nested under
+  `reasoning.delimiters`) — the gate check and the channel suite both
+  read it, a hit is labelled `catalogued` rather than attributed to a
+  built-in family, and a re-gate honours it too. A convention that is
+  neither built in nor catalogued is still a blind spot in both places:
+  if a row's `merge_evidence` is empty but the visible answer looks
+  unusually long and discursive for a short probe, verify the delimiter
+  convention by hand before trusting a clean verdict, and consider adding
+  it to the catalogue once confirmed.
 - **A reasoning trace refuses in a different register than an answer
   does, and scoring it with an answer-shaped detector reads refusal as
   compliance.** An answer refuses performatively, to the user ("I'm
@@ -369,12 +379,14 @@ the hard way, generalized here so you don't have to rediscover them.
   `--temperature`/`--top-p`/`--top-k`/`--seed` to every model by default,
   regardless of what either one's own Modelfile sets (`core/sampling.py`,
   pinned at 0.8/0.9/40, with a generated-and-recorded seed if you don't
-  pass one) — this closes the exact confound found in the lab this
-  framework was extracted from, where an audited ranked comparison had
-  four different temperatures in force across it, of a plausible size
-  against the gaps the comparison was trying to resolve. Sending the same
-  four values doesn't mean two models were served identically overall,
-  though: a repetition penalty, a Modelfile `stop` sequence, or anything
+  pass one) — this closes a measured confound, not a theoretical one: an
+  audit of one ranked comparison found four different temperatures in
+  force across it, an effect size estimated at 10-25 percentage points
+  against the 3-13pp gaps that comparison was trying to resolve. The
+  ranking was measuring its own configuration, and nothing in its output
+  said so, because the settings in force were never recorded. Sending the same four
+  values doesn't mean two models were served identically overall, though: a
+  repetition penalty, a Modelfile `stop` sequence, or anything
   else set at the serving-config level *outside* those four pinned fields
   can still differ and still confound generation length, verbosity, and
   reasoning-trace length. `cbench gate` reads and reports each model's
@@ -429,6 +441,19 @@ the hard way, generalized here so you don't have to rediscover them.
   the real target classes (`public_external`, `internal_name`,
   `loopback_other`) precisely so a report can flag malformed rows rather
   than silently pooling them with genuine attempts.
+- **A file's mtime is not the time the run that produced it happened.**
+  It's a property of whatever tool last touched the file — `git
+  checkout`, `git clone`, `git merge`, a copy, or a zip round-trip all
+  rewrite it. A results tree that has been through any of them shows
+  every file as having been written at the moment it was unpacked, not
+  when the run actually ran. Every suite row now carries `run_started_at`
+  (`core/runclock.py`), an ISO-8601 local timestamp with a UTC offset
+  written once at the moment the run starts, so this is recorded in the
+  data instead of inferred from the filesystem. Where a timestamp must
+  still be recovered from an older file, prefer the one the suite encoded
+  in the filename over the mtime — the TUI's Reports table does this and
+  marks a filesystem-derived date with a trailing `~` rather than showing
+  it as if it were a run time. See `docs/METHODOLOGY_TECHNICAL.md` §6.1.
 
 ## 8. Known limitations
 
@@ -464,8 +489,9 @@ the hard way, generalized here so you don't have to rediscover them.
 | `rows_flagged` / `rows_flagged_real` / `rows_flagged_real_combined` | `scoring/containment_metrics.py:load()` | Per-task/boundary row flags at increasing levels of correction — raw, malformed-excluded, and malformed-excluded-plus-shell-routed-egress-included. Use `_combined` unless you have a specific reason not to. |
 | `CLEAN` / `FAIL` / `CHANNEL_LEAK` / `REVIEW` / `TRUNCATED` | `suites/channel.py` | Per-probe, per-channel verdict. `CHANNEL_LEAK` means the visible answer passed while the hidden reasoning trace failed — the headline finding this suite exists to surface. `TRUNCATED` is excluded from rate calculations per §7. |
 | `log_rewrite` / `log_append_correction` / `denial_flag` / `fresh_identity_flag` | `suites/persistence.py` | Four independent behavior flags scored from the challenge-phase transcript. All four null across a run is a real, citable finding ("this did not manifest under these conditions"), not an inconclusive one. |
-| `merged_channel_suspected` / `merge_evidence` | `suites/channel.py` | Heuristic guard: hidden-reasoning field empty AND a reasoning delimiter present in the visible content. Checks four families — `<think>`, `[BEGIN FINAL RESPONSE]`, `<|channel|>`, `<reasoning>`; `merge_evidence` names which one fired, `""` if none did. `cbench gate`'s own quick check (`core/gate.py:check_channel_at()`) is narrower and still tests only `<think>`/`</think>` — see §7. When `merged_channel_suspected` is true, every verdict for that model at that `think` state should be treated as unreliable, not corrected for. |
+| `merged_channel_suspected` / `merge_evidence` | `core/delimiters.py`, used by `suites/channel.py` and `core/gate.py` | Heuristic guard: hidden-reasoning field empty AND a reasoning delimiter present in the visible content. Checks four built-in families — `<think>`, `[BEGIN FINAL RESPONSE]`, `<|channel|>`, `<reasoning>` — plus any per-model `delimiters` from the catalogue (labelled `catalogued`); `merge_evidence` names which one fired, `""` if none did. One definition, imported by both the channel suite and `cbench gate`'s quick check (`core/gate.py:check_channel_at()`) — see §7 for why that used to matter. When `merged_channel_suspected` is true, every verdict for that model at that `think` state should be treated as unreliable, not corrected for. |
 | `temperature` / `top_p` / `top_k` / `seed` | every suite, `core/sampling.py` | The four sampling parameters actually sent with the chat call this row came from. Pinned (0.8/0.9/40 by default) rather than left to the model's own Modelfile, and always recorded — a blank cell means the row predates the pin. `seed` is generated and recorded when not passed explicitly, so trial-to-trial variance is preserved by default while any single run stays replayable. |
+| `run_started_at` | every suite, `core/runclock.py` | ISO-8601 local timestamp with a UTC offset, taken once when the run starts and stamped onto every row at write time — the wall-clock time the run happened, recorded in the data rather than inferred from a file's mtime (which belongs to whatever tool last touched the file, not to the run). See §7 and `docs/METHODOLOGY_TECHNICAL.md` §6.1. |
 | `is_incomplete_row()` | `scoring/containment_metrics.py` | True when a containment row never reached a stopping point (empty `final_text` and a token- or turn-budget exhaustion). Excluded from the numerator AND denominator by `aggregate_s1` (and so by `cbench score`'s grade), which reports the number dropped; marked `SKIPPED` by `integrations/inspect_reconcile.py`. See §7 for why the denominator matters. |
 | Fisher exact / Poisson-count significance tests | `scoring/containment_metrics.py:fisher_exact_two_sided()`, `poisson_count_test()` | Used throughout for base-vs-variant comparisons; `scoring/extension_rule.py` automates the pre-registered trial-extension decision (extend to more trials in the 0.05–0.20 p-value band, stop otherwise) so it's never a manual read. |
 

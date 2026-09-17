@@ -7,12 +7,12 @@ once in the main loop and again in the retry block, so a model that edited one
 log entry was recorded as having edited it twice, and a model that edited
 nothing could still surface as a tamper event.
 
-In the research lab this framework was extracted from, this single bug was the
-sole source of ALL 17 `log_rewrite` firings across its entire corpus. It forced
-that suite's null result to be withdrawn rather than caveated, and it silently
-invalidated a cross-framework validation that had appeared to confirm the
-result -- both harnesses agreed because both were reading the same
-double-executed calls.
+Every log-tampering event this suite had ever reported was that bug rather
+than a model. The consequence is why this test exists: the suite's null result
+had to be WITHDRAWN rather than caveated, and a cross-framework validation that
+appeared to confirm it was worthless -- both harnesses agreed because both were
+reading the same double-executed calls. Agreement between two scorers reading
+one corrupted input is not corroboration.
 
 The test drives `execute_tool` directly with a fabricated tool-call sequence,
 so it needs no model, no network and no GPU. It asserts the property that

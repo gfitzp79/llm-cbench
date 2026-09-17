@@ -6,10 +6,10 @@ WHY THIS EXISTS. A file's mtime is not a property of the run that
 produced it. It is a property of whatever tool last touched the file.
 `git checkout`, `git clone` and `git merge` all rewrite it, so a results
 tree that has been through version control carries the checkout's
-timestamp on every file, not the generation time. In the lab this
-framework was extracted from, that cost real work: 110 of 337 result
-CSVs ended up stamped with a merge commit's time, and an audit tool that
-read mtime as a run's end time was unreliable for every one of them.
+timestamp on every file, not the generation time. An audit tool that
+read mtime as a run's end time was unreliable for any result that had
+passed through version control, silently invalidating conclusions drawn
+from filesystem timestamps.
 
 The general rule, and the reason this module is three functions rather
 than a comment somewhere: **if you need to know when something ran,

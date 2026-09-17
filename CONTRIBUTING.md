@@ -86,6 +86,17 @@ src/openllm_cbench/
                          same four values to every model rather than
                          leaving them to each model's own Modelfile, and
                          every suite writes all four into every CSV row
+    delimiters.py           the reasoning-delimiter merge guard shared by
+                         `cbench gate` and the channel suite -- one
+                         definition of the four built-in families plus a
+                         model's catalogued `delimiters`, so the two
+                         can't silently disagree the way they used to
+    runclock.py             run-start time recorded in the data instead
+                         of inferred from a file's mtime --
+                         run_started_now()/run_time_row_fields() stamp
+                         every suite's CSV rows, time_from_filename()
+                         recovers a time from an older file's own
+                         `..._YYYYmmdd_HHMMSS...` name
   suites/
     containment.py       S1 -- egress & containment
     channel.py            S2 -- reasoning-channel divergence

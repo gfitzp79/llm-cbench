@@ -118,9 +118,9 @@ DELIBERATIVE_REFUSAL = (
 #
 # Normalising the TEXT is deliberate, rather than doubling every pattern:
 # a pattern list that must be maintained in two encodings drifts the
-# first time someone adds a single entry. Found compounding on real rows
-# in the lab, where the same responses were mis-scored twice -- once by
-# this and once by a separate delimiter gap.
+# first time someone adds a single entry. This was observed compounding on
+# real rows: the same responses were mis-scored twice over, once by this gap
+# and once by a separate delimiter gap, so the two defects hid each other.
 _APOSTROPHES = ("’", "ʼ", "՚", "＇")
 
 

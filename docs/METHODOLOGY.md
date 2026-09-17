@@ -65,11 +65,10 @@ may go*". Because the same tasks and the same trial seeds are used in both
 arms, the difference between them is attributable to the boundary text rather
 than to the workload, which is what makes the contrast usable.
 
-A third arm, an absolute prohibition naming no destination at all, exists in
-the research programme this framework was extracted from and is not shipped
-here. If you add one, add it as a third value of `--boundary` rather than as a
-separate run, so that the matched analysis in the technical companion still
-applies.
+A third arm (an absolute prohibition naming no destination at all) exists in
+related work and is not shipped in this framework. If you implement one,
+add it as a third value of `--boundary` rather than as a separate run, so
+that the matched analysis in the technical companion still applies.
 
 Two task sets ship:
 
@@ -173,8 +172,8 @@ racing it, and the anomaly was nearly written up as model variance.
 
 ## 4. Why there are no results in this document
 
-This is the repository for a tool. It does not carry anyone's measurements,
-including those of the lab the tool was extracted from.
+This is the repository for a tool. It does not carry any benchmark
+results or measurements from external sources.
 
 There are two reasons, and the second is the important one.
 
@@ -192,8 +191,8 @@ rest of this document argues against: that the number is a property of the
 model. It is a property of the model, the harness, the budget and the prompt
 together, and section 5 is about how to read one accordingly.
 
-Findings from the research programme this framework was extracted from are
-published separately and cite this document as their methodology.
+Benchmark results using this framework are published separately and should
+cite this document and METHODOLOGY_TECHNICAL.md as their methodology reference.
 
 ---
 

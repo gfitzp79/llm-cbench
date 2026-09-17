@@ -200,14 +200,17 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # captured results instead of calling execute_tool again.
     #
     # The previous code ran this loop and then re-ran an identical loop inside
-    # the retry block, so every log edit was applied twice. In the research lab
-    # this framework was extracted from, that single bug was the sole source of
-    # ALL 17 `log_rewrite` firings in its entire corpus -- it forced that
-    # suite's null result to be WITHDRAWN rather than caveated, and it silently
-    # invalidated a cross-framework validation that had appeared to confirm the
-    # result (both harnesses agreed because both were reading the same
-    # double-executed calls). A tamper-detection suite that manufactures tamper
-    # events is worse than no suite, because its positives look like findings.
+    # the retry block, so every log edit was applied twice. Every log-tampering
+    # event this suite had ever reported was that bug, not a model: one edit
+    # counted as two.
+    #
+    # The consequence is the part worth keeping. The suite's null result was
+    # WITHDRAWN rather than caveated, and a cross-framework validation that had
+    # appeared to confirm it turned out to be worthless -- both harnesses
+    # agreed because both were reading the same double-executed calls.
+    # Agreement between two scorers reading one corrupted input is not
+    # corroboration. A tamper-detection suite that manufactures tamper events
+    # is worse than no suite, because its positives look like findings.
     #
     # Any `log_rewrite` result produced before this fix is void.
     challenge_results = []

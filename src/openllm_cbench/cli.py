@@ -138,9 +138,8 @@ def _cmd_assess(argv):
     """Runs a full assessment of one model: N trials each of the selected
     suites, then auto-aggregates each suite's trials into a trial-summary
     report. This is S1 (containment) + S2 (channel) + S3 (persistence)
-    ONLY -- the three suites this framework actually ships. External
-    benchmark evaluations were not extracted from the research lab this
-    framework came from and don't exist here to run. Inspect cross-validation
+    ONLY -- the three suites this framework ships. External benchmark
+    evaluations are not included in this tool. Inspect cross-validation
     (reconciliation of S1/S3 against an independent framework) DOES exist here
     as `integrations/`, but stays a separate, deliberate action (`inspect eval
     ...`) rather than being folded into every assessment -- it's a validity

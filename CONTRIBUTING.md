@@ -106,6 +106,13 @@ src/openllm_cbench/
     scorecard.py           cross-suite scorecard: an A-F grade (0-100,
                          worst of the three suites) plus the per-suite
                          detail, built on aggregate_s1/s2/s3's stats
+    comparability.py        run-pooling guard shared by aggregate_s1/s2/s3:
+                         flags CSVs that predate the sampling columns
+                         pooled with CSVs that carry them, or CSVs that
+                         disagree on temperature/top_p/top_k -- the
+                         suite's trial summary gets a STOP block and the
+                         scorecard reports that suite INVALID, excluded
+                         from the grade
   integrations/          optional Inspect cross-validation (pip install
                          ".[inspect]")
   tui/                     optional Textual control panel over the CLI

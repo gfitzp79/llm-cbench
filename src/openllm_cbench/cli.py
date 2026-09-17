@@ -32,6 +32,8 @@ Usage:
     cbench aggregate --suite s1 --model <model-tag>
     cbench extension-rule --pair <base-tag> <variant-tag>   # pre-registered stopping rule
     cbench guardrail --csv <path>
+    cbench score-probes                           # standalone: score newest CSV's probes (or pass a path)
+    cbench score-containment                        # standalone: re-score S1 CSVs with richer egress metrics
     cbench tui                                   # requires: pip install "openllm-cbench[tui]"
 """
 

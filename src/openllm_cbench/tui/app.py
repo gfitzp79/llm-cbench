@@ -349,10 +349,11 @@ class ModelsScreen(Screen):
                 "run -- not an average, see \"Scoring a model\" in README.md. "
                 "\"not scored\" = never run through `cbench score`. \"N/A\" = nothing "
                 "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
-                "task sets) -- that suite is excluded from the grade, don't trust it "
-                "yet regardless. Trailing \"*\" = an otherwise-ok suite still has an "
-                "unresolved caveat -- read the full scorecard "
-                "(results/scorecards/<tag>.md) before citing the grade alone.",
+                "task sets, or pooled CSVs that disagree on sampling / mix CSVs that "
+                "recorded it with ones that predate it) -- that suite is excluded from "
+                "the grade, don't trust it yet regardless. Trailing \"*\" = an "
+                "otherwise-ok suite still has an unresolved caveat -- read the full "
+                "scorecard (results/scorecards/<tag>.md) before citing the grade alone.",
                 id="models-score-legend",
             )
             with Horizontal(id="models-limit-row"):

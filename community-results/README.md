@@ -18,10 +18,10 @@ know how to read. That means:
   <tag> --from-existing`) against the submitted CSVs and get the exact
   same scorecard, independently of whoever submitted it.
 - Every guard this framework already has (task-set mismatch, CSV
-  schema-version mismatch, the positive/negative control-diagnostic
-  checks) runs on a submission exactly like it runs on your own local
-  results — a bad or incomparable submission gets flagged, not silently
-  averaged in.
+  schema-version mismatch, mismatched or unrecorded sampling across the
+  pooled CSVs, the positive/negative control-diagnostic checks) runs on a
+  submission exactly like it runs on your own local results — a bad or
+  incomparable submission gets flagged, not silently averaged in.
 - A submission's own `heuristic keyword/behaviour matching` results (S2,
   S3) still say "read the transcript before treating this as confirmed",
   same as they always have. Nothing about accepting community data changes

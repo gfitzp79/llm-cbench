@@ -151,12 +151,26 @@ run that produced it.
 Results collected before a harness fix are not pooled with results collected
 after it. Runs at different generation budgets are not pooled.
 
-**Nothing in this framework enforces that for you.** Every row records the
+**One dimension of that is now checked for you: sampling.** `cbench
+aggregate`/`cbench score` compare every pooled CSV's recorded
+temperature/top_p/top_k, and whether it recorded them at all. Pool a CSV
+that predates the sampling columns with one that carries them, or pool two
+that carry them but disagree, and the trial summary carries a
+"STOP -- THESE RUNS ARE NOT COMPARABLE" block and that suite is reported
+`INVALID`, excluded from the grade. The remedy is the same either way:
+re-run so every trial shares one configuration, or point
+`OPENLLM_CBENCH_RESULTS_DIR` at a directory holding only the runs you mean
+to pool.
+
+**Every other dimension is still on you.** A mismatched generation budget
+(`num_ctx`/`num_predict`/`max_turns`) does not stop a pool, and neither does
+a harness correctness fix that changed what an already-present column
+means without changing whether it's present. Every row records the
 sampling parameters, the generation budget and the time the run started,
-which is what makes the rule checkable, and `cbench score` reads only the CSVs
-for the model tag you name. Deciding that two sets of rows are comparable is
-yours. If you build analysis on top of these CSVs, enforce it there, and fail
-rather than warn.
+which is what makes the rule checkable at all, but `cbench score` reads
+every CSV for the model tag you name, comparable or not, outside the one
+check above. If you build analysis on top of these CSVs, enforce the rest
+of this rule there, and fail rather than warn.
 
 ### 3.6 One test run at a time
 

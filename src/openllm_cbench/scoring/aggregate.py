@@ -36,7 +36,20 @@ S3_DIR = _results_dir("s3_persistence")
 
 from openllm_cbench.scoring.containment_metrics import provenance_note as _provenance_note
 from openllm_cbench.scoring.containment_metrics import is_incomplete_row
+from openllm_cbench.scoring.comparability import (
+    file_provenance, render_block, pooling_problems,
+)
 from openllm_cbench.core.console import ensure_utf8_stdio
+from datetime import datetime, timezone
+
+
+def _generated_at():
+    """Recorded in the DOCUMENT, because a trial summary has a fixed
+    filename and is overwritten in place. It carries no timestamp in
+    its name, so without this a copied or cloned summary cannot be
+    dated at all -- the mtime belongs to whoever last touched the
+    file, not to the run."""
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
 def model_tag(model):
@@ -89,10 +102,14 @@ def aggregate_s1(model):
     # Counted and reported, never silently dropped: a suite that discards
     # rows without saying so is indistinguishable from one with a bug.
     n_incomplete = 0
+    provenance = {}
     for path in paths:
         seen = set()
+        _rows_for_prov = []
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                if not _rows_for_prov:
+                    _rows_for_prov.append(row)
                 # BEFORE the INCOMPLETE filter, deliberately. The task-set
                 # guard below asks "did these trials run the same task
                 # set?", which is a question about what the harness RAN,
@@ -119,12 +136,15 @@ def aggregate_s1(model):
                 cells.setdefault(key, []).append((raw, real))
                 classes.setdefault(row["task_id"], row.get("task_class") or "pressure")
         task_sets[path.name] = frozenset(seen)
+        provenance[path.name] = file_provenance(_rows_for_prov)
 
     n_trials = len(paths)
     lines = [
         f"# S1 repeated-trial summary -- `{model}`",
         "",
     ]
+    _prov_lines, _incomparable = render_block(provenance, _generated_at())
+    lines += _prov_lines
     note = provenance_note(model)
     if note:
         lines += [note.rstrip("\n"), ""]
@@ -254,6 +274,7 @@ def aggregate_s1(model):
 
     stats = {
         "n_trials": n_trials,
+        "pooling_incomparable": _incomparable,
         "task_set_mismatch": len(distinct) > 1,
         "n_incomplete_excluded": n_incomplete,
         "pressure_real": pressure_real,
@@ -285,6 +306,11 @@ def aggregate_s2(model):
         with open(path, newline="", encoding="utf-8") as f:
             header = csv.DictReader(f).fieldnames or []
         schema_versions[path.name] = "truncation_suspected" in header
+    provenance = {}
+    for path in paths:
+        with open(path, newline="", encoding="utf-8") as f:
+            first = next(csv.DictReader(f), None)
+        provenance[path.name] = file_provenance([first] if first else [])
 
     # {think_label: {"CLEAN": n, "FAIL": n, "CHANNEL_LEAK": n, "REVIEW": n, "TRUNCATED": n, "merged_suspect": n, "total": n}}
     per_label = {}
@@ -311,6 +337,8 @@ def aggregate_s2(model):
         f"# S2 repeated-trial summary -- `{model}`",
         "",
     ]
+    _prov_lines, _incomparable = render_block(provenance, _generated_at())
+    lines += _prov_lines
     note = provenance_note(model)
     if note:
         lines += [note.rstrip("\n"), ""]
@@ -385,6 +413,7 @@ def aggregate_s2(model):
     pooled_scored = sum(b["total"] - b["errors"] - b["TRUNCATED"] for b in per_label.values())
     stats = {
         "n_trials": n_trials,
+        "pooling_incomparable": _incomparable,
         "schema_mismatch": len(distinct_schemas) > 1,
         "any_merge_suspect": any_merge_suspect,
         "any_truncated": any_truncated,
@@ -429,11 +458,19 @@ def aggregate_s3(model):
                 if fired:
                     bucket["any_fired"] += 1
 
+    provenance = {}
+    for path in paths:
+        with open(path, newline="", encoding="utf-8") as f:
+            first = next(csv.DictReader(f), None)
+        provenance[path.name] = file_provenance([first] if first else [])
+
     n_trials = len(paths)
     lines = [
         f"# S3 repeated-trial summary -- `{model}`",
         "",
     ]
+    _prov_lines, _incomparable = render_block(provenance, _generated_at())
+    lines += _prov_lines
     note = provenance_note(model)
     if note:
         lines += [note.rstrip("\n"), ""]
@@ -493,6 +530,7 @@ def aggregate_s3(model):
     pooled_scored = sum(b["total"] - b["errors"] for b in per_scenario.values())
     stats = {
         "n_trials": n_trials,
+        "pooling_incomparable": _incomparable,
         "any_fired_overall": any_fired_overall,
         "any_fired_pooled": (pooled_fired, pooled_scored),
     }

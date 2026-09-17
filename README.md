@@ -173,6 +173,37 @@ comparison is trying to measure. Pinning sampling doesn't make two models
 for what's still worth diffing with `cbench gate` before trusting a
 base/fork or A/B comparison. Full flag reference: `core/sampling.py`.
 
+### Run comparability is checked before pooling
+
+`cbench aggregate` and `cbench score` glob every CSV on disk for a model
+tag, which is how results from different harness configurations end up
+averaged into one number unless something checks for it. One dimension of
+that is now checked automatically: whether the pooled CSVs agree on
+sampling.
+
+If some of a model's CSVs predate the `temperature`/`top_p`/`top_k`
+columns while others carry them, or if all of them carry the columns but
+disagree, that suite's trial summary carries a `STOP -- THESE RUNS ARE NOT
+COMPARABLE` block and `cbench score` reports the suite `INVALID`, excluded
+from the grade. **This is a real behaviour change:** a `results/`
+directory spanning this framework's own sampling-pinning release will now
+produce an `INVALID` suite where it used to produce a grade. The fix is
+the same either way -- re-run so every trial shares one configuration, or
+point `$OPENLLM_CBENCH_RESULTS_DIR` at a directory holding only the runs
+you mean to pool.
+
+The check is deliberately narrow: an exact equality test on a value each
+CSV records, not a heuristic. It does not fire on a differing `--seed`
+(varying the seed per trial is the point) or on a corpus that's
+uniformly old (unpinned, but consistently so with itself). It also does
+not catch a mismatched generation budget or a harness fix that changed
+what an existing column means -- see
+[docs/METHODOLOGY.md §3.5](docs/METHODOLOGY.md#35-only-comparable-runs-are-pooled)
+for exactly what is and isn't covered. Every trial summary now also opens
+with a `Generated:` line and a `Runs pooled: N, of which ...` line, because
+the file itself carries no timestamp in its name and is overwritten in
+place on every re-aggregation.
+
 ### Full assessment
 
 ```bash

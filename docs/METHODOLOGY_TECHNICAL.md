@@ -252,13 +252,24 @@ after the compute is spent. Prefer the ones that run before the work.
 | **run lock** (`core/runlock.py`) | before a batch | two batches sharing a GPU |
 | **gate check** (`cbench gate`) | before a battery | committing hours to a config that produces no data |
 | **catalogue banner** (`core/registry.py`) | at every suite start | citing a run against a model whose gaps were never checked |
-| **recorded sampling and budget columns** | in every row | pooling incompatible runs without noticing |
+| **pooling-comparability guard** (`scoring/comparability.py`) | at aggregation (`cbench aggregate`/`cbench score`) | pooling CSVs with mixed sampling instrumentation, or disagreeing pinned sampling, into one rate without noticing |
+| **recorded generation-budget columns** | in every row | nothing automatic -- checking these against each other before pooling is still your own job |
 
-The last of those is a guard only in the sense that it makes the mistake
-visible afterwards. **This framework does not refuse to pool incompatible
-runs for you.** Section 3.5 of the companion document states the rule; the
-columns let you check it; nothing enforces it. If you build analysis on top of
-these CSVs, enforce it there, and fail loudly rather than warning.
+The pooling-comparability guard is a real refusal, not just visibility: when
+it fires, the affected suite's trial summary carries a
+"STOP -- THESE RUNS ARE NOT COMPARABLE" block and its scorecard verdict is
+`INVALID`, excluded from the grade. It is deliberately narrow -- two exact
+equality checks and nothing else: (1) some pooled CSVs carry the sampling
+columns and some predate them, (2) all carry them but disagree on
+temperature/top_p/top_k. A differing `seed` does not fire it; varying the
+seed per trial is the intended behaviour.
+
+**This framework still does not refuse to pool a mismatched generation
+budget, or two runs straddling a harness fix that changed what an
+already-present column means, for you.** Section 3.5 of the companion
+document states the rule for those; the columns let you check it; nothing
+enforces it. If you build analysis on top of these CSVs, enforce that part
+yourself, and fail loudly rather than warning.
 
 Two implementation notes that cost real time to learn:
 

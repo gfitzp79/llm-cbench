@@ -395,6 +395,26 @@ the hard way, generalized here so you don't have to rediscover them.
   unpinned *before* either one is run through a real suite — do this
   before comparing two models, not after a surprising result makes you go
   looking for why.
+- **Pooling runs from before a fix with runs from after it used to be
+  entirely on you — one narrow axis of that is now checked.**
+  `cbench aggregate`/`cbench score` glob every CSV on disk for a model tag,
+  which is how a `results/` directory spanning several harness versions
+  gets averaged into one confident-looking rate. `scoring/comparability.py`
+  checks exactly one thing: whether the pooled CSVs agree on recorded
+  sampling (`temperature`/`top_p`/`top_k`), including whether they
+  recorded it at all. Either failure — mixed instrumentation, or matching
+  instrumentation with disagreeing values — puts a `STOP` block in that
+  suite's trial summary and marks its scorecard verdict `INVALID`, excluded
+  from the grade. That is a real behaviour change: a `results/` directory
+  that predates this framework's own sampling-pinning release, mixed with
+  CSVs from after it, now produces `INVALID` where it used to produce a
+  grade. The check deliberately does not fire on a differing `seed`
+  (varying it per trial is the point) or on a corpus that is uniformly old
+  and therefore internally consistent, and it does not catch a mismatched
+  generation budget or a harness fix that changed what an already-present
+  column means — those are still yours to check. See
+  `docs/METHODOLOGY.md` §3.5 and `docs/METHODOLOGY_TECHNICAL.md` §6 for the
+  exact boundary of what is and isn't covered.
 - **A gate check that times out is an absent measurement, not a failed
   one, and reporting it as "the model failed X" states a false claim
   about the model rather than the machine.** Found live: a 27.9B dense
@@ -492,6 +512,7 @@ the hard way, generalized here so you don't have to rediscover them.
 | `merged_channel_suspected` / `merge_evidence` | `core/delimiters.py`, used by `suites/channel.py` and `core/gate.py` | Heuristic guard: hidden-reasoning field empty AND a reasoning delimiter present in the visible content. Checks four built-in families — `<think>`, `[BEGIN FINAL RESPONSE]`, `<|channel|>`, `<reasoning>` — plus any per-model `delimiters` from the catalogue (labelled `catalogued`); `merge_evidence` names which one fired, `""` if none did. One definition, imported by both the channel suite and `cbench gate`'s quick check (`core/gate.py:check_channel_at()`) — see §7 for why that used to matter. When `merged_channel_suspected` is true, every verdict for that model at that `think` state should be treated as unreliable, not corrected for. |
 | `temperature` / `top_p` / `top_k` / `seed` | every suite, `core/sampling.py` | The four sampling parameters actually sent with the chat call this row came from. Pinned (0.8/0.9/40 by default) rather than left to the model's own Modelfile, and always recorded — a blank cell means the row predates the pin. `seed` is generated and recorded when not passed explicitly, so trial-to-trial variance is preserved by default while any single run stays replayable. |
 | `run_started_at` | every suite, `core/runclock.py` | ISO-8601 local timestamp with a UTC offset, taken once when the run starts and stamped onto every row at write time — the wall-clock time the run happened, recorded in the data rather than inferred from a file's mtime (which belongs to whatever tool last touched the file, not to the run). See §7 and `docs/METHODOLOGY_TECHNICAL.md` §6.1. |
+| `pooling_incomparable` (scorecard `INVALID`) | `scoring/comparability.py`, read by `aggregate_s1`/`aggregate_s2`/`aggregate_s3` and `scoring/scorecard.py` | True when a suite's pooled CSVs mix sampling instrumentation (some carry `temperature`/`top_p`/`top_k`, some predate the columns) or agree on carrying it but disagree on the values. Puts a `STOP` block in that suite's trial summary and excludes the suite from the scorecard's grade. Two exact equality checks only, never a heuristic — see §7 for the boundary of what this does and doesn't catch. |
 | `is_incomplete_row()` | `scoring/containment_metrics.py` | True when a containment row never reached a stopping point (empty `final_text` and a token- or turn-budget exhaustion). Excluded from the numerator AND denominator by `aggregate_s1` (and so by `cbench score`'s grade), which reports the number dropped; marked `SKIPPED` by `integrations/inspect_reconcile.py`. See §7 for why the denominator matters. |
 | Fisher exact / Poisson-count significance tests | `scoring/containment_metrics.py:fisher_exact_two_sided()`, `poisson_count_test()` | Used throughout for base-vs-variant comparisons; `scoring/extension_rule.py` automates the pre-registered trial-extension decision (extend to more trials in the 0.05–0.20 p-value band, stop otherwise) so it's never a manual read. |
 

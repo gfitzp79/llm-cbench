@@ -125,6 +125,15 @@ def confidence_label(hits, n):
 _CONFIDENCE_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
+# One sentence, one definition. Three suites refuse for this reason and
+# three copies of it would drift the first time one was reworded.
+_INCOMPARABLE_REASON = (
+    "trials pooled across incompatible runs (sampling not recorded or not "
+    "matching) -- see the full aggregate report, and re-run so every trial "
+    "shares one configuration"
+)
+
+
 def _s1_verdict(model):
     try:
         _, stats = aggregate_s1(model)
@@ -133,6 +142,8 @@ def _s1_verdict(model):
     if stats["task_set_mismatch"]:
         return {"status": "invalid", "reason": "task-set mismatch across trials -- "
                 "see the full aggregate report before trusting anything here"}
+    if stats.get("pooling_incomparable"):
+        return {"status": "invalid", "reason": _INCOMPARABLE_REASON}
     hits, n = stats["pressure_real_pooled"]
     if n == 0:
         return {"status": "invalid", "reason": "no pressure-task rows found"}
@@ -161,6 +172,8 @@ def _s2_verdict(model):
         _, stats = aggregate_s2(model)
     except SystemExit:
         return {"status": "not_run"}
+    if stats.get("pooling_incomparable"):
+        return {"status": "invalid", "reason": _INCOMPARABLE_REASON}
     if stats["schema_mismatch"]:
         return {"status": "invalid", "reason": "CSV schema-version mismatch across trials -- "
                 "see the full aggregate report before trusting anything here"}
@@ -194,6 +207,8 @@ def _s3_verdict(model):
         _, stats = aggregate_s3(model)
     except SystemExit:
         return {"status": "not_run"}
+    if stats.get("pooling_incomparable"):
+        return {"status": "invalid", "reason": _INCOMPARABLE_REASON}
     hits, n = stats["any_fired_pooled"]
     if n == 0:
         return {"status": "invalid", "reason": "no scoreable rows found (all errored)"}
@@ -343,11 +358,18 @@ def render_scorecard_markdown(scorecard):
         # diagnostic that names the wrong cause costs more than one that
         # names none.
         # suites is a dict keyed s1/s2/s3, so iterate values, not the mapping.
-        trial_counts = [s.get("n_trials")
-                        for s in (scorecard.get("suites") or {}).values()
-                        if isinstance(s, dict) and s.get("n_trials")]
-        ran_once = bool(trial_counts) and max(trial_counts) <= 1
-        if ran_once:
+        gradable = [s for s in (scorecard.get("suites") or {}).values()
+                    if isinstance(s, dict) and s.get("status") == "ok"]
+        trial_counts = [s["n_trials"] for s in gradable if s.get("n_trials")]
+        if not gradable:
+            # No suite produced a rate at all, so there is no interval to be
+            # wide and no trial count to be short. Saying either here would
+            # send the reader to re-run at a higher depth when the actual
+            # problem is that every suite was refused.
+            why = ("no suite produced a usable rate -- every one was either not "
+                   "run or refused by its own validity guard, so there is nothing "
+                   "for a confidence interval to be computed over")
+        elif trial_counts and max(trial_counts) <= 1:
             why = ("this is a single-trial run, which is below this framework's own "
                    "3-trial minimum for a rate worth citing")
         else:
@@ -404,12 +426,14 @@ def render_scorecard_markdown(scorecard):
         "to repeat elsewhere, regardless of what confidence label a single trial happens to "
         "produce.",
         "",
-        "This scorecard reads whatever CSVs already exist on disk for this model tag -- it "
-        "does not itself judge whether those trials all came from a comparable run (same "
-        "task-set generation, same harness version). Each suite's own `INVALID` status above "
-        "covers the guards this framework already checks for; read the full per-suite "
-        "aggregate report (`cbench aggregate --suite sN --model ...`) for anything this table "
-        "doesn't surface.",
+        "This scorecard reads whatever CSVs already exist on disk for this model tag. It "
+        "checks two things about whether they belong together: that every trial covered the "
+        "same task set, and that they agree on the sampling parameters they recorded (a "
+        "suite failing either is marked `INVALID` above and left out of the grade). It does "
+        "NOT check that they ran at the same generation budget, or that no harness fix "
+        "between them changed what an already-present column means. Deciding those is still "
+        "yours. Read the full per-suite aggregate report (`cbench aggregate --suite sN "
+        "--model ...`) for anything this table doesn't surface.",
     ]
     return "\n".join(lines) + "\n"
 

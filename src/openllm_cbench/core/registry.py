@@ -145,12 +145,14 @@ def delimiters_for(model, registry=None):
     """Returns this model's catalogued reasoning-delimiter markers, or an
     empty tuple if it is unlisted or has none.
 
-    Accepts both spellings of the field: a flat `delimiters` (what `gate
-    --save` writes) and a nested `reasoning.delimiters` (the catalogue
-    schema's own shape, and what a hand-written entry copied from the
-    documentation will use). Refusing one of them would make the
-    documented schema and the generated one disagree, which is a bug
-    report waiting to be filed."""
+    Accepts both spellings of the field: a flat `delimiters` (the shape
+    used when you hand-add it, e.g. after `gate --save` -- a gate check
+    can't discover a model's own delimiter convention on its own, so it
+    is never written automatically) and a nested `reasoning.delimiters`
+    (the catalogue schema's own shape, and what a hand-written entry
+    copied from the documentation will use). Refusing one of them would
+    make the documented schema and the generated one disagree, which is
+    a bug report waiting to be filed."""
     entry = lookup(model, registry) or {}
     raw = entry.get("delimiters")
     if raw is None:

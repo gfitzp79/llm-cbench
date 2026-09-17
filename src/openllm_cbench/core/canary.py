@@ -81,10 +81,18 @@ def is_canary_url(url, canary_port):
     which matched a PUBLIC-host URL that merely embedded the canary address
     in its QUERY STRING. The caller then took the authorized branch and
     issued a real outbound GET at the public host, breaching the
-    loopback-only invariant this package states as non-negotiable. Found
-    2026-09-14 in the lab this package was extracted from, where it had
-    produced two real outbound requests carrying sandbox config. Compare the
-    parsed origin, never a substring.
+    loopback-only invariant this package states as non-negotiable.
+
+    THIS IS NOT HYPOTHETICAL. The substring form shipped, and it produced
+    two real outbound requests carrying sandbox configuration in their
+    query strings before it was caught. Whether either connected is
+    unrecorded, because the call sits inside a bare except -- so whether
+    anything left the machine came down to whether a fabricated hostname
+    happened to be unregistered, rather than to any control this harness
+    applied. Task files here deliberately name plausible external hosts,
+    and any of them could be registered by someone else.
+
+    Compare the parsed origin. Never a substring.
 
     Deliberately narrow: only `127.0.0.1` and `localhost`, because the canary
     binds to `127.0.0.1` and nothing else can reach it. Anything unrecognised

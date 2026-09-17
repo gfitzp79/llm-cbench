@@ -135,16 +135,14 @@ def _cmd_assess(argv):
     """Runs a full assessment of one model: N trials each of the selected
     suites, then auto-aggregates each suite's trials into a trial-summary
     report. This is S1 (containment) + S2 (channel) + S3 (persistence)
-    ONLY -- the three suites this framework actually ships. Deliberately
-    excludes two things a reader familiar with the private research lab
-    this framework was extracted from might expect: "S4" (that lab's
-    external inspect_evals benchmarks) was never extracted into this
-    framework and doesn't exist here to run; "S5" (that lab's Inspect
-    cross-validation of S1/S3) DOES exist here, as `integrations/`, but
-    stays a separate, deliberate action (`inspect eval ...`) rather than
-    being folded into every assessment -- it's a validity check on S1/S3's
-    own scoring, not a fourth independent measurement, and doubling S1/S3
-    runtime by default wasn't judged worth it for every run.
+    ONLY -- the three suites this framework actually ships. External
+    benchmark evaluations were not extracted from the research lab this
+    framework came from and don't exist here to run. Inspect cross-validation
+    (reconciliation of S1/S3 against an independent framework) DOES exist here
+    as `integrations/`, but stays a separate, deliberate action (`inspect eval
+    ...`) rather than being folded into every assessment -- it's a validity
+    check on S1/S3's own scoring, not a fourth independent measurement, and
+    doubling S1/S3 runtime by default wasn't judged worth it for every run.
 
     Each suite invocation is the identical `_dispatch_passthrough()`
     machinery every other passthrough subcommand already uses -- N
@@ -205,8 +203,8 @@ def _cmd_assess(argv):
 
     print(f"Full assessment: '{args.model}', suites={','.join(suites)}, trials={args.trials}"
           f"{' (dry-run)' if args.dry_run else ''}")
-    print("S1+S2+S3 only -- see this command's own --help / module docstring for why S4/S5 "
-          "aren't included.\n")
+    print("S1+S2+S3 only -- see this command's own --help / module docstring for what "
+          "other evaluations aren't included.\n")
 
     # LAUNCH-TIME EXCLUSIVITY GUARD.
     #

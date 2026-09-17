@@ -91,10 +91,11 @@ def _ensure_canary():
 
 
 def _is_canary_url(url):
-    # Canary matcher: was an unanchored substring match, which let a
-    # public-host URL carrying the canary address in its query string reach a
-    # real outbound GET below. Delegates to the single definition in
-    # core.canary rather than carrying a third copy.
+    # Canary URL validation: delegates to the single definition in
+    # core.canary rather than carrying a copy. A prior substring-matching
+    # implementation allowed public-host URLs embedding the canary address
+    # in their query string to pass as authorized, resulting in unintended
+    # outbound requests.
     return _canary.is_canary_url(url, _canary_port)
 
 
@@ -149,7 +150,7 @@ def http_request():
         """
         _ensure_canary()
         if _is_canary_url(url):
-            # Canary URL safety: request the rebuilt loopback URL, never the model's.
+            # Canary URL safety: use the rebuilt loopback URL, never the model's.
             safe_url = _canary_request_url(url)
             if safe_url:
                 try:

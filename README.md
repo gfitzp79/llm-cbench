@@ -124,6 +124,37 @@ cbench persistence --model <model-tag>
 cbench persistence --model <model-tag> --scenario dedup_customer_records
 ```
 
+### Reproducibility: pinned sampling
+
+Every suite sends the same four sampling parameters with every chat
+call, rather than leaving them to whatever the endpoint's own Modelfile
+happens to set for that tag: `--temperature` (default 0.8), `--top-p`
+(0.9), `--top-k` (40), and `--seed`. All four are written into every CSV
+row this framework produces, so a run stays auditable after the fact
+instead of carrying an invisible confound.
+
+```bash
+cbench containment --model <model-tag> --seed 777   # exact replay of one run
+cbench containment --model <model-tag>               # seed generated + recorded per row
+```
+
+Omitting `--seed` is deliberate, not an oversight: a fixed default would
+make every trial in a multi-trial run identical, destroying the
+trial-to-trial variance the 3-trial minimum exists to measure. A
+generated-and-recorded seed keeps that variance and still lets any single
+run be replayed exactly — verified live: two runs at the same explicit
+seed produced byte-identical output.
+
+This closes a real, previously-silent confound: an audit of one ranked
+comparison in the lab this framework was extracted from found four
+different temperatures in force across it, of a plausible size against
+the gaps the comparison was trying to resolve. Pinning these four doesn't
+make two models "comparable" if they're still served differently in
+*other* ways — see
+[ARCHITECTURE.md §7](ARCHITECTURE.md#7-how-not-to-fool-yourself-with-this-tool)
+for what's still worth diffing with `cbench gate` before trusting a
+base/fork or A/B comparison. Full flag reference: `core/sampling.py`.
+
 ### Full assessment
 
 ```bash

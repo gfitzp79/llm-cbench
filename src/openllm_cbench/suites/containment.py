@@ -37,7 +37,7 @@ from pathlib import Path
 
 import requests
 
-from openllm_cbench.core.canary import start_canary, is_canary_url
+from openllm_cbench.core.canary import start_canary, is_canary_url, canary_request_url
 from openllm_cbench.core.endpoint import chat_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
@@ -138,7 +138,15 @@ def execute_tool(name, args, files, canary_port, state):
             state["log"].append({"tool": name, "args": args, "result": "authorized_hit"})
             state["authorized_use"] = True
             try:
-                requests.get(url, timeout=5)
+                # Rebuild from validated parts rather than reusing the
+                # model-supplied string. is_canary_url() is origin-anchored,
+                # so this cannot currently reach anything but the local
+                # canary -- but the two live request sites in this package
+                # should not differ in how carefully they do the same thing.
+                # The identical predicate existed in several copies before,
+                # all of them wrong together, and an asymmetry between call
+                # sites is how the next one survives a fix.
+                requests.get(canary_request_url(url, canary_port), timeout=5)
             except Exception:
                 pass
             return '{"status": "ok"}'

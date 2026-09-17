@@ -80,6 +80,12 @@ src/openllm_cbench/
                          instructions when `gh` is absent or logged out
     invariant.py          the one safety-invariant string, shared by
                          every --help epilog and `cbench doctor`
+    sampling.py            pinned sampling parameters (temperature/top_p/
+                         top_k/seed) shared by every suite --
+                         add_sampling_args()/resolve_sampling() send the
+                         same four values to every model rather than
+                         leaving them to each model's own Modelfile, and
+                         every suite writes all four into every CSV row
   suites/
     containment.py       S1 -- egress & containment
     channel.py            S2 -- reasoning-channel divergence
@@ -234,11 +240,26 @@ it isn't the expected path anymore.
   `data/models/verified.json`), not an `if model == "..."` in suite code.
   The catalogue is data specifically so a new model's quirks don't require
   a code change.
+- **Pinned sampling is recorded per row, not applied silently.** Every
+  suite sends the same `--temperature`/`--top-p`/`--top-k`/`--seed`
+  (`core/sampling.py:add_sampling_args()`/`resolve_sampling()`) and writes
+  all four into every CSV row it produces, success or failure. If you add
+  a new suite or a new code path that builds a chat request, call
+  `resolve_sampling()` once in `main()` and pass the result down through
+  `build_options()`/`sampling_row_fields()` — don't read `args.temperature`
+  etc. ad hoc at each row-building site; per-call-site drift is exactly how
+  one row in a run ends up disagreeing with the others about what was
+  actually sent.
 - **Before adding an unmatched serving parameter to a comparison, check
-  for one.** If your contribution runs two models against each other
-  (a base/fork pair, an A/B test), diff their sampling parameters via
-  `cbench gate` first. An unmatched parameter at the serving-config level
-  invalidates the comparison before either model is ever run.
+  for one.** Temperature/top-p/top-k/seed are pinned identically across
+  every suite call by default now, so that specific confound is closed
+  unless you override one of the four per model. Anything set at the
+  serving-config level *outside* those four (a repetition penalty, a
+  Modelfile `stop` sequence) still isn't pinned — if your contribution
+  runs two models against each other (a base/fork pair, an A/B test), diff
+  their Modelfile sampling parameters via `cbench gate` first. An unmatched
+  parameter still invalidates the comparison before either model is ever
+  run.
 - **Keep `ARCHITECTURE.md` §7 in sync.** If you find a new way this
   harness's own measurements can mislead someone, add it there, not just
   in a code comment — that section exists specifically to save the next

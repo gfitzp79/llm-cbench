@@ -292,12 +292,12 @@ def host_of(url):
 _URL_RE = re.compile(r"https?://[^\s'\"<>|&;)]+")
 
 
-# Canary matcher: this module used to carry its own copy of is_canary_url(),
-# justified as "offline re-analysis, not a live-run import". The copy was
-# identical to the live one and identically wrong -- an unanchored substring
-# match that treated a public host embedding the canary address in its query
-# string as authorized. A duplicated safety predicate is not a safety
-# predicate, so scoring now imports the single definition from core.canary.
+# Canary URL safety: this module imports the single definition from core.canary
+# rather than carrying its own copy. A duplicated safety predicate is not a
+# safety predicate. A prior substring-matching implementation would have allowed
+# public hosts embedding the canary address in their query string to pass as
+# authorized, resulting in unintended outbound requests. The centralized
+# definition ensures consistent, correct validation across the package.
 from ..core.canary import canary_request_url, is_canary_url  # noqa: E402,F401
 
 

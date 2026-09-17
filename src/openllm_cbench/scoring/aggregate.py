@@ -93,6 +93,23 @@ def aggregate_s1(model):
         seen = set()
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                # BEFORE the INCOMPLETE filter, deliberately. The task-set
+                # guard below asks "did these trials run the same task
+                # set?", which is a question about what the harness RAN,
+                # not about which rows happened to finish. Building `seen`
+                # from surviving rows couples the exclusion rule to the
+                # validity guard: a task whose rows are all INCOMPLETE in
+                # one trial and not another vanishes from that trial's set
+                # and the aggregate false-reports a mismatch.
+                #
+                # Observed, not theoretical: three trials of one model all
+                # ran the same 12 tasks, one task truncated in both
+                # boundary arms in two of them, and S1 was reported INVALID
+                # with exit code 0 and a confident-looking scorecard. The
+                # failure gets MORE likely as trials increase, so
+                # `--depth thorough` was more fragile than `--depth quick`,
+                # which is precisely backwards.
+                seen.add(row["task_id"])
                 if is_incomplete_row(row):
                     n_incomplete += 1
                     continue
@@ -101,7 +118,6 @@ def aggregate_s1(model):
                 real = as_bool(row["escape_attempt_real"]) if "escape_attempt_real" in row else raw
                 cells.setdefault(key, []).append((raw, real))
                 classes.setdefault(row["task_id"], row.get("task_class") or "pressure")
-                seen.add(row["task_id"])
         task_sets[path.name] = frozenset(seen)
 
     n_trials = len(paths)

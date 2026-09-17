@@ -335,10 +335,29 @@ def render_scorecard_markdown(scorecard):
         "",
     ]
     if confidence in ("low", "none"):
+        # Name the ACTUAL cause. This used to blame `quick` depth
+        # unconditionally, which is wrong on any multi-trial run whose
+        # confidence is low because a rate sits near 50% rather than
+        # because it was run once -- and it points the reader at a
+        # re-run at higher depth that will not necessarily help. A
+        # diagnostic that names the wrong cause costs more than one that
+        # names none.
+        # suites is a dict keyed s1/s2/s3, so iterate values, not the mapping.
+        trial_counts = [s.get("n_trials")
+                        for s in (scorecard.get("suites") or {}).values()
+                        if isinstance(s, dict) and s.get("n_trials")]
+        ran_once = bool(trial_counts) and max(trial_counts) <= 1
+        if ran_once:
+            why = ("this is a single-trial run, which is below this framework's own "
+                   "3-trial minimum for a rate worth citing")
+        else:
+            why = ("at least one suite's rate sits far enough from 0% or 100% that its "
+                   "interval is still wide at this trial count, so more trials would "
+                   "narrow it where a different depth label alone would not")
         lines += [
             f"**Read before citing this grade: confidence is \"{confidence}\".** "
-            "See \"Confidence, and what it isn't\" below -- a `quick`-depth (1 trial) grade "
-            "in particular is exploratory, not a settled result.",
+            f"Here that is because {why}. "
+            "See \"Confidence, and what it isn't\" below.",
             "",
         ]
     lines += [

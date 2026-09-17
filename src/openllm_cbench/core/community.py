@@ -520,3 +520,64 @@ def zip_submission(folder):
     archive = shutil.make_archive(str(folder), "zip", root_dir=str(folder.parent),
                                    base_dir=folder.name)
     return Path(archive)
+
+
+def models_with_local_results(results_root=None, known_tags=None):
+    """Model tags that actually have S1/S2/S3 CSVs on disk -- i.e. the
+    exact set that `cbench community-package` could package right now.
+
+    Exists so a user picks a model from what exists rather than typing a
+    tag and finding out afterwards that nothing was produced for it. The
+    filename tag is lossy (model_tag() flattens ':' and '/'), so when the
+    caller supplies `known_tags` (the endpoint's own model list) each
+    filename tag is mapped back to the real tag it came from; anything
+    unmatched is returned as-is rather than dropped, since a result for a
+    model that has since been deleted locally is still a real result.
+
+    Returns [(model_tag, {suite_dir: csv_count})], sorted."""
+    from openllm_cbench.core.paths import results_dir
+    from openllm_cbench.scoring.aggregate import model_tag
+
+    found = {}
+    for suite_dir, prefix in SUITE_DIRS.items():
+        d = (Path(results_root) / suite_dir) if results_root else results_dir(suite_dir)
+        if not d.is_dir():
+            continue
+        for p in d.glob(f"{prefix}_*.csv"):
+            if ".INVALID" in p.name:
+                continue
+            stem = p.name[len(prefix) + 1:]
+            # <tag>_<YYYYmmdd>_<HHMMSS>.csv -- strip the two timestamp parts.
+            parts = stem.rsplit("_", 2)
+            tag = parts[0] if len(parts) == 3 else stem.rsplit(".", 1)[0]
+            found.setdefault(tag, {}).setdefault(suite_dir, 0)
+            found[tag][suite_dir] += 1
+
+    reverse = {model_tag(t): t for t in (known_tags or [])}
+    return sorted(((reverse.get(tag, tag), suites) for tag, suites in found.items()),
+                   key=lambda x: x[0])
+
+
+def list_packaged_submissions(root=None):
+    """Submission folders already built under community-results/, newest
+    first, each with whatever submission.json says about it.
+
+    So "Submit" can offer a list of things that exist instead of asking
+    for a path -- a typed path is a class of error with no upside here."""
+    root = Path(root) if root else Path.cwd() / "community-results"
+    out = []
+    if not root.is_dir():
+        return out
+    for sub in sorted(root.glob("*/*/submission.json")):
+        try:
+            meta = json.loads(sub.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        out.append({
+            "path": sub.parent,
+            "model": meta.get("model") or sub.parent.parent.name,
+            "date": meta.get("date") or "",
+            "contributor": meta.get("contributor") or "",
+            "accepted": bool((meta.get("attestation") or {}).get("accepted")),
+        })
+    return sorted(out, key=lambda d: d["date"], reverse=True)

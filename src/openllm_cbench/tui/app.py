@@ -9,6 +9,7 @@ for why that split is load-bearing, not just tidy.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -237,7 +238,10 @@ class RunScreen(Screen):
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        _report_job_result(log, result)
+        ok = _report_job_result(log, result)
+        # A package that just succeeded should be pickable immediately.
+        if ok and "community-package" in argv:
+            self._refresh_pickers()
 
 
 class GateScreen(Screen):
@@ -321,6 +325,11 @@ class ModelsScreen(Screen):
                 "Models pulled into your local endpoint. \"Catalogued\" means the "
                 "model catalogue already has config guidance for this exact tag -- "
                 "an uncatalogued model still runs fine, just \"ungated\".\n"
+                "Speed column: a bold tok/s figure is MEASURED on this machine during that "
+                "model's gate check. A word (fast/good/moderate/slow) is an estimate from "
+                "the parameters actually read per token -- for a mixture-of-experts model "
+                "that's the active experts, not the full weight count, which is why a "
+                "30B-A3B MoE outruns a dense 30B of the same size on disk.\n"
                 "Score column: an A-F grade (0-100), the worst of the three suites "
                 "run -- not an average, see \"Scoring a model\" in README.md. "
                 "\"not scored\" = never run through `cbench score`. \"N/A\" = nothing "
@@ -343,7 +352,7 @@ class ModelsScreen(Screen):
 
     def on_mount(self) -> None:
         table = self.query_one("#models-table", DataTable)
-        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Fit", "Catalogued", "Score")
+        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Fit", "Speed", "Catalogued", "Score")
         table.cursor_type = "row"
         self._hw_info = None
         self._refresh()
@@ -382,7 +391,7 @@ class ModelsScreen(Screen):
         registry = await asyncio.to_thread(load_registry)
         catalogued = set(registry.get("models", {}).keys())
 
-        from openllm_cbench.core.hardware import fit_assessment, probe
+        from openllm_cbench.core.hardware import fit_assessment, performance_estimate, probe
         if self._hw_info is None:
             self._hw_info = await asyncio.to_thread(probe)
         vram_mb = (self._hw_info or {}).get("gpu_vram_mb")
@@ -408,8 +417,32 @@ class ModelsScreen(Screen):
                 "spills": f"[bold red]{assessment['headline']}[/bold red]",
                 "unknown": "[dim]?[/dim]",
             }[assessment["tier"]]
+
+            # Measured beats estimated: a gate check on this machine
+            # timed the model, so use that rather than inferring speed
+            # from parameter count.
+            entry = registry.get("models", {}).get(m["name"]) or {}
+            perf = performance_estimate(
+                fit_tier=assessment["tier"],
+                params_b=m.get("params_b"),
+                active_params_b=assessment.get("active_params_b"),
+                measured_tok_s=entry.get("measured_tok_s"),
+                moe=assessment.get("moe", False),
+            )
+            if perf["source"] == "measured":
+                speed_cell = f"[bold green]{perf['tok_s']:.0f} tok/s[/bold green]"
+            else:
+                speed_cell = {
+                    "fast": "[green]fast[/green]",
+                    "good": "[green]good[/green]",
+                    "moderate": "[yellow]moderate[/yellow]",
+                    "slow": "[red]slow[/red]",
+                    "unknown": "[dim]?[/dim]",
+                }[perf["label"]]
+
             table.add_row(
                 m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]), fit_cell,
+                speed_cell,
                 "yes" if is_cat else "[bold yellow]no[/bold yellow]",
                 score if score != "not scored" else "[dim]not scored[/dim]",
             )
@@ -952,17 +985,24 @@ class CommunityScreen(Screen):
                     yield DirectoryTree(str(root), id="community-tree")
                 else:
                     yield Static(
-                        f"No community-results/ directory at {root}.",
+                        f"No community-results/ directory at {root}.\n\n"
+                        f"This is created the first time you package a submission. If you "
+                        f"have packaged one before, you are probably in a different working "
+                        f"directory than when you did -- this path is resolved relative to "
+                        f"where you launched cbench.",
                         id="community-tree-empty",
                     )
                 with Vertical(id="community-form-inner"):
+                    yield Select([], id="community-model-select", allow_blank=True,
+                                  prompt="Model to package — scanning results...")
+                    yield Select([], id="community-submission-select", allow_blank=True,
+                                  prompt="Packaged submission to validate/submit — scanning...")
                     yield Input(
-                        placeholder="model tag to package, e.g. gemma3:12b",
+                        placeholder="(or type a model tag)",
                         id="community-model-input",
                     )
                     yield Input(
-                        placeholder="submission folder path, e.g. "
-                                     "community-results/gemma3-12b/alice_20260912",
+                        placeholder="(or type a submission folder path)",
                         id="community-path-input",
                     )
                     yield Checkbox(
@@ -984,6 +1024,66 @@ class CommunityScreen(Screen):
                     yield Static("", id="community-preview")
                     yield RichLog(id="community-log", wrap=True, highlight=True, markup=True)
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_pickers()
+
+    @work(exclusive=True)
+    async def _refresh_pickers(self) -> None:
+        """Fills both pickers from what actually exists: models that have
+        CSVs on disk, and submissions already packaged. A user should be
+        choosing from real options, not recalling a path."""
+        import asyncio
+
+        from textual.css.query import NoMatches
+
+        from openllm_cbench.core.community import (
+            list_packaged_submissions, models_with_local_results,
+        )
+        from openllm_cbench.core.discover import list_local_models
+
+        def gather():
+            try:
+                tags = [m["name"] for m in list_local_models()]
+            except Exception:
+                tags = []
+            return models_with_local_results(known_tags=tags), list_packaged_submissions()
+
+        try:
+            models, submissions = await asyncio.to_thread(gather)
+        except Exception:
+            models, submissions = [], []
+
+        try:
+            model_select = self.query_one("#community-model-select", Select)
+            sub_select = self.query_one("#community-submission-select", Select)
+        except NoMatches:
+            return
+
+        opts = []
+        for tag, suites in models:
+            n = sum(suites.values())
+            opts.append((f"{tag}  ({n} CSV(s) across {len(suites)} suite(s))", tag))
+        model_select.set_options(opts)
+        model_select.prompt = ("Model to package" if opts else
+                                "No model has results on disk yet — score one first")
+
+        sub_opts = [
+            (f"{d['model']}  {d['date']}  ({'terms accepted' if d['accepted'] else 'terms NOT accepted'})",
+             str(d["path"]))
+            for d in submissions
+        ]
+        sub_select.set_options(sub_opts)
+        sub_select.prompt = ("Packaged submission to validate/submit" if sub_opts else
+                              "Nothing packaged yet — use Package first")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.value is Select.BLANK:
+            return
+        if event.select.id == "community-model-select":
+            self.query_one("#community-model-input", Input).value = str(event.value)
+        elif event.select.id == "community-submission-select":
+            self.query_one("#community-path-input", Input).value = str(event.value)
 
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
         if event.control.id == "community-tree":
@@ -1127,29 +1227,141 @@ class AboutScreen(Screen):
 
 
 class ReportsScreen(Screen):
-    """Browses whatever `results/` already contains -- this screen reads
-    files `cbench` wrote, it never generates or edits any of them."""
+    """Browses reports `cbench` already wrote -- never generates or edits
+    one.
+
+    Leads with a TABLE of the reports that exist (model, suite, kind,
+    date), because that is how someone looks for one: "the channel report
+    for qwen3 from Tuesday", not "results/s2_channel/trial_summary_qwen3-
+    0.6b.md". The directory tree is still there underneath for anything
+    the table doesn't classify, but nobody should have to navigate it to
+    find a report this screen could have listed."""
 
     BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    # Report filenames this framework writes, most specific first:
+    #   trial_summary_<tag>.md        -- N trials pooled (the citable one)
+    #   <suite>_report_<tag>.md       -- one run of one suite
+    #   scorecards/<tag>.md           -- the cross-suite grade
+    # The model tag is whatever remains once the prefix is removed, which
+    # is why these are matched rather than split on "_": a tag itself
+    # contains underscores often enough that splitting mangles it.
+    REPORT_PREFIXES = (
+        ("trial_summary_", "trial summary"),
+        ("containment_report_", "S1 single run"),
+        ("channel_report_", "S2 single run"),
+        ("persistence_report_", "S3 single run"),
+    )
+    SUITE_LABEL = {
+        "s1_containment": "S1 containment",
+        "s2_channel": "S2 channel",
+        "s3_persistence": "S3 persistence",
+        "scorecards": "scorecard",
+        "tui-logs": "run log",
+    }
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield InvariantBar()
         root = _results_root()
-        with Horizontal(id="reports-body"):
-            if root.exists():
-                yield DirectoryTree(str(root), id="reports-tree")
-            else:
-                yield Static(
-                    f"No results/ directory yet at {root} -- run a suite first.",
-                    id="reports-empty",
-                )
-            with VerticalScroll(id="reports-viewer-container"):
-                yield TextArea("", id="reports-viewer", read_only=True)
+        with Vertical(id="reports-form"):
+            yield Static(
+                f"Reports in [bold]{root}[/bold] -- trial summaries and scorecards. "
+                f"Pick a row to read it. Newest first. Raw CSVs and run logs are in the "
+                f"tree below.",
+                id="reports-caption",
+            )
+            with Horizontal(id="reports-body"):
+                with Vertical(id="reports-left"):
+                    yield DataTable(id="reports-table")
+                    if root.exists():
+                        yield DirectoryTree(str(root), id="reports-tree")
+                    else:
+                        yield Static(
+                            f"No results directory at {root}.\n\n"
+                            f"If you have run suites before, you are almost certainly in a "
+                            f"different working directory than when you ran them -- results/ "
+                            f"is resolved relative to where you launch cbench. cd to your "
+                            f"project directory and reopen, or set "
+                            f"$OPENLLM_CBENCH_RESULTS_DIR.",
+                            id="reports-empty",
+                        )
+                with VerticalScroll(id="reports-viewer-container"):
+                    yield TextArea("", id="reports-viewer", read_only=True)
         yield Footer()
 
-    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
-        path = Path(event.path)
+    def on_mount(self) -> None:
+        table = self.query_one("#reports-table", DataTable)
+        table.add_columns("Model", "Suite", "Kind", "Date", "File")
+        table.cursor_type = "row"
+        self._paths = {}
+        self._load_reports()
+
+    @staticmethod
+    def _strip_timestamp(tag):
+        """Drops a trailing _YYYYmmdd_HHMMSS. A single-run report carries
+        one; the run time belongs in the Date column, not glued to the
+        model name where it stops the column being scannable."""
+        return re.sub(r"_\d{8}_\d{6}$", "", tag)
+
+    def _classify(self, path: Path, root: Path):
+        rel = path.relative_to(root)
+        suite = self.SUITE_LABEL.get(rel.parts[0], rel.parts[0]) if len(rel.parts) > 1 else "-"
+        stem = path.stem
+
+        for prefix, kind in self.REPORT_PREFIXES:
+            if stem.startswith(prefix):
+                return self._strip_timestamp(stem[len(prefix):]), suite, kind
+        if rel.parts[0] == "scorecards":
+            return stem, suite, "scorecard"
+        return stem, suite, "report"
+
+    @work(exclusive=True)
+    async def _load_reports(self) -> None:
+        import asyncio
+        import datetime
+
+        from textual.css.query import NoMatches
+
+        root = _results_root()
+        if not root.exists():
+            return
+
+        def scan():
+            # REPORTS, not every artefact. A results tree holds hundreds of
+            # per-trial CSVs and run logs; listing them all buried the six
+            # documents someone actually opens (261 rows on this machine,
+            # of which 6 were readable reports). Raw CSVs and logs are
+            # still reachable through the tree below -- they are inputs
+            # and evidence, not things you browse.
+            rows = []
+            for pth in root.rglob("*.md"):
+                if pth.is_file():
+                    rows.append((pth, pth.stat().st_mtime))
+            return sorted(rows, key=lambda r: r[1], reverse=True)
+
+        found = await asyncio.to_thread(scan)
+        try:
+            table = self.query_one("#reports-table", DataTable)
+        except NoMatches:
+            return
+
+        for pth, mtime in found:
+            model, suite, kind = self._classify(pth, root)
+            when = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            key = table.add_row(model, suite, kind, when, pth.name)
+            self._paths[key] = pth
+
+        try:
+            self.query_one("#reports-caption", Static).update(
+                f"{len(found)} report(s) in [bold]{root}[/bold] -- trial summaries and "
+                f"scorecards. Pick a row to read it. Newest first. Raw CSVs and run logs "
+                f"are in the tree below."
+            )
+        except NoMatches:
+            pass
+
+    def _show(self, path: Path) -> None:
         viewer = self.query_one("#reports-viewer", TextArea)
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -1158,6 +1370,19 @@ class ReportsScreen(Screen):
             viewer.text = text
         except Exception as e:
             viewer.text = f"Could not read {path}: {e}"
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        path = self._paths.get(event.row_key)
+        if path is not None:
+            self._show(path)
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        path = self._paths.get(event.row_key)
+        if path is not None:
+            self._show(path)
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self._show(Path(event.path))
 
 
 class CBenchTUI(App):

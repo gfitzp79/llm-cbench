@@ -391,6 +391,20 @@ def to_registry_entry(result):
         "tools": bool(result.get("has_tools_capability")),
         "thinking": bool(result.get("has_thinking_capability")),
         "channel_separation": channel_separation,
+        # Measured, not estimated: what this machine actually did with
+        # this model during the gate check. Persisted because the gate is
+        # the only place this framework legitimately times a model, and
+        # throwing the number away meant every later "how fast is this?"
+        # had to be guessed from parameter counts. A measurement beats an
+        # estimate for the same reason real on-disk size beats
+        # bytes-per-param arithmetic in core/hardware.py.
+        #
+        # Machine-specific by definition -- it says nothing about the
+        # model in the abstract, only about this model on this hardware,
+        # which is exactly the question someone picking what to run next
+        # is asking.
+        "measured_tok_s": result.get("tokens_per_sec"),
+        "measured_load_s": result.get("warm_up_seconds"),
         "config_overrides": {},
         "caveats": list(result.get("caveats", [])),
     }

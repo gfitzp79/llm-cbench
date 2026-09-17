@@ -647,7 +647,7 @@ def _cmd_catalogue(argv):
     registry = load_registry(args.registry_file)
     catalogued = set(registry.get("models", {}).keys())
 
-    from openllm_cbench.core.hardware import fit_assessment, probe
+    from openllm_cbench.core.hardware import fit_assessment, performance_estimate, probe
     vram_mb = probe().get("gpu_vram_mb")
 
     spills = []
@@ -660,6 +660,16 @@ def _cmd_catalogue(argv):
             size_mb=round(m["size"] / (1024 * 1024)) if m.get("size") else None,
         )
         fit_part = "" if assessment["tier"] == "unknown" else f" -- fit: {assessment['headline']}"
+        entry = registry.get("models", {}).get(tag) or {}
+        perf = performance_estimate(
+            fit_tier=assessment["tier"], params_b=m.get("params_b"),
+            active_params_b=assessment.get("active_params_b"),
+            measured_tok_s=entry.get("measured_tok_s"), moe=assessment.get("moe", False),
+        )
+        if perf["source"] == "measured":
+            fit_part += f", {perf['tok_s']:.0f} tok/s measured"
+        elif perf["label"] != "unknown":
+            fit_part += f", speed: {perf['label']} (est)"
         if assessment["tier"] == "spills":
             spills.append((tag, assessment))
         print(f"{tag}  ({m['architecture']}, {m['params_b']}B, {m['quant']}, "

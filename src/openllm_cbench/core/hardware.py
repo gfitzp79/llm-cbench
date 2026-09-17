@@ -270,6 +270,80 @@ def fit_assessment(vram_mb, tag="", architecture=None, params_b=None, quant=None
                      f"is usable -- about {over:,.0f} MB will spill into system RAM. {speed}")}
 
 
+# --- Expected speed ------------------------------------------------------
+#
+# "Will it fit" and "will it be quick" are different questions with
+# different answers, and a size column answers neither on its own. A
+# 30B-A3B MoE is the same size on disk as a dense 30B and roughly ten
+# times faster to generate with, because only the active experts are read
+# per token. A 0.6B model that fits is fast for the opposite reason.
+# Showing size alone invites the reader to rank those three by the one
+# number that does not predict what they care about.
+#
+# EFFECTIVE parameters -- active for an MoE, total for a dense model --
+# are what drive generation speed. Memory pressure then modifies it: a
+# model that spills reads weights over the PCIe bus or from system RAM,
+# and a dense model pays that per token where an MoE pays it only for the
+# experts it touches.
+#
+# All of this is a fallback. If the model has actually been gate-checked
+# on this machine, we have a MEASURED tokens/sec and use that instead --
+# same principle as preferring real on-disk size over bytes-per-param
+# arithmetic in check_model_fit().
+
+SPEED_BANDS = ((2, "fast"), (9, "good"), (25, "moderate"), (float("inf"), "slow"))
+MEASURED_BANDS = ((40, "fast"), (15, "good"), (6, "moderate"), (0, "slow"))
+
+
+def effective_params_b(params_b, active_params_b=None):
+    """Parameters actually read per token: the active count for a
+    mixture-of-experts model, the full count for a dense one. None when
+    neither is known."""
+    if active_params_b:
+        return active_params_b
+    return params_b if isinstance(params_b, (int, float)) else None
+
+
+def performance_estimate(fit_tier=None, params_b=None, active_params_b=None,
+                          measured_tok_s=None, moe=False):
+    """Expected generation speed for a model on this machine.
+
+    Returns {"label", "source", "tok_s", "detail"}. `source` is
+    "measured" when a gate check on this machine timed the model, and
+    "estimate" when the label is inferred from effective parameter count
+    and memory pressure. A caller should show the distinction: one is a
+    fact about this hardware, the other is arithmetic."""
+    if measured_tok_s:
+        # A measured rate is banded on the rate itself, not on parameter
+        # count -- the whole point of having measured it is that the
+        # proxy is no longer needed.
+        label = next(lbl for floor, lbl in MEASURED_BANDS if measured_tok_s >= floor)
+        return {"label": label, "source": "measured", "tok_s": measured_tok_s,
+                "detail": f"{measured_tok_s:.0f} tok/s measured on this machine"}
+
+    eff = effective_params_b(params_b, active_params_b)
+    if eff is None:
+        return {"label": "unknown", "source": None, "tok_s": None, "detail": ""}
+
+    label = next(lbl for ceiling, lbl in SPEED_BANDS if eff <= ceiling)
+
+    # Memory pressure degrades the estimate. A dense model that spills
+    # pays for every parameter on every token; an MoE pays only for the
+    # experts it actually reads, so it drops one band rather than two.
+    order = ["fast", "good", "moderate", "slow"]
+    if fit_tier == "spills":
+        label = order[min(len(order) - 1, order.index(label) + (1 if moe else 2))]
+    elif fit_tier == "tight":
+        label = order[min(len(order) - 1, order.index(label) + 1)]
+
+    if active_params_b and params_b:
+        detail = (f"~{active_params_b:g}B active of {params_b:g}B "
+                  f"(mixture-of-experts), estimated")
+    else:
+        detail = f"~{eff:g}B parameters read per token, estimated"
+    return {"label": label, "source": "estimate", "tok_s": None, "detail": detail}
+
+
 def probe():
     """Returns a dict summarizing this machine's advisory model-size band.
     Never raises -- every field degrades to None/'unknown' independently."""

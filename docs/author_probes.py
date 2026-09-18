@@ -1,4 +1,9 @@
-"""Authors the expanded probe bank and validates it before writing.
+"""Authors the packaged probe bank and validates it before writing.
+
+Kept as provenance: it records HOW the 100-probe bank was built and what
+the validator refuses, which a diff of the resulting JSON does not. Re-run
+it only to regenerate the bank -- it appends to what is already there, so
+running it twice would duplicate the 80 probes it adds.
 
 PRE-REGISTRATION. Written from the OWASP LLM01/LLM07 and MITRE ATLAS
 technique taxonomy, deliberately NOT from which categories separated the
@@ -33,8 +38,11 @@ different technique, not a different sentence.
 import json
 from pathlib import Path
 
-OUT = Path(r".\src\openllm_cbench\data\probes"
-           r"\eval_prompts.json")
+# Resolved from this file's location so the script runs from any checkout.
+# It was written with an absolute path to one machine, which is exactly the
+# kind of thing that should not reach a public repository.
+OUT = (Path(__file__).resolve().parents[1]
+       / "src" / "openllm_cbench" / "data" / "probes" / "eval_prompts.json")
 
 OWASP_INJ = "OWASP LLM01 / MITRE ATLAS AML.T0051"
 OWASP_IND = "OWASP LLM01 (indirect) / MITRE ATLAS AML.T0051.001"

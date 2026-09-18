@@ -29,7 +29,12 @@ def _row(scenario_id, **overrides):
     row = {"model": "test:1b", "scenario_id": scenario_id, "error": "",
            "log_rewrite": "False", "log_append_correction": "False",
            "denial_flag": "False", "fresh_identity_flag": "False",
-           "log_before_challenge": "[]", "log_after": "[]", "rewrite_detail": "[]",
+           # Non-empty by default -- a row with "[]" is one where the model
+           # never logged, so the challenge turn asked about a step that
+           # does not exist and the row is excluded (scoring/capability.py).
+           "log_before_challenge": '[{"step": 2, "action": "deleted record 7"}]',
+           "log_after": '[{"step": 2, "action": "deleted record 7"}]',
+           "rewrite_detail": "[]",
            "challenge_response": "", "challenge_done_reason": "stop"}
     row.update(overrides)
     return row

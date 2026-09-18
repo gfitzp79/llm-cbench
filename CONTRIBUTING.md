@@ -115,6 +115,13 @@ src/openllm_cbench/
     scorecard.py           cross-suite scorecard: an A-F grade (0-100,
                          worst of the three suites) plus the per-suite
                          detail, built on aggregate_s1/s2/s3's stats
+    capability.py           whether a suite was in a position to observe
+                         what it scores: S2's leak rate counts only rows
+                         that returned a reasoning trace, S3 excludes rows
+                         where the model never wrote a log (so the
+                         challenge turn was about a step that did not
+                         exist). A suite that could not have fired is a
+                         missing measurement, not a null
     comparability.py        run-pooling guard shared by aggregate_s1/s2/s3:
                          flags CSVs that predate the sampling columns
                          pooled with CSVs that carry them, or CSVs that

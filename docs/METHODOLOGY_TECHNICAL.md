@@ -45,11 +45,20 @@ other way. Report both and say which is cited.
 
 ### 1.2a Repeated probes are not independent observations
 
-A trial is a fixed instrument run once. One S2 trial asks 20 probes across 2
-think states, so each (probe, state) cell appears exactly once per trial and N
-trials means each probe was asked N times per state. S1 is 12 tasks across 2
-boundary arms; S3 is its scenario set. In every case the repeats are the same
-question asked again, not new questions.
+A trial is a fixed instrument run once. One S2 trial asks each probe in the
+bank across 2 think states, so each (probe, state) cell appears exactly once
+per trial and N trials means each probe was asked N times per state. S1 is 12
+tasks across 2 boundary arms; S3 is its scenario set. In every case the repeats
+are the same question asked again, not new questions.
+
+**The number of probes is the lever, and the trial count is not.** Because
+`n = k*m` and the design effect depends only on `m` and the ICC, `n_eff`
+scales linearly with the number of distinct probes `k` at a fixed trial count,
+while adding trials grows `m` and the design effect together and converges on a
+ceiling of `k/ICC`. Measured on a real corpus: 20 probes at ICC 0.45 capped
+`n_eff` at 45 no matter how many trials were run, which gave a real two-model
+comparison 24% power. The bank was subsequently sized from that arithmetic
+rather than chosen — see §1.2b.
 
 **A confidence interval computed on the row count therefore overstates what the
 run knows.** Twelve rows for one probe are twelve observations of one question.
@@ -78,6 +87,32 @@ beside the confidence label whenever it is smaller than the row count.
 Cluster on the QUESTION, not on the question-and-condition. Two rows sharing a
 probe but differing in think state are still answers to the same probe, so the
 conservative grouping is the probe.
+
+### 1.2b An instrument is sized from the difference it must resolve
+
+A bank's size is a power question, not a taste question. For two proportions
+at 80% power and α = 0.05, the required per-arm `n_eff` follows directly from
+the standard two-proportion formula — directly, with no design effect to apply,
+because `n_eff` *is* the independent-equivalent sample size.
+
+That figure is deliberately reported in `n_eff` and never converted to a probe
+count (`scoring/compare.py:effective_n_needed`). `DEFF = 1 + (m-1)*ICC` has two
+unknowns and a scorecard supplies one equation, so rows-per-cluster is not
+recoverable after the fact; inventing an `m` to make the advice look concrete
+would be a fabricated number in the one place this framework exists to avoid
+them. The safe statement is the RATIO needed-to-have, because `n_eff` scales
+linearly with cluster count at a fixed trial count.
+
+Worked, on the corpus this section was written from: a 12.6pp difference at
+ICC 0.45 needed `n_eff` ≈ 191 per arm against the 37 the run achieved — about
+5x the probes. The bank went from 20 scoreable probes to 100 on that basis.
+
+Two consequences worth stating plainly. **More trials cannot substitute**, per
+§1.2a. And **a required growth beyond roughly 10x is not a plan**: the same
+corpus needed `n_eff` ≈ 2028 to resolve a 3.4pp gap, and the honest report
+there is that the two are indistinguishable at any bank size anyone would
+build, not that someone should build it. `cbench compare` says so rather than
+printing the number alone.
 
 ### 1.3 Matched analysis
 

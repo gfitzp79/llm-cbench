@@ -681,7 +681,8 @@ actually needs:
 | 25/117 vs 40/117 | **p = 0.041** | 8/37 vs 13/37 · **p = 0.302** |
 
 The naive test clears p < 0.05. It treats 117 rows as 117 independent
-observations when they are 20 probes asked six times each. `cbench compare`
+observations when they are a bank of probes each asked once per think state
+per trial. `cbench compare`
 reports **both**, because the gap between them is the finding.
 
 **The verdict is three-way, never two:**

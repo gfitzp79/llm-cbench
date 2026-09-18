@@ -387,7 +387,10 @@ def test_catalogue_display_survives_a_scorecard_saved_by_an_older_schema(tmp_pat
     # This fixture predates "grade" too (added alongside the compact_summary
     # schema bump) -- both display helpers must recognize it as stale and
     # ask for a re-score rather than render a summary with no grade in it.
-    assert "older schema" in line
+    # Asserted on the BEHAVIOUR, not the sentence: the message was reworded
+    # when a scoring-version stamp joined the pre-grade check, and a test
+    # that pins prose fails on an improvement to it.
+    assert "cbench score" in line and "again" in line
     assert "run `cbench score` again" in line
 
 
@@ -408,3 +411,51 @@ def test_catalogue_compact_label_rejects_a_stale_pre_grade_compact_summary(tmp_p
         encoding="utf-8",
     )  # has compact_summary, but predates "grade"
     assert sc.catalogue_compact_label("old-model:1b", root=root) == "needs re-score"
+
+
+def test_a_freshly_computed_scorecard_is_not_stale(isolated_dirs):
+    """The round trip. A version stamp that flagged its own output would
+    make every scorecard read 'needs re-score' forever."""
+    _write_csv(isolated_dirs / "s1" / "containment_test-1b_20260101_000000.csv",
+               S1_FIELDNAMES, [_s1_row("email_report"),
+                               _s1_row("explicit_external", task_class="control_positive",
+                                       escape_attempt="True", escape_attempt_real="True")])
+    card = sc.compute_scorecard("test:1b")
+    assert card["scoring_version"] == sc.SCORING_VERSION
+    assert sc.is_stale(card) is False
+    sc.save_scorecard(card)
+    assert sc.catalogue_compact_label("test:1b") != "needs re-score"
+
+
+def test_a_scorecard_from_older_scoring_rules_is_stale():
+    """THE case this exists for. A file written this morning under rules
+    that changed this afternoon still has a `grade` key, so the old
+    pre-grade check waved it through -- and a real one sat on disk reading
+    'Grade A (100/100)' while its own summary line said the containment
+    suite was INVALID."""
+    assert sc.is_stale({"grade": "A", "score": 100, "scoring_version": sc.SCORING_VERSION - 1})
+    assert sc.is_stale({"grade": "A", "score": 100})  # no stamp at all
+
+
+def test_a_pre_grade_scorecard_is_still_stale():
+    """The older check must keep working; the version stamp adds to it
+    rather than replacing it."""
+    assert sc.is_stale({"compact_summary": "signal* [high]"})
+    assert sc.is_stale({})
+    assert sc.is_stale(None)
+
+
+def test_both_display_paths_agree_about_staleness(isolated_dirs):
+    """One table cell contradicting the detail line underneath it is worse
+    than both saying 're-score me'."""
+    import json
+    root = isolated_dirs.parent / "results" / "scorecards"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "old-1b.json").write_text(json.dumps({
+        "model": "old:1b", "grade": "A", "score": 100,
+        "compact_summary": "A (100/100) [high]",
+        "overall_summary": "all clean", "overall_confidence": "high",
+        "scoring_version": 1,
+    }), encoding="utf-8")
+    assert sc.catalogue_compact_label("old:1b", root=root) == "needs re-score"
+    assert "superseded" in sc.catalogue_summary_line("old:1b", root=root)

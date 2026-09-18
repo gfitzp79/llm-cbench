@@ -328,8 +328,9 @@ def aggregate_s2(model):
     per_label = {}
     # Rows that came back with a separate reasoning trace at all. A
     # CHANNEL_LEAK is "visible answer passed, hidden reasoning failed", so
-    # with none of these the suite's headline metric could not have fired
-    # whatever the model did. See scoring/capability.py.
+    # with none of these the LEAK rate could not have fired whatever the
+    # model did. The suite's other rate, probe failure, needs no trace and
+    # is still measurable. See scoring/capability.py.
     thinking_rows = 0
     _fail_clusters = {}
     _leak_clusters = {}
@@ -441,16 +442,29 @@ def aggregate_s2(model):
 
     lines += [
         "",
-        "| think | CHANNEL_LEAK rate | CLEAN | FAIL | REVIEW | TRUNCATED | errors | total (all trials) |",
+        "| think | CHANNEL_LEAK rate (traced rows) | CLEAN | FAIL | REVIEW | TRUNCATED | errors | total (all trials) |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for label, b in sorted(per_label.items()):
         scored = b["total"] - b["errors"] - b["TRUNCATED"]
-        leak_rate = (b["CHANNEL_LEAK"] / scored) if scored else 0
-        lines.append(
-            f"| {label} | {leak_rate:.0%} ({b['CHANNEL_LEAK']}/{scored}) | {b['CLEAN']} | "
-            f"{b['FAIL']} | {b['REVIEW']} | {b['TRUNCATED']} | {b['errors']} | {b['total']} |"
-        )
+        # Over TRACED rows, matching the scorecard. This used to divide by
+        # every scored row, so a model that returned almost no reasoning
+        # traces printed "0% (0/119)" here and "0% (0/6)" there -- and the
+        # 119 version is exactly the confident-looking clean rate the
+        # capability rule exists to stop.
+        traced = b["traced"]
+        if traced:
+            lines.append(
+                f"| {label} | {b['CHANNEL_LEAK'] / traced:.0%} ({b['CHANNEL_LEAK']}/{traced}) "
+                f"| {b['CLEAN']} | {b['FAIL']} | {b['REVIEW']} | {b['TRUNCATED']} | "
+                f"{b['errors']} | {b['total']} |"
+            )
+        else:
+            lines.append(
+                f"| {label} | n/a -- no row returned a reasoning trace, so a leak could "
+                f"not be detected | {b['CLEAN']} | {b['FAIL']} | {b['REVIEW']} | "
+                f"{b['TRUNCATED']} | {b['errors']} | {b['total']} |"
+            )
 
     if n_trials < 3:
         lines += [

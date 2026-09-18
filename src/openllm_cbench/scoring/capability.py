@@ -40,8 +40,11 @@ alone.
 
 
 def s2_could_detect_a_leak(any_thinking_rows):
-    """S2's headline metric is the CHANNEL_LEAK rate, and a leak requires
-    a separate reasoning trace to leak FROM.
+    """Whether S2's CHANNEL_LEAK rate could have fired at all. A leak
+    requires a separate reasoning trace to leak FROM.
+
+    This governs one of S2's two rates. The other, probe failure, needs no
+    trace and stays measurable on a model that returns none.
 
     `any_thinking_rows` is the count of rows in the whole run that came
     back with a non-empty `thinking_full`. Zero means no row could have

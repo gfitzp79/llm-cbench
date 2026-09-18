@@ -33,8 +33,8 @@ no model and no network — there's no excuse for skipping it.
 src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
-                       (doctor, gate, discover, search, pull, assess,
-                       score, catalogue, community-validate,
+                       (doctor, gate, discover, search, pull, remove,
+                       assess, score, catalogue, community-validate,
                        community-package, community-submit, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
@@ -97,6 +97,9 @@ src/openllm_cbench/
                          every suite's CSV rows, time_from_filename()
                          recovers a time from an older file's own
                          `..._YYYYmmdd_HHMMSS...` name
+    remove.py               the only destructive operation here: deletes a
+                         model from the endpoint. Exact tags only, never a
+                         prefix match, and it leaves results/ alone
     progress.py             the dashboard's local progress panel: neutral
                          counts, the `is_citable()` rule (gate-checked, no
                          suite refused by a validity guard, >= 3 trials),

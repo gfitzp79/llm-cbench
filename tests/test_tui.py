@@ -1059,3 +1059,117 @@ def test_package_omits_notes_when_left_blank():
             preview = str(app.screen.query_one("#community-preview").content)
             assert "--notes" not in preview
     asyncio.run(scenario())
+
+
+def test_models_table_has_an_added_column_and_sorts_by_value(monkeypatch):
+    """Sorting must order by the underlying value, not the rendered cell.
+    A formatted size sorts "9.0 GB" after "10.5 GB" as a string, and a Fit
+    cell sorts by the colour of its markup."""
+    from textual.widgets import DataTable
+
+    from openllm_cbench.core import discover
+
+    models = [
+        {"name": "big:70b", "size": 40_000_000_000, "modified_at": "2026-01-02T00:00:00Z",
+         "architecture": "llama", "params_b": 70.0, "quant": "Q4_K_M"},
+        {"name": "small:1b", "size": 900_000_000, "modified_at": "2026-09-09T00:00:00Z",
+         "architecture": "llama", "params_b": 1.0, "quant": "Q4_K_M"},
+        {"name": "mid:9b", "size": 5_000_000_000, "modified_at": "2026-05-05T00:00:00Z",
+         "architecture": "llama", "params_b": 9.0, "quant": "Q4_K_M"},
+    ]
+    monkeypatch.setattr(discover, "list_local_models", lambda *a, **k: models)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            for _ in range(25):
+                await pilot.pause()
+            scr = app.screen
+            t = scr.query_one("#models-table", DataTable)
+            cols = [str(c.label) for c in t.columns.values()]
+            assert "Added" in cols, cols
+
+            added_i = cols.index("Added")
+            assert str(t.get_row_at(0)[added_i]).count("-") == 2, "Added should be a date"
+
+            scr._sort_by, scr._sort_desc = "Size", False
+            scr._apply_sort(quiet=True)
+            tags = [str(t.get_row_at(r)[0]) for r in range(t.row_count)]
+            assert tags == ["small:1b", "mid:9b", "big:70b"], tags
+
+            scr._sort_desc = True
+            scr._apply_sort(quiet=True)
+            tags = [str(t.get_row_at(r)[0]) for r in range(t.row_count)]
+            assert tags == ["big:70b", "mid:9b", "small:1b"], tags
+
+            scr._sort_by, scr._sort_desc = "Added", False
+            scr._apply_sort(quiet=True)
+            tags = [str(t.get_row_at(r)[0]) for r in range(t.row_count)]
+            assert tags == ["big:70b", "mid:9b", "small:1b"], tags
+    asyncio.run(scenario())
+
+
+def test_delete_does_nothing_until_the_box_is_ticked(monkeypatch):
+    """The only destructive action in the app. An unconfirmed click must
+    reach no subprocess at all."""
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            for _ in range(25):
+                await pilot.pause()
+            await pilot.click("#models-delete")
+            for _ in range(6):
+                await pilot.pause()
+            assert "argv" not in captured, "an unconfirmed delete must not run anything"
+    asyncio.run(scenario())
+
+
+def test_a_confirmed_delete_calls_the_real_subcommand_and_disarms(monkeypatch):
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    from textual.widgets import Checkbox, DataTable
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-models")
+            for _ in range(25):
+                await pilot.pause()
+            scr = app.screen
+            if scr.query_one("#models-table", DataTable).row_count == 0:
+                return
+            tag = str(scr.query_one("#models-table", DataTable).get_row_at(0)[0])
+            scr.query_one("#models-confirm-delete", Checkbox).value = True
+            await pilot.click("#models-delete")
+            for _ in range(8):
+                await pilot.pause()
+            argv = captured.get("argv", [])
+            assert "remove" in argv and "--yes" in argv, argv
+            assert argv[argv.index("--model") + 1] == tag, "must delete the exact selected tag"
+            # Disarmed again, so the next delete needs its own confirmation
+            # rather than inheriting this one.
+            assert scr.query_one("#models-confirm-delete", Checkbox).value is False
+    asyncio.run(scenario())

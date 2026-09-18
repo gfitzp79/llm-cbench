@@ -504,6 +504,51 @@ def _cmd_search(argv):
     return 1
 
 
+def _cmd_remove(argv):
+    """Deletes a pulled model from the local endpoint. The only command
+    here that destroys anything, and the only one that requires an
+    explicit --yes."""
+    import argparse
+
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.remove import remove_model
+
+    p = argparse.ArgumentParser(
+        prog="cbench remove",
+        description="Delete a model from the local endpoint. This frees the disk "
+                     "space and CANNOT be undone from here -- getting the model back "
+                     "means pulling it again.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True,
+                   help="Exact model tag to delete. Never prefix-matched: an exact "
+                        "tag is the difference between deleting qwen3:1.7b and "
+                        "qwen3:14b.")
+    p.add_argument("--yes", action="store_true",
+                   help="Required. Confirms you mean to delete this model. Without "
+                        "it nothing is sent to the endpoint.")
+    p.add_argument("--endpoint", default=None)
+    args = p.parse_args(argv)
+
+    base_url = resolve_base_url(args.endpoint)
+    if not args.yes:
+        print(f"[!] NOT DELETING '{args.model}'.\n"
+              f"    This would remove the model from {base_url}, freeing its disk "
+              f"space and requiring a re-pull to get it back.\n"
+              f"    Re-run with --yes if that is what you want.", file=sys.stderr)
+        return 2
+
+    # Results are deliberately left alone -- see core/remove.py.
+    print(f"Deleting '{args.model}' from {base_url} ...")
+    ok, detail = remove_model(args.model, base_url)
+    print(detail if ok else f"[!] {detail}", file=sys.stdout if ok else sys.stderr)
+    if ok:
+        print("Any CSVs, reports and scorecards for this model are untouched in "
+              "results/ -- the measurement outlives the weights.")
+    return 0 if ok else 1
+
+
 def _cmd_pull(argv):
     """Pulls a model into the local endpoint -- see core/pull.py's module
     docstring for why this needs no new trust boundary beyond what
@@ -1010,6 +1055,7 @@ _NATIVE = {
     "discover": _cmd_discover,
     "search": _cmd_search,
     "pull": _cmd_pull,
+    "remove": _cmd_remove,
     "assess": _cmd_assess,
     "score": _cmd_score,
     "catalogue": _cmd_catalogue,

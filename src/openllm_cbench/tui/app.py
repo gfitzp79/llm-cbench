@@ -382,6 +382,22 @@ class GateScreen(Screen):
         _report_job_result(log, result)
 
 
+def _short_date(iso):
+    """`2026-09-18T10:07:54.359+01:00` -> `2026-09-18`. Returns "" for a
+    value that isn't a timestamp rather than showing a mangled one."""
+    if not isinstance(iso, str) or len(iso) < 10:
+        return ""
+    head = iso[:10]
+    return head if head[4] == "-" and head[7] == "-" else ""
+
+
+def _as_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return -1.0
+
+
 class ModelsScreen(Screen):
     """What's actually available to run a suite against: every model
     pulled into the local endpoint, and whether the catalogue already
@@ -429,6 +445,17 @@ class ModelsScreen(Screen):
                 yield Input(placeholder="all", id="models-limit-input",
                             value="", type="integer")
                 yield Static("model(s) per batch", id="models-limit-suffix")
+            with Horizontal(id="models-delete-row"):
+                # The one destructive action in this app. The checkbox is
+                # deliberately not remembered between uses: an armed
+                # delete sitting around from five minutes ago is how the
+                # wrong model gets removed.
+                yield Checkbox(
+                    "Confirm delete -- permanently removes the selected model's "
+                    "weights from your endpoint (results are kept)",
+                    id="models-confirm-delete", value=False,
+                )
+                yield Button("Delete selected", id="models-delete", variant="error")
             with Horizontal(id="models-buttons"):
                 yield Button("Refresh", id="models-refresh", variant="primary")
                 yield Button("Gate + save selected", id="models-gate-selected")
@@ -439,9 +466,19 @@ class ModelsScreen(Screen):
             yield RichLog(id="models-log", wrap=True, highlight=True, markup=True)
         yield Footer()
 
+    _rows: list = []
+    _sort_by: str = None
+    _sort_desc: bool = False
+
     def on_mount(self) -> None:
+        self._rows = []
         table = self.query_one("#models-table", DataTable)
-        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Fit", "Speed", "Catalogued", "Score")
+        table.add_columns("Tag", "Params (B)", "Quant", "Size", "Added", "Fit",
+                          "Speed", "Catalogued", "Score")
+        # Clicking a header sorts by it. The rows carry parallel sort keys
+        # (see _rows) because sorting the RENDERED cell would sort
+        # "9.0 GB" after "10.5 GB" as strings, and markup like
+        # "[green]fits[/green]" by its escape code.
         table.cursor_type = "row"
         self._hw_info = None
         self._refresh()
@@ -457,6 +494,8 @@ class ModelsScreen(Screen):
             self._gate_selected()
         elif event.button.id == "models-gate-all":
             self._gate_all()
+        elif event.button.id == "models-delete":
+            self._delete_selected()
 
     def _refresh(self) -> None:
         # Guarded for the same reason as _populate_model_select and
@@ -472,6 +511,116 @@ class ModelsScreen(Screen):
             return
         log.write("[dim]Refreshing from the local endpoint...[/dim]")
         self._refresh_worker()
+
+    def on_data_table_header_selected(self, event) -> None:
+        """Click a header to sort by it; click the same one again to
+        reverse. Sorts the parallel key, never the rendered cell -- the
+        cell is formatted for a human and sorting it puts "9.0 GB" after
+        "10.5 GB" and orders Fit by the colour of its markup."""
+        if event.data_table.id != "models-table":
+            return
+        label = str(event.column_key.value or event.label)
+        self._sort_desc = (label == self._sort_by) and not self._sort_desc
+        self._sort_by = label
+        self._apply_sort()
+
+    def _apply_sort(self, quiet: bool = False) -> None:
+        """Re-renders the rows in sorted order.
+
+        Rebuilds rather than calling DataTable.sort(), because that hands
+        its key function the ROW VALUES -- the formatted cells. Sorting
+        those puts "9.0 GB" after "10.5 GB" and orders Fit by the colour
+        of its markup. The raw values were kept beside each row precisely
+        so this never has to read one back out."""
+        if not self._sort_by or not self._rows:
+            return
+        try:
+            table = self.query_one("#models-table", DataTable)
+        except NoMatches:
+            return
+        col = self._sort_by
+
+        def key_for(item):
+            v = (item[1] or {}).get(col, "")
+            if v is None:
+                return (1, "")
+            # One comparable type per column: a str never meets a float.
+            return (0, v.lower()) if isinstance(v, str) else (0, v)
+
+        try:
+            ordered = sorted(self._rows, key=key_for, reverse=self._sort_desc)
+        except TypeError:
+            return
+        self._rows = ordered
+        table.clear()
+        for cells, _ in ordered:
+            table.add_row(*cells)
+        if quiet:
+            return
+        arrow = "descending" if self._sort_desc else "ascending"
+        try:
+            self.query_one("#models-log", RichLog).write(
+                f"[dim]Sorted by {col}, {arrow}. Click the same header again to "
+                f"reverse it.[/dim]")
+        except NoMatches:
+            pass
+
+    def _selected_tag(self):
+        """The tag under the cursor, or None. Reads column 0 of the row
+        rather than an index into anything else, so adding a column
+        cannot silently change which value this returns."""
+        try:
+            table = self.query_one("#models-table", DataTable)
+        except NoMatches:
+            return None
+        if table.row_count == 0 or table.cursor_row is None:
+            return None
+        try:
+            return str(table.get_row_at(table.cursor_row)[0])
+        except Exception:
+            return None
+
+    def _delete_selected(self) -> None:
+        """`cbench remove --model <tag> --yes`, the one destructive action
+        this app can take.
+
+        Three guards, all of them cheap and all of them earned: a row must
+        actually be selected, the confirmation must be ticked in this same
+        interaction, and the exact tag is echoed before the subprocess
+        runs so what is about to happen is on screen in words."""
+        log = self.query_one("#models-log", RichLog)
+        tag = self._selected_tag()
+        if not tag:
+            log.write("[bold red]Select a model row first -- nothing is selected, so "
+                      "there is nothing to delete.[/bold red]")
+            return
+        if not self.query_one("#models-confirm-delete", Checkbox).value:
+            log.write(
+                f"[bold yellow]NOT deleting '{tag}'.[/bold yellow] Deleting removes the "
+                f"model's weights from your endpoint and cannot be undone from here -- "
+                f"getting it back means pulling it again. Tick the confirm box if that "
+                f"is what you want.")
+            return
+
+        argv = cbench_command("remove", ["--model", tag, "--yes"])
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        log.write(f"[bold red]Deleting '{tag}' from the endpoint.[/bold red] "
+                  f"[dim]Its CSVs, reports and scorecard stay in results/ -- the "
+                  f"measurement outlives the weights.[/dim]")
+        # Untick immediately, so the next delete has to be confirmed on its
+        # own terms rather than inheriting this one.
+        self.query_one("#models-confirm-delete", Checkbox).value = False
+        self._delete_worker(argv, log)
+
+    @work(exclusive=True, group="models-delete")
+    async def _delete_worker(self, argv, log) -> None:
+        result = await run_job(argv, lambda line: log.write(line))
+        if result.returncode == 0:
+            log.write("[green]Deleted. Refreshing the list...[/green]")
+            self._refresh()
+        else:
+            log.write(f"[bold red]Delete failed (exit {result.returncode}) -- "
+                      f"nothing was removed.[/bold red]")
 
     @work(exclusive=True)
     async def _refresh_worker(self) -> None:
@@ -497,6 +646,7 @@ class ModelsScreen(Screen):
         vram_mb = (self._hw_info or {}).get("gpu_vram_mb")
 
         table.clear()
+        self._rows = []
         uncatalogued_n = 0
         spills_n = 0
         for m in sorted(local, key=lambda x: x["name"]):
@@ -540,12 +690,32 @@ class ModelsScreen(Screen):
                     "unknown": "[dim]?[/dim]",
                 }[perf["label"]]
 
-            table.add_row(
-                m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]), fit_cell,
+            added_raw = m.get("modified_at") or ""
+            cells = (
+                m["name"], str(m["params_b"]), m["quant"], format_size(m["size"]),
+                _short_date(added_raw), fit_cell,
                 speed_cell,
                 "yes" if is_cat else "[bold yellow]no[/bold yellow]",
                 score if score != "not scored" else "[dim]not scored[/dim]",
             )
+            table.add_row(*cells)
+            # Sort keys kept beside the row rather than parsed back out of
+            # the rendered cells. A displayed value is for a human; sorting
+            # it is how "9.0 GB" ends up after "10.5 GB".
+            self._rows.append((cells, {
+                "Tag": m["name"].lower(),
+                "Params (B)": _as_float(m.get("params_b")),
+                "Quant": (m.get("quant") or "").lower(),
+                "Size": m.get("size") or 0,
+                "Added": added_raw,
+                "Fit": {"fits": 0, "tight": 1, "spills": 2, "unknown": 3}[assessment["tier"]],
+                "Speed": -(perf.get("tok_s") or 0) if perf["source"] == "measured" else
+                         {"fast": 1, "good": 2, "moderate": 3, "slow": 4, "unknown": 5}[perf["label"]] + 100,
+                "Catalogued": 0 if is_cat else 1,
+                "Score": score or "",
+            }))
+        if self._sort_by:
+            self._apply_sort(quiet=True)
         if spills_n:
             log.write(f"[bold yellow]{spills_n} model(s) won't fit in this GPU's "
                        f"{vram_mb:,} MB of VRAM and will run partly on CPU -- much slower, but "
@@ -1575,6 +1745,8 @@ class CBenchTUI(App):
     #reports-viewer-container { width: 60%; }
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
+    #models-delete-row { height: auto; margin: 0 0 1 0; }
+    #models-delete-row Checkbox { width: 1fr; }
     #models-limit-row { height: auto; margin: 0 0 1 0; }
     #models-limit-label { width: auto; padding: 1 1 0 0; }
     #models-limit-suffix { width: auto; padding: 1 0 0 1; }

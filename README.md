@@ -284,6 +284,31 @@ gate-checking a model, pulling a new model, and packaging, validating or
 submitting a community submission (see "Sharing your own results"
 below).
 
+**Local models** now also shows an **Added** column (when each model was
+pulled), sorts by any column when you click its header (click again to
+reverse), and can **delete** a selected model. Sorting orders the
+underlying value, not the formatted cell, so sizes sort numerically
+rather than putting "9.0 GB" after "10.5 GB".
+
+Delete is the only destructive thing this tool does. It requires a
+confirmation box ticked in the same interaction, names the exact tag
+before it runs, and calls `cbench remove --model <tag> --yes` as a real
+subprocess like every other action here. The box unticks itself
+afterwards, so a second delete needs its own confirmation rather than
+inheriting the first. **Your results are never touched**: the CSVs,
+reports and scorecard for a deleted model stay in `results/`, because the
+measurement is what this framework exists to produce and removing it as a
+side effect of freeing disk space would be data loss dressed up as
+convenience.
+
+```bash
+cbench remove --model <model-tag> --yes
+```
+
+Without `--yes` nothing is sent to the endpoint. The tag is never
+prefix-matched, because a loose match is how `qwen3:14b` gets deleted by
+somebody who meant `qwen3:1.7b`.
+
 **Local models** lists what's pulled locally with a picker that fills
 the model field for you, a **Fit** column (does this model fit in your
 VRAM, and is it a mixture-of-experts model that degrades gently when it

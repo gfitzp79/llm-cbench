@@ -138,3 +138,26 @@ def test_unverifiable_preflight_refuses_by_default(lockdir, monkeypatch):
                  log=lambda m: None).acquire()
     assert lk.held
     lk.release()
+
+
+def test_the_lock_path_resolves_when_asked_not_at_import(tmp_path, monkeypatch):
+    """REGRESSION GUARD. `DEFAULT_LOCK` is bound the first time this
+    module is imported, and it used to be the default ARGUMENT of
+    RunLock.__init__ as well -- so $CBENCH_LOCK_DIR was unreachable to
+    anything setting it after import.
+
+    That was not theoretical. Running `pytest` while a genuine assessment
+    held the lock failed five tests that have nothing to do with locking:
+    they constructed RunLock with no lock_dir, got the real one, and were
+    correctly refused. Resolve-at-call-time is how every other path in
+    this package works."""
+    from openllm_cbench.core.runlock import RunLock, default_lock_dir
+
+    chosen = tmp_path / "elsewhere" / "run.lock"
+    monkeypatch.setenv("CBENCH_LOCK_DIR", str(chosen))
+    assert default_lock_dir() == str(chosen)
+    assert RunLock(label="t").dir == chosen, "constructed with no lock_dir"
+
+    explicit = tmp_path / "explicit.lock"
+    assert RunLock(lock_dir=str(explicit), label="t").dir == explicit, \
+        "an explicit path still wins, so a contention test can still be written"

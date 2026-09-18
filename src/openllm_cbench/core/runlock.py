@@ -56,6 +56,20 @@ RUNNER_PATTERNS = (
 )
 
 DEFAULT_LOCK = os.environ.get("CBENCH_LOCK_DIR", ".cbench/run.lock")
+
+
+def default_lock_dir():
+    """Where the lock lives, resolved WHEN ASKED rather than at import.
+
+    `DEFAULT_LOCK` above is bound the first time this module is imported,
+    which made `$CBENCH_LOCK_DIR` unusable to anything that sets it after
+    that -- including a test suite trying to keep off the real lock. The
+    consequence was not theoretical: running `pytest` while a genuine
+    assessment held the lock failed five tests that had nothing to do with
+    locking, because they acquired the real one and were correctly
+    refused. Resolve-at-call-time is how every other path in this package
+    works (see core/config.py); this one was the exception."""
+    return os.environ.get("CBENCH_LOCK_DIR") or DEFAULT_LOCK
 UNKNOWN = -1  # the preflight could not run; NOT the same as "zero runners"
 
 
@@ -226,9 +240,11 @@ class RunLock:
     docstring is modelled on.
     """
 
-    def __init__(self, lock_dir=DEFAULT_LOCK, label="", patterns=RUNNER_PATTERNS,
+    def __init__(self, lock_dir=None, label="", patterns=RUNNER_PATTERNS,
                  allow_unverified=False, force=False, log=None, owner_pid=None):
-        self.dir = Path(lock_dir)
+        # None, not DEFAULT_LOCK: a default argument binds at import and
+        # would pin the path before anything could set it.
+        self.dir = Path(lock_dir if lock_dir is not None else default_lock_dir())
         self.label = label or "unlabelled"
         # Whose liveness makes this lock valid. Defaults to this process, which
         # is right for an in-process orchestrator (cbench assess). The CLI

@@ -242,7 +242,7 @@ them badly.
 | cross-model contrast | CMH stratified by model, continuity-corrected | no, do it in your analysis |
 | direction consistency | exact sign test across models | no |
 | multiple comparisons | Bonferroni across all pairs, not just the reported one | no |
-| contested scoring choice | report **bounds** across the disputed rows, not a chosen value | no |
+| contested scoring choice | report **bounds** across the disputed rows, not a chosen value | partly, `scoring/scorecard.py` does it for S2's unreadable rows; elsewhere it is yours |
 
 **Bounds over choices.** Where a convention is genuinely contested, report the
 interval the disputed rows can move the answer across. A conclusion that holds

@@ -455,8 +455,11 @@ def aggregate_s2(model):
         "leak_pooled": (pooled_leak, pooled_traced),
         "scored_rows": pooled_scored,
         "traceless_excluded": pooled_scored - pooled_traced,
-        "fail_pooled": (pooled_fail, pooled_determined),
-        "undetermined_excluded": pooled_undetermined,
+        # One denominator for both bounds: every row the suite attempted
+        # and did not truncate. See scoring/scorecard.py for why this is
+        # an interval rather than a value.
+        "fail_bounds": (pooled_fail, pooled_undetermined,
+                        pooled_determined + pooled_undetermined),
         "thinking_rows": thinking_rows,
         "could_detect_leak": s2_could_detect_a_leak(thinking_rows),
     }

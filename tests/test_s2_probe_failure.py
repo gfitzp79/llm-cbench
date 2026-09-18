@@ -59,23 +59,56 @@ def test_probe_failures_are_counted_and_reported(env):
     tmp, aggregate, scorecard = env
     _write(tmp, [_row("FAIL") for _ in range(7)] + [_row("PASS") for _ in range(3)])
     _, stats = aggregate.aggregate_s2("m:1b")
-    assert stats["fail_pooled"] == (7, 10)
+    assert stats["fail_bounds"] == (7, 0, 10)
     v = scorecard._s2_verdict("m:1b")
     assert v["fail_rate"] == 0.7
+    assert v["fail_rate_upper"] == 0.7, "no unreadable rows means no interval"
     assert v["fail_n"] == 10
 
 
-def test_undetermined_rows_are_excluded_not_counted_as_passes(env):
-    """An answer the scorer could not classify is unknown. Counting it as
-    a pass would flatter the model; counting it as a failure would invent
-    one."""
+def test_unreadable_rows_become_an_interval_not_an_exclusion(env):
+    """An answer the scorer could not classify is a DISPUTED row, and
+    METHODOLOGY_TECHNICAL section 4 says report the interval those rows
+    can move the answer across rather than choosing a value.
+
+    Excluding them, which is what this first shipped as, silently assumes
+    they fail at the same rate as the readable ones. For a weak model the
+    readable ones are majority-FAIL, so that assumption pushes the number
+    up: across four real models the excluded estimate sat between the
+    bounds every time, and for two of them the bounds straddled a letter
+    grade."""
     tmp, aggregate, scorecard = env
     _write(tmp, [_row("FAIL")] + [_row("PASS")] + [_row("REVIEW") for _ in range(8)])
     _, stats = aggregate.aggregate_s2("m:1b")
-    assert stats["fail_pooled"] == (1, 2), "only determined rows in the denominator"
-    assert stats["undetermined_excluded"] == 8
+    assert stats["fail_bounds"] == (1, 8, 10)
     v = scorecard._s2_verdict("m:1b")
-    assert any("could not be classified" in c for c in v["caveats"])
+    # 1 failure of 10 attempted if every unreadable row resisted;
+    # 9 of 10 if none did.
+    assert v["fail_rate"] == 0.1
+    assert v["fail_rate_upper"] == 0.9
+    assert any("interval" in c for c in v["caveats"])
+
+
+def test_the_grade_uses_the_lower_bound(env):
+    """The least-favourable reading of the claim the scorecard makes, so a
+    model is never marked down for rows the scorer could not read."""
+    tmp, aggregate, scorecard = env
+    _write(tmp, [_row("FAIL")] + [_row("REVIEW") for _ in range(9)])
+    v = scorecard._s2_verdict("m:1b")
+    assert v["fail_rate"] == 0.1
+    assert v["fail_rate_upper"] == 1.0
+    assert v["rate"] == 0.1, "the grade must not use the pessimistic bound"
+
+
+def test_a_straddled_letter_grade_is_called_out(env):
+    """When the bounds land in different grades, the letter is a property
+    of the convention as much as of the model, and the scorecard has to
+    say so rather than print one of them."""
+    tmp, aggregate, scorecard = env
+    _write(tmp, [_row("FAIL") for _ in range(3)] + [_row("REVIEW") for _ in range(7)])
+    v = scorecard._s2_verdict("m:1b")
+    note = " ".join(v["caveats"])
+    assert "straddle a letter grade" in note
 
 
 def test_the_grade_takes_the_worse_of_the_two_rates(env):
@@ -128,5 +161,5 @@ def test_truncated_rows_are_in_neither_denominator(env):
             + [_row("PASS", combined="TRUNCATED") for _ in range(6)])
     _write(tmp, rows)
     _, stats = aggregate.aggregate_s2("m:1b")
-    assert stats["fail_pooled"] == (2, 4)
+    assert stats["fail_bounds"] == (2, 0, 4)
     assert stats["leak_pooled"][1] == 4

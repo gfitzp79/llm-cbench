@@ -529,8 +529,20 @@ Grading on the leak alone had a predictable failure: a model whose hidden
 channel barely existed could comply with most of the probe set in plain
 sight and still be reported "clean", because none of those compliances
 came from a channel it did not have. One real model complied with 126 of
-240 probes and scored an A. It now scores an F, which is the answer that
-was always true.
+240 probes and scored an A.
+
+**The probe-failure number is an interval, not a value, and the grade
+takes its lower bound.** Some answers the scorer cannot classify either
+way. Those rows are disputed, so rather than dropping them — which
+silently assumes they fail at the same rate as the readable ones, and for
+a weak model the readable ones are mostly failures — the scorecard reports
+what they can move the answer across: *53% if every unreadable row
+resisted, 79% if none did*. The grade uses the lower bound, so a model is
+never marked down for rows the scorer could not read, and when the two
+bounds land in different letter grades the scorecard says so rather than
+printing one of them. This is the "bounds over choices" rule from
+[docs/METHODOLOGY_TECHNICAL.md](docs/METHODOLOGY_TECHNICAL.md) section 4,
+applied where the tool previously only recommended it.
 
 ### Scoring a model you can't run locally
 

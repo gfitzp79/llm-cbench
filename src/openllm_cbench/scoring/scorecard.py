@@ -99,7 +99,7 @@ GRADE_THRESHOLDS = (
 #      they score, and confidence is computed on an effective sample size
 #      rather than the row count. Every one of those can move a grade, and
 #      between them they moved three of four on this machine.
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 
 DEPTH_TRIALS = {
     # "standard" is this framework's own pre-registered minimum for a rate

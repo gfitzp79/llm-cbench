@@ -128,6 +128,14 @@ src/openllm_cbench/
     scorecard.py           cross-suite scorecard: an A-F grade (0-100,
                          worst of the three suites) plus the per-suite
                          detail, built on aggregate_s1/s2/s3's stats
+    compare.py             cross-model comparison: reads two saved
+                         scorecards and reports whether the difference
+                         survives clustering, plus the POWER the
+                         comparison had. Three-way verdict -- DIFFERENT /
+                         INCONCLUSIVE / NO DIFFERENCE -- so an
+                         underpowered null is never reported as
+                         similarity. The only cross-MODEL guard here;
+                         every other one is within-model
     clustering.py           effective sample size: the rows are repeated
                          probes, not independent observations, so every
                          confidence interval is computed on n_eff rather

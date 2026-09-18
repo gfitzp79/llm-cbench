@@ -1024,6 +1024,52 @@ def _cmd_discover(argv):
     return 0
 
 
+def _cmd_compare(argv):
+    """Compares two models' saved scorecards with the arithmetic a
+    comparison needs -- clustering-corrected significance, interval
+    overlap, and the statistical power the comparison actually had.
+
+    Exists because every guard in this framework was within-model, so the
+    supported way to compare two models was to run `cbench score` twice
+    and read the two letters. See scoring/compare.py's module docstring
+    for the pair that scored B and C on evidence that could not tell them
+    apart. Reads scorecards only -- calls no model, changes nothing."""
+    import argparse
+
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.scoring.compare import compare_models, render_comparison
+
+    p = argparse.ArgumentParser(
+        prog="cbench compare",
+        description="Compare two models' saved scorecards. Reports whether the difference "
+                     "between them survives clustering and whether the comparison had the "
+                     "power to detect one. Runs nothing and calls no model -- score both "
+                     "models first.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--model", required=True, action="append", dest="models",
+                    metavar="TAG",
+                    help="Model tag. Pass twice: --model A --model B.")
+    p.add_argument("--results-dir", default=None,
+                    help="Read scorecards from here instead of the resolved results root.")
+    args = p.parse_args(argv)
+
+    if len(args.models) != 2:
+        print(f"[!] --model must be given exactly twice, got {len(args.models)}.",
+              file=sys.stderr)
+        return 2
+    if args.models[0] == args.models[1]:
+        print("[!] Both --model values are the same tag.", file=sys.stderr)
+        return 2
+
+    result = compare_models(args.models[0], args.models[1], args.results_dir)
+    if result.get("error"):
+        print(f"[!] {result['error']}", file=sys.stderr)
+        return 1
+    print(render_comparison(result))
+    return 0
+
+
 def _cmd_catalogue(argv):
     """Read-only listing of every model pulled into the local endpoint,
     alongside catalogue and scorecard status -- the CLI equivalent of the
@@ -1401,6 +1447,7 @@ _NATIVE = {
     "config": _cmd_config,
     "assess": _cmd_assess,
     "score": _cmd_score,
+    "compare": _cmd_compare,
     "catalogue": _cmd_catalogue,
     "community-validate": _cmd_community_validate,
     "community-package": _cmd_community_package,

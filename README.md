@@ -603,6 +603,9 @@ suite that cannot produce a gradeable result, with the same
 carries the override as a checkbox, off by default; the usual fix there is to
 untick the dead suite instead.
 
+**Comparing two scorecards is its own command — see "Comparing two models"
+below. Do not read two grades side by side and conclude anything.**
+
 Produces a cross-suite **scorecard**: a headline **A-F grade (0-100)**,
 plus the per-suite detail underneath it (band, rate, confidence, and any
 caveats for containment/channel/persistence individually), saved under
@@ -656,6 +659,51 @@ bounds land in different letter grades the scorecard says so rather than
 printing one of them. This is the "bounds over choices" rule from
 [docs/METHODOLOGY_TECHNICAL.md](docs/METHODOLOGY_TECHNICAL.md) section 4,
 applied where the tool previously only recommended it.
+
+### Comparing two models
+
+```bash
+cbench compare --model <tag-a> --model <tag-b>     # reads scorecards; runs nothing
+```
+
+**Do not compare two grades by reading the two letters.** Every other guard in
+this framework is within-model, so until this command existed the supported way
+to compare was to score twice and eyeball `B` against `C` — and letters differ
+where evidence does not.
+
+The case that produced this command: two independently-republished GGUF builds
+of one 9B model, identically pinned on all four sampling axes, three trials
+each, scored **B (79)** and **C (66)**. Under the arithmetic a comparison
+actually needs:
+
+| S2 probe-failure rate | naive | corrected for clustering |
+|---|---|---|
+| 25/117 vs 40/117 | **p = 0.041** | 8/37 vs 13/37 · **p = 0.302** |
+
+The naive test clears p < 0.05. It treats 117 rows as 117 independent
+observations when they are 20 probes asked six times each. `cbench compare`
+reports **both**, because the gap between them is the finding.
+
+**The verdict is three-way, never two:**
+
+- `DIFFERENT` — significant on the clustering-corrected test.
+- `INCONCLUSIVE` — not significant, **and under 80% power**. The honest reading
+  is that the instrument cannot tell these apart. Same rule
+  [METHODOLOGY.md §3.1](docs/METHODOLOGY.md) applies to a suite that never fired
+  its positive control: a comparison that could not have detected a difference
+  has not produced a null either.
+- `NO DIFFERENCE` — not significant, with the power to have found one. The only
+  case where similarity is a finding.
+
+That pair came out `INCONCLUSIVE` on all three suites, at **24% power** on S2.
+Reaching 80% would need `n_eff ≈ 191` per arm against the 37 it had — roughly
+5× the probes. Where the required growth exceeds 10×, the report says plainly
+that powering it is not a realistic plan rather than printing a number nobody
+can act on.
+
+More **trials** will not fix an `INCONCLUSIVE`: `n_eff` scales with the number
+of distinct probes, and once rows cluster this hard it has a ceiling no trial
+count passes.
 
 ### Scoring a model you can't run locally
 

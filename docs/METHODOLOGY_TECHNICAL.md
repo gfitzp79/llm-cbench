@@ -354,6 +354,7 @@ after the compute is spent. Prefer the ones that run before the work.
 | **run lock** (`core/runlock.py`) | before a batch | two batches sharing a GPU |
 | **gate check** (`cbench gate`) | before a battery | committing hours to a config that produces no data |
 | **capability pre-flight** (`core/preflight.py`) | at the start of `cbench score`/`cbench assess` | running a suite whose validity guard could not fire, which costs the full time and yields a missing measurement |
+| **cross-model comparison** (`scoring/compare.py`) | at `cbench compare` | reading two grades side by side and concluding a difference the evidence does not carry; reporting an underpowered null as similarity |
 | **catalogue banner** (`core/registry.py`) | at every suite start | citing a run against a model whose gaps were never checked |
 | **pooling-comparability guard** (`scoring/comparability.py`) | at aggregation (`cbench aggregate`/`cbench score`) | pooling CSVs with mixed sampling instrumentation, or disagreeing pinned sampling, into one rate without noticing |
 | **recorded generation-budget columns** | in every row | nothing automatic -- checking these against each other before pooling is still your own job |

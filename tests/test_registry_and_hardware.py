@@ -105,3 +105,50 @@ def test_registry_leaves_an_unmeasurable_params_b_alone(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(overlay))
 
     assert lookup("mystery:1b", load_registry())["params_b"] == "unknown"
+
+
+def test_save_entry_creates_a_missing_parent_directory(tmp_path, monkeypatch):
+    """A gate check that had just run CORRECTLY ended in a raw
+    FileNotFoundError traceback from inside save_entry(), because the
+    catalogue path's parent did not exist yet.
+
+    That is not an exotic case: `--registry-file` and
+    $OPENLLM_CBENCH_MODELS_FILE exist precisely so the catalogue can be
+    pointed somewhere of the user's choosing, and somewhere of their
+    choosing frequently does not exist yet. A stack trace after a
+    successful check reads as a broken tool rather than a directory one
+    level too deep. core/config.py:save_config() had always done this;
+    this is the same operation."""
+    from openllm_cbench.core.registry import load_registry, lookup, save_entry
+
+    target = tmp_path / "never" / "existed" / "models.json"
+    assert not target.parent.exists()
+
+    written = save_entry("x:1b", {"tools": True}, str(target))
+
+    assert written == target and target.is_file()
+    assert lookup("x:1b", load_registry(str(target))) == {"tools": True}
+
+
+def test_save_entry_creates_a_parent_from_the_environment_layer(tmp_path, monkeypatch):
+    """Same crash, reached through the env var rather than the flag --
+    the layer a scripted workflow uses."""
+    from openllm_cbench.core.registry import save_entry
+
+    target = tmp_path / "from_env" / "models.json"
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(target))
+    assert save_entry("y:1b", {"tools": False}).is_file()
+
+
+def test_save_entry_does_not_disturb_an_existing_catalogue(tmp_path):
+    """The mkdir must not become a reason to rewrite a directory that is
+    already there, or to lose entries already in the file."""
+    from openllm_cbench.core.registry import load_registry, lookup, save_entry
+
+    target = tmp_path / "cat" / "models.json"
+    save_entry("first:1b", {"tools": True}, str(target))
+    save_entry("second:1b", {"tools": False}, str(target))
+
+    registry = load_registry(str(target))
+    assert lookup("first:1b", registry) == {"tools": True}
+    assert lookup("second:1b", registry) == {"tools": False}

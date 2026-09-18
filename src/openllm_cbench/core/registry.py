@@ -178,9 +178,22 @@ def delimiters_for(model, registry=None):
 
 def save_entry(model, entry, overlay_path=None):
     """Writes/replaces one model's entry in the local overlay file,
-    creating the file if it doesn't exist yet. Does not touch the
-    packaged seed. Returns the path written to."""
+    creating the file AND its directory if they don't exist yet. Does not
+    touch the packaged seed. Returns the path written to.
+
+    The mkdir is not incidental. This path comes from a four-layer
+    resolution whose upper layers -- `--registry-file` and
+    `$OPENLLM_CBENCH_MODELS_FILE` -- exist precisely so someone can point
+    the catalogue at a location of their choosing, and a location of
+    their choosing frequently does not exist yet. Without it, a gate
+    check that had just run correctly ended in a raw FileNotFoundError
+    traceback from inside this function, which reads as a broken tool
+    rather than a directory one level too deep. `cbench discover
+    --gate-all` calls this once per model and was equally exposed.
+    core/config.py:save_config() has always done this; this is the same
+    operation and now behaves the same way."""
     path = default_overlay_path(overlay_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     data = {"models": _load_overlay(path)}
     data["models"][model] = entry
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

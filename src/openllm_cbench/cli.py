@@ -617,9 +617,9 @@ def _cmd_search(argv):
     result."""
     import argparse
 
-    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.invariant import epilog as safety_epilog
-    from openllm_cbench.core.pull import check_model_availability
+    from openllm_cbench.core.pull import check_model_availability, check_tag
 
     p = argparse.ArgumentParser(
         prog="cbench search",
@@ -633,12 +633,17 @@ def _cmd_search(argv):
     p.add_argument("--endpoint", default=None)
     args = p.parse_args(argv)
 
+    ok_tag, complaint = check_tag(args.model)
+    if not ok_tag:
+        print(f"[!] {complaint}", file=sys.stderr)
+        return 2
+
     base_url = resolve_base_url(args.endpoint)
-    print(f"Checking '{args.model}' against {base_url}'s registry ...")
+    print(f"Checking '{args.model}' against {base_url}'s registry ...", flush=True)
     try:
         result = check_model_availability(args.model, base_url)
     except Exception as e:
-        print(f"[!] Could not reach {base_url}: {e}", file=sys.stderr)
+        print(f"[!] {describe_request_failure(e, base_url)}", file=sys.stderr)
         return 1
 
     if result["exists"]:
@@ -882,9 +887,9 @@ def _cmd_pull(argv):
     `ollama pull` already does from a terminal today."""
     import argparse
 
-    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.invariant import epilog as safety_epilog
-    from openllm_cbench.core.pull import pull_model, throttled_progress_printer
+    from openllm_cbench.core.pull import check_tag, pull_model, throttled_progress_printer
 
     p = argparse.ArgumentParser(
         prog="cbench pull",
@@ -896,8 +901,18 @@ def _cmd_pull(argv):
     p.add_argument("--endpoint", default=None)
     args = p.parse_args(argv)
 
+    # Checked before the request, because the endpoint's complaint about a
+    # pasted command line is an opaque 400 and this one names the tag.
+    ok_tag, complaint = check_tag(args.model)
+    if not ok_tag:
+        print(f"[!] {complaint}", file=sys.stderr)
+        return 2
+
     base_url = resolve_base_url(args.endpoint)
-    print(f"Pulling '{args.model}' into {base_url} ...")
+    # flush: the failure below goes to stderr, and the TUI reads both down
+    # one pipe where only stdout is block-buffered -- without this the
+    # error arrives before the line saying what was being attempted.
+    print(f"Pulling '{args.model}' into {base_url} ...", flush=True)
 
     def _print(line):
         print(line, flush=True)
@@ -905,7 +920,7 @@ def _cmd_pull(argv):
     try:
         ok, final = pull_model(args.model, base_url, on_progress=throttled_progress_printer(_print))
     except Exception as e:
-        print(f"[!] Could not reach {base_url}: {e}", file=sys.stderr)
+        print(f"[!] {describe_request_failure(e, base_url)}", file=sys.stderr)
         return 1
 
     if ok:
@@ -920,7 +935,7 @@ def _cmd_discover(argv):
     import argparse
 
     from openllm_cbench.core.discover import list_local_models, find_uncatalogued, format_size
-    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.gate import run_gate, render_gate_report, to_registry_entry
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.core.registry import load_registry, save_entry
@@ -947,11 +962,11 @@ def _cmd_discover(argv):
     args = p.parse_args(argv)
 
     base_url = resolve_base_url(args.endpoint)
-    print(f"Listing locally-pulled models from {base_url} ...")
+    print(f"Listing locally-pulled models from {base_url} ...", flush=True)
     try:
         local = list_local_models(base_url)
     except Exception as e:
-        print(f"[!] Could not reach {base_url}/api/tags: {e}", file=sys.stderr)
+        print(f"[!] {describe_request_failure(e, base_url)}", file=sys.stderr)
         return 1
 
     registry = load_registry(args.registry_file)
@@ -1021,7 +1036,7 @@ def _cmd_catalogue(argv):
     import argparse
 
     from openllm_cbench.core.discover import list_local_models, format_size
-    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.core.registry import load_registry
     from openllm_cbench.scoring.scorecard import catalogue_compact_label, catalogue_summary_line
@@ -1039,11 +1054,11 @@ def _cmd_catalogue(argv):
     args = p.parse_args(argv)
 
     base_url = resolve_base_url(args.endpoint)
-    print(f"Listing locally-pulled models from {base_url} ...\n")
+    print(f"Listing locally-pulled models from {base_url} ...\n", flush=True)
     try:
         local = list_local_models(base_url)
     except Exception as e:
-        print(f"[!] Could not reach {base_url}/api/tags: {e}", file=sys.stderr)
+        print(f"[!] {describe_request_failure(e, base_url)}", file=sys.stderr)
         return 1
 
     if not local:

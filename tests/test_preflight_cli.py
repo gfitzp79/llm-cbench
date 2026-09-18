@@ -155,10 +155,14 @@ def test_from_existing_is_not_preflighted(monkeypatch, capsys, tmp_path):
 
 # --------------------------------------------- what must not block a run
 
-def test_a_broken_preflight_never_blocks(monkeypatch, capsys):
-    """A pre-flight that can stop a run on its own malfunction is worse
-    than no pre-flight. An unreachable endpoint is not evidence about the
-    model."""
+def test_an_unreachable_endpoint_does_not_block(monkeypatch, capsys):
+    """An unreachable endpoint is not evidence about the model.
+
+    Note which path this actually takes: `run_gate()` catches its own
+    sub-check failures by contract, so this arrives as UNVERIFIED rather
+    than as an exception. The test below covers the exception path
+    separately -- an audit pass pointed out that this one was named for a
+    mechanism it was not exercising."""
     monkeypatch.setattr(gate, "fetch_show_info",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("connection refused")))
     monkeypatch.setattr(gate, "warm_up", lambda *a, **k: (False, 0.0, None))
@@ -166,6 +170,27 @@ def test_a_broken_preflight_never_blocks(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: 0)
     assert _run(["assess", "--model", "unreachable:8b"], monkeypatch) == 0
     assert "NOT STARTING" not in capsys.readouterr().err
+
+
+def test_the_preflight_cannot_block_a_run_by_failing_itself(monkeypatch, capsys):
+    """The defensive catch, exercised for real by making run_gate() raise.
+
+    `run_gate()` documents that it never raises past itself, which makes
+    this handler unreachable today -- deliberately kept anyway, because
+    it is a contract rather than a guarantee, and the cost of that
+    contract quietly changing is a guard that blocks legitimate runs. A
+    guard that can stop your work by malfunctioning is worse than no
+    guard, so the fallback is tested rather than assumed."""
+    monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "openllm_cbench.core.gate.run_gate",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("preflight itself is broken")))
+
+    assert _run(["assess", "--model", "whatever:8b"], monkeypatch) == 0
+    err = capsys.readouterr().err
+    assert "Pre-flight could not complete" in err
+    assert "continuing anyway" in err
+    assert "NOT STARTING" not in err
 
 
 def test_a_timed_out_tool_call_does_not_block(endpoint, monkeypatch, capsys):

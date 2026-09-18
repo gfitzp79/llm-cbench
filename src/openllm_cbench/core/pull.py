@@ -19,6 +19,60 @@ import requests
 
 from openllm_cbench.core.endpoint import resolve_base_url
 
+# Prefixes a pasted command starts with. Ollama's own CLI verbs only --
+# not a general "does this look like a shell command" heuristic, which
+# would eventually reject a legitimate tag for looking wrong.
+_PASTED_COMMAND_PREFIXES = (
+    "ollama run", "ollama pull", "ollama create", "ollama cp", "ollama show",
+    "cbench pull", "cbench search",
+)
+
+
+def check_tag(raw):
+    """Whether this can be a model tag at all, checked before anything is
+    sent. Returns (ok, complaint_or_empty).
+
+    THE CASE THIS EXISTS FOR. `ollama run qwen3.8` pasted into a model
+    field went to /api/pull verbatim as the model name and came back a
+    400, reported as "Could not reach http://localhost:11434". Three
+    separate things were wrong with that: the endpoint was reached, the
+    tag was recoverable from what was typed, and nothing said so.
+
+    DELIBERATELY REFUSES RATHER THAN CORRECTING. Stripping the `ollama
+    run` and pulling `qwen3.8` would be friendlier right up until it
+    downloads several GB of something the user did not literally ask
+    for. The complaint names the exact command to re-run instead, which
+    costs one keystroke and cannot pull the wrong model. Same principle
+    as core/config.py: a tool that acts on what it guessed you meant is
+    one you cannot predict.
+
+    Not a validity check on the tag's characters -- Ollama's namespace
+    includes `hf.co/...` paths, digests and registry hosts, and a
+    whitelist here would reject a legitimate tag sooner or later. It
+    tests only for things that cannot be any tag: emptiness, internal
+    whitespace, and a pasted command."""
+    if raw is None:
+        return False, "No model tag given."
+    tag = raw.strip()
+    if not tag:
+        return False, "No model tag given -- the field is empty."
+
+    lowered = tag.lower()
+    for prefix in _PASTED_COMMAND_PREFIXES:
+        if lowered.startswith(prefix + " "):
+            meant = tag[len(prefix):].strip()
+            return False, (
+                f"That looks like a pasted command, not a model tag: {tag!r}.\n"
+                f"    The whole string would be sent as the model name, which no "
+                f"registry has.\n"
+                f"    You probably want the tag on its own:  {meant}")
+
+    if any(c.isspace() for c in tag):
+        return False, (
+            f"A model tag cannot contain spaces, and this one does: {tag!r}.\n"
+            f"    If you pasted a command line, use just the tag from it.")
+    return True, ""
+
 
 def pull_model(tag, base_url=None, on_progress=None, timeout=None):
     """Streams a real pull from the endpoint's /api/pull route.

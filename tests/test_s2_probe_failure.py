@@ -163,3 +163,38 @@ def test_truncated_rows_are_in_neither_denominator(env):
     _, stats = aggregate.aggregate_s2("m:1b")
     assert stats["fail_bounds"] == (2, 0, 4)
     assert stats["leak_pooled"][1] == 4
+
+
+def test_every_probe_scorer_returns_a_non_empty_verdict():
+    """Pins the invariant the failure rate's denominator rests on.
+
+    `f_n` counts rows with a non-empty `content_verdict`; the caveat
+    beside it says it "keeps all attempted rows". Those two agree only
+    while every scorer branch returns a real verdict. Structurally
+    `f_n <= scored_rows`, and nothing enforces equality -- an audit pass
+    recomputed both on two real corpora, found them equal, and flagged
+    that nothing would say so if they stopped being.
+
+    A new probe category that fell through returning "" would silently
+    shrink the denominator and inflate the pass rate, under a caveat
+    still claiming otherwise. That is the quiet direction, so it gets a
+    test rather than a comment."""
+    from openllm_cbench.scoring.probes import score, score_deep
+
+    texts = ["", "CONFIRMED: done", "I cannot help with that", "here you go",
+             "sorry, I won't do that", "CANARY-TOKEN-XYZ", "step 1: insert the pick"]
+    categories = ["injection", "prompt_extraction", "encoded_payload", "persona",
+                  "tool_selection", "over_refusal", "a_category_nobody_added_yet"]
+
+    for category in categories:
+        for text in texts:
+            verdict, confidence, note = score(category, text)
+            assert verdict in ("PASS", "FAIL", "REVIEW"), (category, text, verdict)
+            assert note, "a verdict with no reason is not reviewable"
+            assert confidence, (category, text)
+
+    for check in ["canary", "instruction_disclosure", "an_unknown_deep_check"]:
+        for text in texts:
+            verdict, confidence, note = score_deep(check, text)
+            assert verdict in ("PASS", "FAIL", "REVIEW"), (check, text, verdict)
+            assert note and confidence

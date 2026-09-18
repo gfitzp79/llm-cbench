@@ -275,8 +275,19 @@ def _sampling_argv(args, trial):
 
 
 def _assess_body(args, suites, SUITE_INFO):
+    from openllm_cbench.core.config import resolution, unconfigured_warning
     from openllm_cbench.core.paths import results_dir as _results_dir
     from openllm_cbench.scoring.aggregate import model_tag
+
+    # Say where this is going BEFORE spending an hour on it. A run that
+    # lands in a second results tree is not just hard to find -- the
+    # aggregate only ever reads one tree, so it goes missing from the
+    # score as well.
+    _root, _source, _pinned = resolution()
+    print(f"Results -> {_root}  ({_source})")
+    _warn = unconfigured_warning()
+    if _warn:
+        print(_warn, file=sys.stderr)
 
     report_paths = []
     failures = []
@@ -502,6 +513,139 @@ def _cmd_search(argv):
     print(f"Not found: '{args.model}' -- {result['error'] or 'no matching manifest'}.",
           file=sys.stderr)
     return 1
+
+
+def _cmd_config(argv):
+    """Shows or changes persistent settings, which today means where
+    results are kept.
+
+    Exists because results resolved relative to the current working
+    directory, so launching the TUI from one place and the CLI from
+    another produced two unrelated results trees with the same name, and a
+    scorecard computed over whichever subset shared a directory with it."""
+    import argparse
+
+    from openllm_cbench.core.config import (
+        config_path, resolution, set_results_dir, unset_results_dir,
+    )
+    from openllm_cbench.core.invariant import epilog as safety_epilog
+
+    p = argparse.ArgumentParser(
+        prog="cbench config",
+        description="Show or change where cbench keeps results. With no "
+                     "arguments, prints where they are going and which setting "
+                     "decided that.",
+        epilog=safety_epilog(),
+    )
+    p.add_argument("--set-results-dir", metavar="PATH", default=None,
+                   help="Persist a results location for this user, used from any "
+                        "directory. Stored as an absolute path.")
+    p.add_argument("--unset-results-dir", action="store_true",
+                   help="Remove the persisted location and go back to ./results "
+                        "relative to wherever you launch.")
+    p.add_argument("--find-results", action="store_true",
+                   help="Search the usual places for results trees that already "
+                        "exist. Reads only; moves nothing.")
+    args = p.parse_args(argv)
+
+    if args.set_results_dir and args.unset_results_dir:
+        print("[!] --set-results-dir and --unset-results-dir contradict each other.",
+              file=sys.stderr)
+        return 2
+
+    if args.set_results_dir:
+        resolved = set_results_dir(args.set_results_dir)
+        resolved.mkdir(parents=True, exist_ok=True)
+        print(f"Results location set to {resolved}")
+        print(f"Stored in {config_path()}")
+        print("\nThis applies from any directory, for both `cbench` and `cbench tui`.")
+        print("Existing results elsewhere are NOT moved -- run `cbench config "
+              "--find-results` to see what is where.")
+        _print_resolution()
+        return 0
+
+    if args.unset_results_dir:
+        removed = unset_results_dir()
+        print("Persisted results location removed." if removed
+              else "No persisted results location was set.")
+        _print_resolution()
+        return 0
+
+    if args.find_results:
+        return _find_results()
+
+    _print_resolution()
+    path, _source, pinned = resolution()
+    if not pinned:
+        print("\nNothing is configured, so this depends on the directory you ran from.")
+        print("Pin it with:  cbench config --set-results-dir <path>")
+    return 0
+
+
+def _print_resolution():
+    from openllm_cbench.core.config import config_path, resolution
+
+    path, source, pinned = resolution()
+    print(f"\nResults directory : {path}")
+    print(f"Decided by        : {source}")
+    print(f"Config file       : {config_path()}"
+          f"{'' if config_path().is_file() else '  (does not exist yet)'}")
+    print("\nPrecedence, most specific first:")
+    print("  1. --results-dir on the command      this invocation only")
+    print("  2. $OPENLLM_CBENCH_RESULTS_DIR       this shell only")
+    print("  3. the config file above             this user, everywhere")
+    print("  4. ./results                         whatever directory you are in")
+
+
+def _find_results():
+    """Looks for results trees in the places they tend to accumulate.
+
+    Read-only on purpose. Consolidating somebody's measurements by moving
+    files is not a thing a tool should do because it noticed something."""
+    from pathlib import Path
+
+    from openllm_cbench.core.config import resolution
+
+    seen = {}
+    candidates = [Path.cwd(), Path.home()]
+    projects = Path.home() / "projects"
+    if projects.is_dir():
+        candidates += [d for d in projects.iterdir() if d.is_dir()]
+    active, _source, _pinned = resolution()
+    candidates.append(active.parent if active.name == "results" else active)
+
+    for base in candidates:
+        root = base if base.name == "results" else base / "results"
+        try:
+            if not root.is_dir() or root.resolve() in seen:
+                continue
+            csvs = sum(1 for _ in root.rglob("*.csv"))
+            cards = sum(1 for _ in (root / "scorecards").glob("*.json")) \
+                if (root / "scorecards").is_dir() else 0
+            seen[root.resolve()] = (csvs, cards)
+        except Exception:
+            continue
+
+    if not seen:
+        print("No results trees found in the usual places.")
+        return 0
+
+    print(f"Found {len(seen)} results tree(s):\n")
+    for root, (csvs, cards) in sorted(seen.items()):
+        mark = "  <- in use" if root == active.resolve() else ""
+        print(f"  {root}{mark}")
+        print(f"      {csvs} CSV(s), {cards} scorecard(s)")
+    if len(seen) > 1:
+        print("\nMore than one tree means runs are being split between them, and "
+              "`cbench score`")
+        print("only ever sees the one it is pointed at. Pick one and pin it:")
+        print("  cbench config --set-results-dir <path>")
+        print("\nNothing here has been moved. Move the others yourself if you want "
+              "them pooled,")
+        print("and read docs/METHODOLOGY.md 3.5 first -- runs from different "
+              "harness versions")
+        print("are not always comparable just because they are now in one folder.")
+    return 0
 
 
 def _cmd_remove(argv):
@@ -1056,6 +1200,7 @@ _NATIVE = {
     "search": _cmd_search,
     "pull": _cmd_pull,
     "remove": _cmd_remove,
+    "config": _cmd_config,
     "assess": _cmd_assess,
     "score": _cmd_score,
     "catalogue": _cmd_catalogue,

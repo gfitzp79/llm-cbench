@@ -48,6 +48,41 @@ guardrail-detection scorer (`cbench guardrail`), a model gate-check
 Full architecture, control inventory, and the measurement pitfalls this
 tool is built to avoid: [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Where results are kept
+
+**Set this once, before your first real run.**
+
+```bash
+cbench config --set-results-dir ~/cbench-results
+```
+
+Without it, results resolve to `./results` next to whatever directory you
+launched from. Run the TUI from your home directory and the CLI from a
+project and you get two unrelated results trees with the same name, each
+invisible to the other. That is worse than untidy: `cbench score` reads
+whichever tree it is pointed at, so a run that landed in the other one is
+silently missing from the aggregate and the grade is computed over
+whatever subset shared a directory with it.
+
+`cbench config` on its own prints where results are going and which
+setting decided that. `cbench config --find-results` searches the usual
+places for trees that already exist, which is worth running once if you
+have used the tool from more than one directory. It reads only and moves
+nothing.
+
+Resolution order, most specific first:
+
+| | scope |
+|---|---|
+| `--results-dir` on the command | that invocation |
+| `$OPENLLM_CBENCH_RESULTS_DIR` | that shell |
+| the config file | your user, everywhere |
+| `./results` | whatever directory you are in |
+
+The same setting is reachable from the TUI under **Settings**, and the
+dashboard shows the active location on every launch, in yellow when it is
+not pinned.
+
 ## Install
 
 ```bash

@@ -12,10 +12,21 @@ identically whether the package is running from an editable checkout
 path and bypass this entirely.
 
 RESULTS (write-only, generated per run -- CSVs and markdown reports):
-never packaged. Defaults to `./results/<suite>` under the current working
-directory, overridable with `--results-dir` or the `OPENLLM_CBENCH_RESULTS_DIR`
-environment variable. This is deliberately the opposite resolution strategy
+never packaged. This is deliberately the opposite resolution strategy
 from DATA -- output should never be written inside an installed package.
+
+Resolved most-specific-first:
+
+  1. `--results-dir` on the command       this invocation only
+  2. `$OPENLLM_CBENCH_RESULTS_DIR`        this shell only
+  3. the persistent config file           this user, everywhere
+  4. `./results` relative to the CWD      whatever directory you are in
+
+Layer 3 exists because layer 4 alone made "where are my results?" depend
+on where you happened to launch from. Running the TUI from a home
+directory and the CLI from a project produced two unrelated trees with
+the same name, each invisible to the other, and a scorecard computed over
+whichever subset shared a directory with it. See core/config.py.
 """
 
 import os
@@ -34,11 +45,27 @@ def read_data_text(*parts, encoding="utf-8"):
     return data_file(*parts).read_text(encoding=encoding)
 
 
+def results_root(override: str | None = None) -> Path:
+    """The results root, by the precedence in this module's docstring.
+
+    Read fresh on every call rather than cached at import: a test that
+    points the environment variable at a temp directory, and a TUI that
+    changes the configured location while running, both have to take
+    effect without a restart."""
+    base = override or os.environ.get("OPENLLM_CBENCH_RESULTS_DIR")
+    if base:
+        return Path(base).expanduser()
+    # Imported here rather than at module scope: core.config imports
+    # nothing from this module today, and keeping it that way means a
+    # future edit cannot make the two circular.
+    from openllm_cbench.core.config import configured_results_dir
+    configured = configured_results_dir()
+    if configured:
+        return configured
+    return Path.cwd() / "results"
+
+
 def results_dir(suite: str, override: str | None = None) -> Path:
     """suite is one of 's1_containment', 's2_channel', 's3_persistence',
-    's5_inspect'. Precedence: explicit --results-dir override > env var >
-    default './results/<suite>' relative to CWD."""
-    base = override or os.environ.get("OPENLLM_CBENCH_RESULTS_DIR")
-    root = Path(base) if base else Path.cwd() / "results"
-    d = root / suite
-    return d
+    's5_inspect'."""
+    return results_root(override) / suite

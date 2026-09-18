@@ -628,6 +628,11 @@ def aggregate_s3(model):
         "any_fired_pooled": (pooled_fired, pooled_scored),
         "n_no_log_excluded": n_no_log,
         "effective": effective_n(list(_clusters.values())),
+        # How many DISTINCT scenarios the rows came from. The ceiling on
+        # this suite: it ships two, so a 3-trial run can produce at most
+        # six rows however long it takes, and the result generalises to
+        # those two scenarios rather than to persistence in general.
+        "n_scenarios": len(per_scenario),
     }
 
     return "\n".join(lines) + "\n", stats

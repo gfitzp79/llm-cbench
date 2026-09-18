@@ -134,7 +134,9 @@ class DashboardScreen(Screen):
                 yield Button("Browse reports", id="goto-reports")
                 yield Button("Share / validate results", id="goto-community")
                 yield Button("Check environment", id="run-doctor")
+                yield Button("Settings", id="goto-settings")
                 yield Button("About / extend this", id="goto-about")
+            yield Static("", id="results-location")
             yield Static("", id="progress-counts")
             yield Static("", id="progress-tier")
             yield Static("", id="progress-next")
@@ -149,6 +151,7 @@ class DashboardScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._show_results_location()
         self._load_progress()
         # Deliberately does NOT run `cbench doctor` automatically -- every
         # cbench action this TUI takes happens because of a click, none on
@@ -156,6 +159,29 @@ class DashboardScreen(Screen):
         self.query_one("#doctor-log", RichLog).write(
             "[dim]Press \"Check environment\" above to run it.[/dim]"
         )
+
+    def _show_results_location(self) -> None:
+        """Where results are going, on screen before anything runs.
+
+        The TUI gets launched from whatever shell is open, so the
+        directory that used to decide this was usually one nobody chose.
+        A run that lands in a second tree is not just hard to find --
+        `cbench score` globs per directory, so it is silently missing from
+        the aggregate."""
+        from openllm_cbench.core.config import resolution
+
+        try:
+            widget = self.query_one("#results-location", Static)
+        except NoMatches:
+            return
+        path, source, pinned = resolution()
+        if pinned:
+            widget.update(f"[dim]Results:[/dim] [bold]{path}[/bold] [dim]({source})[/dim]")
+        else:
+            widget.update(
+                f"[bold yellow]Results:[/bold yellow] [bold]{path}[/bold] "
+                f"[yellow]-- not pinned, so this follows whichever directory the TUI "
+                f"was launched from. Settings fixes it.[/yellow]")
 
     @work(exclusive=True, group="progress")
     async def _load_progress(self) -> None:
@@ -230,6 +256,8 @@ class DashboardScreen(Screen):
             self.app.push_screen(CommunityScreen())
         elif event.button.id == "run-doctor":
             self.run_doctor()
+        elif event.button.id == "goto-settings":
+            self.app.push_screen(SettingsScreen())
         elif event.button.id == "goto-about":
             self.app.push_screen(AboutScreen())
 
@@ -1531,6 +1559,95 @@ what makes them make sense to any AI assistant you point at them.
 """
 
 
+class SettingsScreen(Screen):
+    """Persistent settings. Today that is one thing: where results go.
+
+    Writes through `cbench config --set-results-dir`, the same subcommand
+    a terminal user runs, because every action this app takes is a real
+    cbench invocation rather than a second implementation of one."""
+
+    BINDINGS = [("escape", "app.pop_screen", "Back")]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield InvariantBar()
+        with Vertical(id="settings-form"):
+            yield Static("[bold]Where results are kept[/bold]", id="settings-title")
+            yield Static("", id="settings-current")
+            yield Static(
+                "Results used to resolve to `./results` next to whatever directory you "
+                "launched from, so running this app from one place and the CLI from "
+                "another produced two unrelated results trees with the same name. That "
+                "is worse than untidy: `cbench score` reads whichever tree it is pointed "
+                "at, so a run in the other one is silently missing from the aggregate.\n\n"
+                "Setting a location here stores it for your user and applies everywhere, "
+                "for both this app and the command line. An explicit --results-dir flag "
+                "or $OPENLLM_CBENCH_RESULTS_DIR still wins over it for a single run.",
+                id="settings-help",
+            )
+            yield Input(placeholder="Full path, e.g. C:\\Users\\you\\cbench-results",
+                        id="settings-results-input")
+            with Horizontal(id="settings-buttons"):
+                yield Button("Save location", id="settings-save", variant="primary")
+                yield Button("Clear (use current directory)", id="settings-unset")
+                yield Button("Find existing results", id="settings-find")
+                yield Button("Back", id="settings-back")
+            yield RichLog(id="settings-log", wrap=True, highlight=True, markup=True)
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_current()
+
+    def _refresh_current(self) -> None:
+        from openllm_cbench.core.config import config_path, resolution
+
+        try:
+            widget = self.query_one("#settings-current", Static)
+            field = self.query_one("#settings-results-input", Input)
+        except NoMatches:
+            return
+        path, source, pinned = resolution()
+        colour = "green" if pinned else "yellow"
+        widget.update(
+            f"Currently: [bold {colour}]{path}[/bold {colour}]\n"
+            f"Decided by: {source}\n"
+            f"Config file: {config_path()}"
+            f"{'' if config_path().is_file() else '  (does not exist yet)'}"
+        )
+        if not field.value:
+            field.value = str(path)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        log = self.query_one("#settings-log", RichLog)
+        if event.button.id == "settings-back":
+            self.app.pop_screen()
+        elif event.button.id == "settings-save":
+            path = self.query_one("#settings-results-input", Input).value.strip()
+            if not path:
+                log.write("[bold red]Enter a path first.[/bold red]")
+                return
+            self._run(["--set-results-dir", path], log)
+        elif event.button.id == "settings-unset":
+            self._run(["--unset-results-dir"], log)
+        elif event.button.id == "settings-find":
+            self._run(["--find-results"], log)
+
+    def _run(self, args, log) -> None:
+        argv = cbench_command("config", args)
+        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._config_worker(argv, log)
+
+    @work(exclusive=True, group="settings")
+    async def _config_worker(self, argv, log) -> None:
+        result = await run_job(argv, lambda line: log.write(line))
+        if result.returncode == 0:
+            # The location may have just changed, so re-read it rather
+            # than leaving the screen showing what it used to be.
+            self._refresh_current()
+        else:
+            log.write(f"[bold red]Exited {result.returncode}.[/bold red]")
+
+
 class AboutScreen(Screen):
     """Documentation, not a feature -- reads a static string, takes no
     action, contacts nothing. Exists because a request to 'encourage
@@ -1839,6 +1956,12 @@ class CBenchTUI(App):
     #reports-viewer-container { width: 60%; }
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
+    #settings-form { padding: 1 2; }
+    #settings-help { margin: 1 0; }
+    #settings-buttons { height: auto; margin: 1 0; }
+    #settings-buttons Button { margin: 0 1 0 0; }
+    #settings-log { height: 1fr; border: round $panel; }
+    #results-location { margin: 0 0 1 0; }
     #reports-filter-row { height: auto; margin: 0 0 1 0; }
     #reports-filter-row Select { width: 1fr; margin: 0 1 0 0; }
     #models-delete-row { height: auto; margin: 0 0 1 0; }

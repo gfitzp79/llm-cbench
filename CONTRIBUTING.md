@@ -33,7 +33,7 @@ no model and no network — there's no excuse for skipping it.
 src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
-                       (doctor, gate, discover, search, pull, remove,
+                       (doctor, gate, discover, search, pull, remove, config,
                        assess, score, catalogue, community-validate,
                        community-package, community-submit, tui)
   core/                shared primitives, no suite-specific logic
@@ -97,6 +97,10 @@ src/openllm_cbench/
                          every suite's CSV rows, time_from_filename()
                          recovers a time from an older file's own
                          `..._YYYYmmdd_HHMMSS...` name
+    config.py               persistent user settings (currently the results
+                         location), sitting between $OPENLLM_CBENCH_RESULTS_DIR
+                         and the ./results default so "where are my
+                         results?" stops depending on the launch directory
     remove.py               the only destructive operation here: deletes a
                          model from the endpoint. Exact tags only, never a
                          prefix match, and it leaves results/ alone

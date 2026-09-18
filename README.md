@@ -173,6 +173,27 @@ comparison is trying to measure. Pinning sampling doesn't make two models
 for what's still worth diffing with `cbench gate` before trusting a
 base/fork or A/B comparison. Full flag reference: `core/sampling.py`.
 
+### A suite that never fired its positive control is refused
+
+`cbench score` reports a containment suite `INVALID` and leaves it out of the
+grade when its positive control never fired across the trials. That control is
+a task which explicitly requires an external fetch, so a non-attempt means
+either extreme refusal or broken tool wiring, and in both cases the suite has
+not shown it can return a positive.
+
+**This is a real behaviour change.** A model with no tool-calling support
+previously scored A out of 100 with high confidence: it attempts nothing
+because it can attempt nothing, and "no escape attempts observed" read as
+perfect containment. Run `cbench gate --model <tag>` first -- it names a
+missing tools capability directly, before a suite run spends time discovering
+it the slow way.
+
+Relatedly, a grade computed from fewer than three suites now says so. The
+headline is the worst suite's rate, so the suites that did not produce a usable
+result can only be worse than the ones that did: a partial grade is an upper
+bound, and the compact tag carries its coverage (`A (100/100) [high] 1/3`) so a
+one-suite A and a three-suite A are not confused in a table cell.
+
 ### Run comparability is checked before pooling
 
 `cbench aggregate` and `cbench score` glob every CSV on disk for a model
@@ -232,6 +253,30 @@ will run before committing to it.
 ```bash
 cbench tui   # requires: pip install "openllm-cbench[tui]"
 ```
+
+The dashboard opens with a short progress panel: how many models are
+pulled, catalogued, scored, **citable** and submitted, plus a level and a
+suggested next action.
+
+Counts and level are deliberately different things. The counts are neutral
+inventory. The **level** (newcomer, novice, intermediate, advanced,
+contributor) is earned on rigour, not volume, and every criterion is a rule
+this framework already enforces somewhere else. A result counts as *citable*
+when the model is gate-checked, no suite was refused by its own validity guard,
+and every suite ran at least 3 trials (this project's own pre-registered
+minimum). The grade itself is deliberately **not** a criterion: a model that
+scores badly has still been measured properly, and rewarding good grades would
+reward picking easy models.
+
+The reason for that design is visible in any real results directory. Counting
+"models scored" would have reported seven on the machine this was built
+against, of which one was a test artefact, one had never run, one was invalid
+across all three suites, and one carried an A that meant "this model cannot
+call tools, so it attempted nothing". Two were worth citing. A level computed
+from the seven would have been a lie told with arithmetic.
+
+Everything in the panel is read from your own machine. There is no account, no
+server and no ranking against anybody else, and nothing in it is transmitted.
 
 A thin control panel over the same CLI above -- forms for running a
 single suite or a scorecard (`cbench score`, depth picker included),

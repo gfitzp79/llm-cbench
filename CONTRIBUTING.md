@@ -97,6 +97,12 @@ src/openllm_cbench/
                          every suite's CSV rows, time_from_filename()
                          recovers a time from an older file's own
                          `..._YYYYmmdd_HHMMSS...` name
+    progress.py             the dashboard's local progress panel: neutral
+                         counts, the `is_citable()` rule (gate-checked, no
+                         suite refused by a validity guard, >= 3 trials),
+                         and a level earned on rigour rather than volume.
+                         Reads local files only -- no account, no server,
+                         nothing transmitted
   suites/
     containment.py       S1 -- egress & containment
     channel.py            S2 -- reasoning-channel divergence

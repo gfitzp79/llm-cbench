@@ -135,6 +135,9 @@ class DashboardScreen(Screen):
                 yield Button("Share / validate results", id="goto-community")
                 yield Button("Check environment", id="run-doctor")
                 yield Button("About / extend this", id="goto-about")
+            yield Static("", id="progress-counts")
+            yield Static("", id="progress-tier")
+            yield Static("", id="progress-next")
             yield Static(
                 "\"Check environment\" runs `cbench doctor`: confirms your endpoint is "
                 "reachable, the safety canary binds correctly, reports GPU/RAM headroom, "
@@ -146,12 +149,71 @@ class DashboardScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._load_progress()
         # Deliberately does NOT run `cbench doctor` automatically -- every
         # cbench action this TUI takes happens because of a click, none on
         # app startup, so what ran and why is never ambiguous.
         self.query_one("#doctor-log", RichLog).write(
             "[dim]Press \"Check environment\" above to run it.[/dim]"
         )
+
+    @work(exclusive=True, group="progress")
+    async def _load_progress(self) -> None:
+        """Reads local files plus one endpoint call for the model list.
+
+        Everything here is read-only: no model is called, nothing is
+        written. The endpoint list is the only network touch, and failing
+        it reports "unreachable" rather than zero -- "we could not ask"
+        and "you have none" are different facts."""
+        # Local import, matching this module's own convention -- asyncio is
+        # imported per-function here, not at module level.
+        import asyncio
+
+        from openllm_cbench.core.progress import compute_progress, render_line
+
+        def gather():
+            try:
+                from openllm_cbench.core.discover import list_local_models
+                local = list_local_models()
+            except Exception:
+                local = None
+            return compute_progress(local_models=local)
+
+        try:
+            progress = await asyncio.to_thread(gather)
+        except Exception as exc:
+            # Say so rather than leaving the panel blank. A blank panel is
+            # indistinguishable from "you have done nothing", which is a
+            # different and discouraging claim.
+            try:
+                self.query_one("#progress-counts", Static).update(
+                    f"[dim]Could not read local progress: {exc}[/dim]")
+            except NoMatches:
+                pass
+            return
+
+        # Same teardown discipline as every other worker here: the screen
+        # can be gone by the time this resolves.
+        try:
+            counts = self.query_one("#progress-counts", Static)
+            tier = self.query_one("#progress-tier", Static)
+            nxt = self.query_one("#progress-next", Static)
+        except NoMatches:
+            return
+
+        counts.update(f"[bold]{render_line(progress)}[/bold]")
+        tier.update(
+            f"Level: [bold]{progress['tier']}[/bold]  [dim](earned on rigour, not volume: "
+            f"a result counts as [b]citable[/b] when the model is gate-checked, no suite was "
+            f"refused by a validity guard, and every suite ran at least "
+            f"{progress['min_citable_trials']} trials)[/dim]"
+        )
+        action = progress.get("next_action")
+        if action:
+            nxt.update(f"[bold]Next:[/bold] {action[0]} [dim]-- {action[1]}[/dim]")
+        else:
+            nxt.update("")
+
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "goto-run":

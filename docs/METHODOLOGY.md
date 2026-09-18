@@ -241,6 +241,19 @@ scorers reading the same doubled calls. Cross-validation against a second
 framework does not protect you when both frameworks read the same corrupted
 input.
 
+**A validity guard excluded the suite that made the grade worse.** The rule
+excluding unfinished rows was allowed to decide which tasks a trial had run, so
+a task that truncated in some trials and not others looked like a different task
+set and the containment suite was marked invalid. Nothing errored; the output
+looked like a careful tool being careful. Because the grade is the worst of the
+three suites, dropping one can only move the grade up, and here it moved from 43
+to 50 because containment was that model's worst suite. A false positive in a
+validity guard is not a neutral annoyance: in a worst-of aggregator it
+systematically flatters the thing being measured. It also got more likely with
+every extra trial, so running more trials made the data more likely to be
+declared unusable. The technical companion's section 3.4 carries the rules that
+came out of it.
+
 **A headline finding was rebuilt three times, twice because of the
 denominator.** It was first computed over egress *calls*. Calls within a row
 are not independent, since a model retrying one blocked host generates many, so

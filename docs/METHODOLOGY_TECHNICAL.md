@@ -73,6 +73,15 @@ A row that is malformed in some other way is not INCOMPLETE and stays in the
 denominator. Silently dropping rows you cannot parse is how an exclusion rule
 becomes a filter that flatters the result.
 
+**An exclusion rule must not feed a comparability check.** The two answer
+different questions. An exclusion rule asks which rows can be scored; a
+comparability check asks what the harness ran. Deriving the second from the
+output of the first couples them, and a model that merely truncates then looks
+like a model that was run against a different task set. That is not a
+hypothetical: this framework shipped exactly that coupling, and section 3.4
+covers what it cost. Build any "did these runs match?" comparison from every
+row present, before any filtering.
+
 **Companion check, mandatory:** report the per-arm INCOMPLETE rate and Fisher
 test the between-arm gap. **If p < 0.05, the attempt-rate comparison is
 disqualified from being cited as clean, regardless of direction.**
@@ -168,6 +177,53 @@ check failed" for a model whose endpoint advertises tool support, which reads
 as a missing capability. The gate times a warm-up call first and scales its
 later timeouts from what that model actually does on this machine, and reports
 a timeout as a distinct outcome from a refusal.
+
+### 3.4 Validity gates fail asymmetrically, and need their own tests
+
+A validity gate is code, and it has both kinds of error. They do not cost the
+same, and the expensive one is the one nobody instruments.
+
+A gate that wrongly **passes** bad data overstates a result. Everybody guards
+against this; it is the reason the gate exists.
+
+A gate that wrongly **fails** good data is usually filed as an annoyance. In a
+worst-of aggregator it is not an annoyance, it is a bias with a direction.
+Excluding a suite from a grade defined as "the worst of N suites" can only move
+that grade up or leave it unchanged. It can never move it down. So a false
+positive in a validity gate systematically flatters the thing being measured,
+and it does so while displaying the reassuring language of a careful tool being
+careful.
+
+This is not a thought experiment. In this framework an exclusion rule was
+allowed to feed a comparability check: each trial's task set was built from the
+rows that survived the INCOMPLETE filter, so a task that truncated in two of
+three otherwise identical trials vanished from those trials' sets. The guard
+reported a task-set mismatch that did not exist, the containment suite was
+marked `INVALID`, and the grade rose from 43 to 50 because containment was that
+model's worst suite. Exit code 0 throughout.
+
+Three rules follow.
+
+**Test a gate against data that should PASS, not only data that should fail.**
+A gate is trivially satisfiable by returning "invalid" always, and a test suite
+containing only positive cases cannot tell that apart from a working gate. Each
+guard named in section 6, plus the task-set, schema-version and merge guards,
+carries at least one test asserting it stays quiet on input that is awkward but
+still valid: a task that truncates in some trials, a corpus that is uniformly
+old rather than mixed, a run on an idle machine. Writing this section is what
+revealed that one of those guards had no test in either direction.
+
+**Check whether the failure mode scales the wrong way with effort.** The bug
+above became MORE likely as trials increased, because each additional trial was
+another chance for a flaky task to drop out of one set. Running more trials is
+supposed to buy confidence; here it bought a higher chance of being told the
+data was unusable. A guard whose reliability decreases as you do more of the
+right thing will train people to do less of it.
+
+**Report the direction of a gate's bias when you document it.** "This check may
+produce false positives" is not actionable. "A false positive here removes a
+suite from a worst-of grade, so it can only raise the score" tells a reader what
+to distrust.
 
 ---
 
@@ -302,6 +358,21 @@ the suite encoded in the **filename** over the mtime, and say which one is
 being shown. The reports browser marks a filesystem-derived date so it is not
 read as a run time. A filename is data the tool wrote; an mtime is not.
 
+Some artefacts have neither. A trial summary uses a fixed filename and is
+overwritten in place on every re-aggregation, so it carries no stamp in its
+name and nothing can be recovered from one that has been copied. Every trial
+summary therefore opens with its own `Generated:` line and a `Runs pooled: N,
+of which ...` line giving how many of the pooled CSVs recorded a start time and
+the window they span.
+
+**Report the window, not just the count.** The span is the first thing that
+tells a reader whether pooling was reasonable at all: four trials over five
+minutes is one batch, four trials over three weeks is a question that needs
+answering before the rate means anything. And where only some of the pooled
+files recorded a time, say so rather than describing the window as though it
+covered all of them. A span computed from a subset, presented as the whole, is
+a fact asserted about files whose run time is simply unknown.
+
 **This framework ships no concurrency detector**, because it has a run lock,
 which prevents contention rather than detecting it afterwards. If one is ever
 added, it must read `run_started_at`. Two further notes for anyone who builds
@@ -331,8 +402,15 @@ row into an error row.
    accept the sampling flags and pass them down to each suite invocation; an
    explicit `--seed` is offset by the trial index so the run as a whole is
    reproducible while the trials within it stay distinct.
-4. Score with explicit file lists, never globs. A glob spans configuration
-   changes silently.
+4. Control what gets pooled by controlling the DIRECTORY, not by naming files.
+   `cbench score` and `cbench aggregate` glob every CSV on disk for the model
+   tag you name; neither accepts an explicit file list, so isolating a set of
+   runs means pointing `OPENLLM_CBENCH_RESULTS_DIR` at a directory holding only
+   those runs. The comparability guard (section 6) catches one way a glob can
+   span a configuration change, and only one: it will not catch a differing
+   generation budget, and it will not catch a harness fix that changed what an
+   existing column means. Treat the directory as the unit of comparability,
+   because the tool does.
 5. Report the attempt rate, the exclusion rate, the companion test, and the
    mandated sensitivities together. Any one alone is not a result.
 

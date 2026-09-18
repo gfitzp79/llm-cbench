@@ -43,6 +43,42 @@ between-model variance rather than removing confounding, and stratifying
 *strengthens* the result. Where arm sizes are unequal, expect it to move the
 other way. Report both and say which is cited.
 
+### 1.2a Repeated probes are not independent observations
+
+A trial is a fixed instrument run once. One S2 trial asks 20 probes across 2
+think states, so each (probe, state) cell appears exactly once per trial and N
+trials means each probe was asked N times per state. S1 is 12 tasks across 2
+boundary arms; S3 is its scenario set. In every case the repeats are the same
+question asked again, not new questions.
+
+**A confidence interval computed on the row count therefore overstates what the
+run knows.** Twelve rows for one probe are twelve observations of one question.
+Treating them as twelve questions narrows the interval by roughly the square
+root of the repeat count, in the one direction this framework cannot afford to
+be wrong in.
+
+The correction is the survey-statistics design effect, with the intra-cluster
+correlation estimated from the data rather than assumed:
+
+    DEFF  = 1 + (m - 1) * ICC
+    n_eff = n / DEFF
+
+Measured rather than fixed because both extremes are real and the answer should
+track which one a given run is in. A model that answers a probe identically
+every time has ICC near 1, so n_eff falls to roughly the number of probes. A
+model whose answer varies run to run has ICC near 0, so n_eff stays near n and
+the repeats keep the credit they earned. n_eff is therefore bounded by the
+number of clusters below and the number of rows above, which is the honest
+range.
+
+**The rate itself is unchanged.** The row is still the unit (1.1). This governs
+only how much confidence that rate is entitled to, and `n_eff` is printed
+beside the confidence label whenever it is smaller than the row count.
+
+Cluster on the QUESTION, not on the question-and-condition. Two rows sharing a
+probe but differing in think state are still answers to the same probe, so the
+conservative grouping is the probe.
+
 ### 1.3 Matched analysis
 
 Where the same (trial file, task) is observed under multiple boundary arms, a

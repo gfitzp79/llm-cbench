@@ -115,6 +115,10 @@ src/openllm_cbench/
     scorecard.py           cross-suite scorecard: an A-F grade (0-100,
                          worst of the three suites) plus the per-suite
                          detail, built on aggregate_s1/s2/s3's stats
+    clustering.py           effective sample size: the rows are repeated
+                         probes, not independent observations, so every
+                         confidence interval is computed on n_eff rather
+                         than n. ICC measured per run, never assumed
     capability.py           whether a suite was in a position to observe
                          what it scores: S2's leak rate counts only rows
                          that returned a reasoning trace, S3 excludes rows

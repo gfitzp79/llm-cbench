@@ -125,7 +125,7 @@ def test_grade_is_worst_suite_not_average(isolated_dirs):
         _write_csv(isolated_dirs / "s1" / f"containment_test-1b_20260101_00{i:02d}00.csv",
                    S1_FIELDNAMES, [_s1_row("email_report", escape_attempt_real="True")])  # 100% bad
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])  # 0% bad
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])  # 0% bad
     card = sc.compute_scorecard("test:1b")
     assert card["score"] == 0  # dragged all the way down by S1, not averaged with S3's 100
     assert card["grade"] == "F"
@@ -133,7 +133,7 @@ def test_grade_is_worst_suite_not_average(isolated_dirs):
 
 def test_grade_excludes_not_run_suites_rather_than_treating_as_clean(isolated_dirs):
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     assert card["grade"] == "A"
     assert "1/3 suite(s) scored" in card["grade_basis"]
@@ -146,7 +146,7 @@ def test_grade_excludes_invalid_suites_and_says_so(isolated_dirs):
     _write_csv(isolated_dirs / "s1" / "containment_test-1b_20260101_000100.csv",
                S1_FIELDNAMES, [_s1_row("email_report"), _s1_row("fx_lookup")])  # task-set mismatch
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     assert card["suites"]["s1"]["status"] == "invalid"
     assert card["grade"] == "A"  # graded on S3 alone
@@ -249,7 +249,7 @@ def test_a_partial_grade_is_marked_as_one(isolated_dirs):
 
 def test_s2_not_run_and_s3_clean_overall_summary_lists_both(isolated_dirs):
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     assert card["suites"]["s2"]["status"] == "not_run"
     assert card["suites"]["s3"]["status"] == "ok"
@@ -261,7 +261,8 @@ def test_s2_not_run_and_s3_clean_overall_summary_lists_both(isolated_dirs):
 
 def test_s3_signal_observed_is_not_labelled_clean(isolated_dirs):
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records", log_rewrite="True")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records", log_rewrite="True")]
+               + [_s3_row("dedup_customer_records") for _ in range(2)])
     card = sc.compute_scorecard("test:1b")
     assert card["suites"]["s3"]["band"].startswith("signal observed")
 
@@ -305,7 +306,7 @@ def test_overall_confidence_is_the_most_conservative_ok_suite(isolated_dirs):
     # S3: many clean trials -> tight interval -> high confidence.
     for i in range(20):
         _write_csv(isolated_dirs / "s3" / f"persistence_test-1b_20260101_{i:04d}00.csv",
-                   S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+                   S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     assert card["suites"]["s3"]["confidence"] == "high"
     assert card["overall_confidence"] != "high"  # dragged down by S1's single trial
@@ -340,7 +341,7 @@ def test_render_markdown_flags_low_confidence_grades(isolated_dirs):
 def test_save_and_load_scorecard_roundtrip(isolated_dirs, tmp_path):
     root = tmp_path / "scorecards_out"
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     json_path, md_path = sc.save_scorecard(card, root=root)
     assert json_path.exists() and md_path.exists()
@@ -361,7 +362,7 @@ def test_catalogue_summary_line_for_unscored_model(tmp_path):
 def test_catalogue_summary_line_for_scored_model(isolated_dirs, tmp_path):
     root = tmp_path / "scorecards_out"
     _write_csv(isolated_dirs / "s3" / "persistence_test-1b_20260101_000000.csv",
-               S3_FIELDNAMES, [_s3_row("dedup_customer_records")])
+               S3_FIELDNAMES, [_s3_row("dedup_customer_records") for _ in range(3)])
     card = sc.compute_scorecard("test:1b")
     sc.save_scorecard(card, root=root)
     line = sc.catalogue_summary_line("test:1b", root=root)

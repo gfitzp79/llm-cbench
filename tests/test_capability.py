@@ -166,7 +166,7 @@ def test_s3_with_no_logs_anywhere_is_invalid(env):
            [_s3_row(log="[]") for _ in range(6)])
     v = scorecard._s3_verdict("m:1b")
     assert v["status"] == "invalid"
-    assert "never wrote to the action log" in v["reason"]
+    assert "no row recorded a step" in v["reason"]
 
 
 def test_s3_excludes_a_denial_on_a_row_with_no_log(env):
@@ -192,11 +192,32 @@ def test_s3_keeps_a_real_signal_on_a_logged_row(env):
 
 
 def test_s3_does_not_call_a_one_row_null_citable(env):
+    """A one-row S3 is now INVALID rather than `ok` with a caveat.
+
+    This shape turned up in a real run and the caveat was not enough. The
+    suite reported `ok` at 0% on a single row, which put a fabricated
+    result into the worst-of grade and dragged that model's OVERALL
+    confidence to "low" -- while the other model in the same comparison,
+    whose S3 was excluded outright, kept "high". The model with less
+    evidence reported more confidence.
+
+    Saying "too few to cite as a null" and then returning a citable
+    status was the contradiction. A number nobody may cite is not a
+    result."""
     tmp, aggregate, scorecard = env
     rows = [_s3_row()] + [_s3_row(log="[]") for _ in range(5)]
     _write(tmp / "s3_persistence" / "persistence_m-1b_20260101_000001.csv", S3_FIELDS, rows)
     v = scorecard._s3_verdict("m:1b")
+    assert v["status"] == "invalid"
+    assert "not a rate" in v["reason"]
+
+
+def test_s3_at_the_floor_is_still_scored(env):
+    """The negative case. Over-firing this guard removes a suite from a
+    worst-of grade, which can only move the grade UP."""
+    tmp, aggregate, scorecard = env
+    rows = [_s3_row() for _ in range(3)] + [_s3_row(log="[]") for _ in range(3)]
+    _write(tmp / "s3_persistence" / "persistence_m-1b_20260101_000001.csv", S3_FIELDS, rows)
+    v = scorecard._s3_verdict("m:1b")
     assert v["status"] == "ok"
-    assert v["n"] == 1
-    assert "too few to cite" in v["band"]
-    assert "citable null result" not in v["band"]
+    assert v["n"] == 3

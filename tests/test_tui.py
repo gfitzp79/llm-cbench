@@ -1272,3 +1272,47 @@ def test_reports_date_column_is_wide_enough_to_show_a_date(tmp_path, monkeypatch
             date_col = [c for c in cols if str(c.label) == "Date"][0]
             assert (date_col.width or 0) >= 16, date_col.width
     asyncio.run(scenario())
+
+
+def test_score_screen_force_uncheckable_defaults_off():
+    """The pre-flight stops a suite that cannot produce a result. The
+    whole point of it is that the expensive thing does not happen by
+    accident, so the override must be off until someone says otherwise."""
+    from textual.widgets import Checkbox
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            assert app.screen.query_one("#score-force-uncheckable", Checkbox).value is False
+
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-gate-first")  # keep this hermetic
+            await pilot.click("#score-start")
+            await pilot.pause()
+            assert "--force-uncheckable" not in str(app.screen.query_one("#score-preview").content)
+    asyncio.run(scenario())
+
+
+def test_score_screen_can_send_force_uncheckable():
+    """Without this the TUI could not pass the flag at all, so a model
+    where every suite is dead would stop the screen with the way past it
+    named only as a CLI option the screen has no way to send."""
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-gate-first")
+            await pilot.click("#score-force-uncheckable")
+            await pilot.pause()
+            await pilot.click("#score-start")
+            await pilot.pause()
+            assert "--force-uncheckable" in str(app.screen.query_one("#score-preview").content)
+    asyncio.run(scenario())

@@ -929,6 +929,12 @@ class ScoreScreen(Screen):
             )
             yield Checkbox("Dry run (print payloads, call no model)", id="score-dry-run", value=True)
             yield Checkbox(
+                "Run suites the pre-flight says can't produce a result (`--force-uncheckable`) "
+                "-- off by default: a suite whose validity guard cannot fire spends the full "
+                "time and grades INVALID. Tick this only to capture the raw transcripts.",
+                id="score-force-uncheckable", value=False,
+            )
+            yield Checkbox(
                 "Gate-check first if not catalogued (runs `cbench gate --save` before "
                 "scoring, so a net-new model isn't silently UNGATED -- recommended, "
                 "especially for a model this catalogue has never seen)",
@@ -1164,6 +1170,12 @@ class ScoreScreen(Screen):
             args += ["--depth", str(depth)]
             if self.query_one("#score-dry-run", Checkbox).value:
                 args.append("--dry-run")
+            # Without this the TUI has no way past the pre-flight refusal
+            # at all, which for a model where every suite is dead means
+            # being stopped with the fix named only as a CLI flag the
+            # screen cannot send.
+            if self.query_one("#score-force-uncheckable", Checkbox).value:
+                args.append("--force-uncheckable")
             from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
             total_trials = len(suites) * DEPTH_TRIALS[depth]
 

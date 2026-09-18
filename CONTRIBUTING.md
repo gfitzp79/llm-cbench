@@ -50,6 +50,13 @@ src/openllm_cbench/
                          summarize_gate_output() reads that report back
                          out of captured output for a caller watching
                          gate as a subprocess
+    preflight.py           the one mapping from gate findings to a
+                         per-suite verdict (ready / INVALID /
+                         unverified). Read by gate.py's report and by
+                         `cbench score`/`cbench assess`, which refuse a
+                         suite that cannot produce a gradeable result --
+                         so the answer is given before the hours are
+                         spent rather than after
     discover.py            lists locally-pulled models missing from the
                          catalogue, via the endpoint's own /api/tags --
                          never talks to ollama.com (see its own
@@ -63,7 +70,9 @@ src/openllm_cbench/
                          against detected VRAM
     runlock.py             launch-time exclusivity guard: refuses to
                          start a second assessment while one holds the
-                         lock (`--force-concurrent` overrides)
+                         lock (`--force-concurrent` overrides). One of
+                         two guards that run BEFORE the work; the other
+                         is preflight.py above
     console.py             UTF-8 stdio setup, applied once at entry
     community.py           shape-checks a community-results/ submission
                          folder before it's scored or merged

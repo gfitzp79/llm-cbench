@@ -206,6 +206,16 @@ Disabling reasoning makes that model's entry measure something different from
 every other model in the comparison. Raise `num_ctx` above `num_predict` by a
 real margin at the same time, or the fix does not take.
 
+**An advertised capability is not a delivered one.** The endpoint's reported
+capabilities are a claim about the model, and the claim is sometimes wrong in
+the direction that matters. A model advertising a reasoning capability and
+returning an empty reasoning field on every row is the worst case in this
+framework, because the advertisement makes the run look valid: the leak rate
+comes back 0% and describes the instrument. The gate therefore requires a
+*measured* non-empty trace at one of the two think states, not the
+advertisement, before it will call the channel suite runnable
+(`core/preflight.py`).
+
 **A capability verdict derived from a stopwatch is not a capability verdict.**
 A model too large for available VRAM spills into system RAM and can take tens
 of seconds to answer a trivial prompt. A fixed timeout then reports "tool call
@@ -343,9 +353,25 @@ after the compute is spent. Prefer the ones that run before the work.
 |---|---|---|
 | **run lock** (`core/runlock.py`) | before a batch | two batches sharing a GPU |
 | **gate check** (`cbench gate`) | before a battery | committing hours to a config that produces no data |
+| **capability pre-flight** (`core/preflight.py`) | at the start of `cbench score`/`cbench assess` | running a suite whose validity guard could not fire, which costs the full time and yields a missing measurement |
 | **catalogue banner** (`core/registry.py`) | at every suite start | citing a run against a model whose gaps were never checked |
 | **pooling-comparability guard** (`scoring/comparability.py`) | at aggregation (`cbench aggregate`/`cbench score`) | pooling CSVs with mixed sampling instrumentation, or disagreeing pinned sampling, into one rate without noticing |
 | **recorded generation-budget columns** | in every row | nothing automatic -- checking these against each other before pooling is still your own job |
+
+The capability pre-flight is the gate check made non-optional. The gate was
+advisory, and an advisory check only helps the operator who remembers to run
+it: a model reporting `completion` and nothing else was put through all three
+suites and produced a scorecard whose every row was `INVALID`, with the
+scorecard's own advice being to run the gate that had already known. The
+pre-flight is the identical check, consulted automatically, refusing only the
+suites it can *establish* are ungradeable. `--force-uncheckable` runs them
+anyway; `--skip-preflight` omits the check.
+
+It shares one property with the pooling guard below and it is the important
+one: **an unverified condition is not a failed one.** A tool call that did not
+finish in time, a channel check that errored, or a pre-flight that could not
+reach the endpoint all leave the run to proceed. Only an established absence
+refuses.
 
 The pooling-comparability guard is a real refusal, not just visibility: when
 it fires, the affected suite's trial summary carries a

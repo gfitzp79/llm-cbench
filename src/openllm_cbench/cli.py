@@ -192,6 +192,14 @@ def _cmd_assess(argv):
                          "this: two assessments on one GPU halve each other's throughput "
                          "and make every wall-time number they produce misleading. Use "
                          "only when the other work is provably on different hardware.")
+    p.add_argument("--force-uncheckable", action="store_true",
+                    help="Run a suite the pre-flight gate says cannot produce a gradeable "
+                         "result on this model. The run will complete and the suite will "
+                         "score INVALID; use this only to capture the raw transcripts.")
+    p.add_argument("--skip-preflight", action="store_true",
+                    help="Skip the capability pre-flight entirely (makes no model calls of "
+                         "its own). Use when the endpoint misreports its capabilities and "
+                         "you know better than it does.")
     args = p.parse_args(argv)
 
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
@@ -210,6 +218,29 @@ def _cmd_assess(argv):
           f"{' (dry-run)' if args.dry_run else ''}")
     print("S1+S2+S3 only -- see this command's own --help / module docstring for what "
           "other evaluations aren't included.\n")
+
+    # LAUNCH-TIME CAPABILITY GUARD.
+    #
+    # Runs before the run lock because it is cheaper and because being
+    # told "this model cannot produce a result" is more useful than being
+    # told "wait your turn" for a model that could not produce one
+    # anyway.
+    #
+    # The incident: exaone-deep:7.8b reports exactly one capability,
+    # `completion`. Three suites were run against it and all three scored
+    # INVALID -- no tool calls, no reasoning trace, nothing for any guard
+    # to grade. The gate had already established every one of those facts
+    # in about five seconds, and nothing consulted it. Until now `assess`
+    # had a run-lock guard and no capability guard at all, so the only
+    # thing standing between a user and an afternoon of dashes was
+    # remembering to run `cbench gate` by hand first.
+    #
+    # --dry-run skips it for the same reason the run lock does: a dry run
+    # makes no model calls, and a pre-flight that did would defeat that.
+    if not args.dry_run and not args.skip_preflight:
+        rc = _assess_preflight(args, suites)
+        if rc is not None:
+            return rc
 
     # LAUNCH-TIME EXCLUSIVITY GUARD.
     #
@@ -245,6 +276,92 @@ def _cmd_assess(argv):
     finally:
         if lock is not None:
             lock.release()
+
+
+def _assess_preflight(args, suites, narrowed=None):
+    """Gate-checks the model and refuses suites that cannot produce a
+    gradeable result. Returns an exit code to stop on, or None to carry
+    on.
+
+    `narrowed` builds the command to suggest when only some suites are
+    dead -- a callable taking the surviving suite list. Parameterised
+    because both `assess` and `score` call this and their flags differ:
+    telling someone who ran `cbench score` to run `cbench assess` would
+    hand them a command that produces no grade.
+
+    THREE THINGS IT DELIBERATELY WILL NOT DO.
+
+    It will not stop on UNVERIFIED. A check that timed out says something
+    about this machine, and turning a stopwatch into a capability verdict
+    is the exact mistake `gate.warm_up()` was written to prevent.
+
+    It will not stop because the gate itself failed. An unreachable
+    endpoint, a changed API, a bug in here -- none of those are evidence
+    about the model, and a pre-flight that can block a run on its own
+    malfunction is worse than no pre-flight. It warns and returns None.
+
+    It will not refuse without saying what to run instead. When some
+    suites survive, the message names the narrowed `--suites` flag,
+    because a user who wanted three suites and can have two is better
+    served by the command than by the diagnosis."""
+    from openllm_cbench.core.endpoint import resolve_base_url
+    from openllm_cbench.core.gate import run_gate
+    from openllm_cbench.core.preflight import SUITE_LABELS, suite_readiness, unrunnable
+
+    print("Pre-flight: checking this model can produce a gradeable result ...")
+    try:
+        # `assess` takes no --endpoint of its own; resolve_base_url(None)
+        # is the same resolution each suite will make for itself, so the
+        # pre-flight and the run cannot end up checking different
+        # endpoints.
+        result = run_gate(args.model, resolve_base_url(getattr(args, "endpoint", None)))
+    except Exception as e:
+        print(f"[!] Pre-flight could not complete ({e}) -- continuing anyway. "
+              f"Nothing here is evidence about the model.", file=sys.stderr)
+        return None
+
+    readiness = suite_readiness(result)
+    for suite in suites:
+        verdict, reason = readiness[suite]
+        print(f"  {SUITE_LABELS[suite]}: {verdict.upper()} -- {reason}")
+
+    bad = unrunnable(result, suites)
+    if not bad:
+        print()
+        return None
+
+    good = [s for s in suites if s not in bad]
+    named = ", ".join(SUITE_LABELS[s] for s in bad)
+    print()
+    # The per-suite reasons above went to stdout and the refusal below
+    # goes to stderr. The TUI runs this with stderr=STDOUT down one pipe,
+    # where stdout is block-buffered and stderr is not -- without this
+    # flush the refusal arrives BEFORE the reasons it refers to, and
+    # "See the reasons above" points at nothing.
+    sys.stdout.flush()
+    if args.force_uncheckable:
+        print("[!] %s cannot produce a gradeable result on this model, and "
+              "--force-uncheckable\n    was given. Running anyway -- expect those suites to "
+              "score INVALID; the\n    transcripts are the only thing you get." % named,
+              file=sys.stderr)
+        return None
+    print("[!] NOT STARTING -- %s cannot produce a gradeable result on this model." % named,
+          file=sys.stderr)
+    print("    Running it would spend the full time and score INVALID, which is a missing\n"
+          "    measurement rather than a finding. See the reasons above.", file=sys.stderr)
+    if good:
+        suggest = narrowed(good) if narrowed else (
+            "cbench assess --model %s --suites %s --trials %d"
+            % (args.model, ",".join(good), args.trials))
+        print("\n    What you CAN run:\n      %s" % suggest, file=sys.stderr)
+        print("    Read any grade from that as covering only those suites.", file=sys.stderr)
+    else:
+        print("\n    No suite here would produce anything. This model is not assessable by\n"
+              "    this framework as it stands -- most often because the endpoint reports\n"
+              "    neither a `tools` nor a `thinking` capability for it.", file=sys.stderr)
+    print("\n    Override with --force-uncheckable to run anyway (the suites will still\n"
+          "    score INVALID; the transcripts are the only thing you get).", file=sys.stderr)
+    return 2
 
 
 def _sampling_argv(args, trial):
@@ -414,6 +531,11 @@ def _cmd_score(argv):
                          "--from-existing, which already makes no model call.")
     p.add_argument("--force-concurrent", action="store_true",
                     help="Same override as `cbench assess --force-concurrent` -- see there.")
+    p.add_argument("--force-uncheckable", action="store_true",
+                    help="Same override as `cbench assess --force-uncheckable` -- see there. "
+                         "The scorecard will grade INVALID for the affected suites.")
+    p.add_argument("--skip-preflight", action="store_true",
+                    help="Same override as `cbench assess --skip-preflight` -- see there.")
     args = p.parse_args(argv)
 
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
@@ -432,7 +554,22 @@ def _cmd_score(argv):
         assess_args = argparse.Namespace(
             model=args.model, trials=trials, dry_run=args.dry_run,
             temperature=args.temperature, top_p=args.top_p,
-            top_k=args.top_k, seed=args.seed)
+            top_k=args.top_k, seed=args.seed,
+            force_uncheckable=args.force_uncheckable,
+            skip_preflight=args.skip_preflight)
+
+        # This command, not `assess`, is what the TUI's Score screen
+        # runs -- so the capability guard has to be here too or the only
+        # interactive path into a multi-hour run is the unguarded one.
+        # That is how a model reporting nothing but `completion` got
+        # three suites and a scorecard of dashes.
+        if not args.dry_run and not args.skip_preflight:
+            rc = _assess_preflight(
+                assess_args, suites,
+                narrowed=lambda good: "cbench score --model %s --suites %s --depth %s"
+                                       % (args.model, ",".join(good), args.depth))
+            if rc is not None:
+                return rc
 
         lock = None
         if not args.dry_run:

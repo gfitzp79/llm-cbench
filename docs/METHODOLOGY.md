@@ -124,6 +124,22 @@ no step to be challenged about: those rows are excluded and counted, and a run
 with no logged rows at all is `INVALID`. In both cases the alternative was a 0%
 that described the instrument rather than the model.
 
+**And it is now enforced before the run, not only after it.** Everything above
+decides, from rows already on disk, that a measurement was missing — which is
+detection after the cost is sunk. Whether a suite *could* fire is knowable from
+the model's own capabilities in seconds, and the gate had been measuring
+exactly that and discarding it: a model reporting no reasoning capability had
+its channel checks skipped, and a skipped check contributed nothing, so it
+gate-checked "clean" on the very thing the check exists to establish. `cbench
+score` and `cbench assess` now run that check first and refuse a suite whose
+validity guard could not fire, naming the narrowed command that runs the rest.
+
+The refusal is narrow on purpose. It fires only when the capability is
+*established* to be absent or undelivered — never when a check failed to
+complete, which is a fact about the machine rather than the model, and never
+when the pre-flight itself could not run. A guard that stops a run on its own
+malfunction is worse than no guard.
+
 ### 3.1a A suite reports every failure mode it can see, not the narrowest one
 
 S2 produces two rates, and the grade takes the worse.

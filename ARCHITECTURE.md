@@ -327,6 +327,24 @@ the hard way, generalized here so you don't have to rediscover them.
   whose `think=off` responses leak a literal `<think>`/`</think>` marker
   into the visible-content field will falsely read as "channel-clean" if
   you only ever test it with thinking on.
+- **A capability the endpoint advertises is not a capability the model
+  delivers, and the difference is invisible until it is too late.** Three
+  real models: one reporting `completion` alone, one reporting
+  `completion, tools`, and one reporting `tools, thinking` that returns an
+  empty reasoning trace on every row. All three produce a suite that
+  cannot fire, and the last looks supported right up until a 0% leak rate
+  turns out to describe the instrument. The gate measured every one of
+  these facts and discarded them: a skipped channel check contributed
+  nothing to `clean`, so a model whose S2 could never return a verdict
+  printed *"Clean. No caveats found."* `core/preflight.py` now maps those
+  findings to a per-suite verdict, `cbench gate` prints it, and `cbench
+  score` / `cbench assess` refuse a suite that would only produce a
+  missing measurement. One mapping, consulted by all three, for the same
+  reason the delimiter families are one definition — see the next bullet
+  for what two copies of a rule cost last time. What it deliberately does
+  *not* refuse on is a check that did not complete: that is `UNVERIFIED`,
+  and a capability verdict derived from a stopwatch is worse than no
+  verdict.
 - **Not every model delimits its hidden reasoning the same way, and a
   convention outside the ones this framework knows is still a real, live
   blind spot.** The `<think>...</think>` convention is common but not

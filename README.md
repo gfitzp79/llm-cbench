@@ -146,7 +146,8 @@ cbench doctor
 
 # Gate-check a model before trusting any real run against it: tool-call
 # wellformedness, reasoning-channel separation at BOTH think states,
-# sampling-parameter extraction.
+# sampling-parameter extraction. Ends with a per-suite verdict -- which
+# of S1/S2/S3 can actually produce a gradeable result on this model.
 cbench gate --model <model-tag>
 
 # Save that gate result into your local model catalogue so every suite
@@ -235,9 +236,43 @@ not shown it can return a positive.
 **This is a real behaviour change.** A model with no tool-calling support
 previously scored A out of 100 with high confidence: it attempts nothing
 because it can attempt nothing, and "no escape attempts observed" read as
-perfect containment. Run `cbench gate --model <tag>` first -- it names a
-missing tools capability directly, before a suite run spends time discovering
-it the slow way.
+perfect containment.
+
+You no longer have to remember to check first. `cbench score` and `cbench
+assess` run that gate themselves before spending anything, and **refuse a
+suite that cannot produce a gradeable result** — naming which suite, why, and
+the narrowed command that runs the rest:
+
+```
+[!] NOT STARTING -- S2 channel cannot produce a gradeable result on this model.
+
+    What you CAN run:
+      cbench score --model llama3.1:8b --suites s1,s3 --depth quick
+```
+
+The three cases it catches, all seen on real models:
+
+| what the endpoint reports | what actually happens | previously |
+|---|---|---|
+| `completion` only | no tool calls, no reasoning trace — all three suites INVALID | gate caveated the missing tools and said nothing about S2 |
+| `completion, tools` | S1/S3 fine; S2 has no separate channel for a leak to be found in | gate printed **"Clean. No caveats found."** |
+| `tools, thinking` | trace comes back **empty** — capability advertised, not delivered | gate printed `thinking=0 chars` and called it clean |
+
+The last is the worst, because the advertised capability makes it look
+supported right up until the scorecard reports a 0% leak rate that is a
+property of the instrument.
+
+A check that could not complete is **not** a refusal. A tool call that timed
+out says something about your machine, not about the model, so it reports
+`UNVERIFIED` and the run proceeds — turning a stopwatch into a capability
+verdict is the mistake `core/gate.py:warm_up()` exists to prevent. The same
+goes for the pre-flight failing on its own: an unreachable endpoint warns and
+carries on.
+
+Overrides, on both commands: `--force-uncheckable` runs anyway (the suites
+still grade INVALID; the transcripts are all you get), and `--skip-preflight`
+does no capability check at all, for when the endpoint misreports itself.
+`--dry-run` and `--from-existing` skip it too, since neither calls a model.
 
 Relatedly, a grade computed from fewer than three suites now says so. The
 headline is the worst suite's rate, so the suites that did not produce a usable
@@ -282,7 +317,14 @@ place on every re-aggregation.
 cbench assess --model <model-tag>                          # S1+S2+S3, 3 trials each (default)
 cbench assess --model <model-tag> --suites s1,s3 --trials 5
 cbench assess --model <model-tag> --dry-run                # preview every payload, call no model
+cbench assess --model <model-tag> --force-uncheckable      # run a suite the pre-flight says can't score
+cbench assess --model <model-tag> --skip-preflight         # no capability check at all
 ```
+
+A capability pre-flight runs first and refuses any suite that cannot produce
+a gradeable result on this model — see "A suite that never fired its positive
+control is refused" above for what it catches, and what it deliberately does
+not refuse on.
 
 Runs N trials of each selected suite back to back, then automatically
 aggregates each suite's trials into a trial-summary report and prints
@@ -554,6 +596,12 @@ re-gate, which would otherwise keep reporting the model clean.
 cbench score --model <model-tag> --depth standard   # quick=1 trial, standard=3 (default), thorough=5
 cbench catalogue                                     # every local model + catalogue/score status
 ```
+
+Like `cbench assess`, this pre-flights the model's capabilities and refuses a
+suite that cannot produce a gradeable result, with the same
+`--force-uncheckable` / `--skip-preflight` overrides. The TUI's Score screen
+carries the override as a checkbox, off by default; the usual fix there is to
+untick the dead suite instead.
 
 Produces a cross-suite **scorecard**: a headline **A-F grade (0-100)**,
 plus the per-suite detail underneath it (band, rate, confidence, and any

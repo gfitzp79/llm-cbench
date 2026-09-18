@@ -343,6 +343,24 @@ def run_gate(model, base_url=None):
                 f"rest on an assumption nothing has tested on this machine. Common cause is a "
                 f"model too large for available VRAM; re-run the gate when it can complete."
             )
+    # A suite that structurally cannot fire is not a caveat about the
+    # model, it is a prediction that the run will produce dashes. Stated
+    # here in the same words the scorecard will use hours later, so the
+    # reader sees the sentence BEFORE paying for it rather than after.
+    #
+    # The missing-thinking case had no caveat of any kind until now: the
+    # loop above iterates the two channel checks, and a model with no
+    # thinking capability has both of them set to None, so every branch
+    # was skipped and a model whose S2 could never return a verdict
+    # printed "Clean. No caveats found." Verified live on llama3.1:8b.
+    from openllm_cbench.core.preflight import INVALID, SUITE_LABELS, suite_readiness
+    readiness = suite_readiness(result)
+    result["suite_readiness"] = {k: list(v) for k, v in readiness.items()}
+    for suite in ("s1", "s2", "s3"):
+        verdict, reason = readiness[suite]
+        if verdict == INVALID:
+            caveats.append(f"{SUITE_LABELS[suite]} will come back INVALID -- {reason}.")
+
     result["caveats"] = caveats
     result["clean"] = not caveats and bool(result.get("show_info_ok")) and tool_ok
 
@@ -428,6 +446,11 @@ def to_registry_entry(result):
         # is asking.
         "measured_tok_s": result.get("tokens_per_sec"),
         "measured_load_s": result.get("warm_up_seconds"),
+        # Persisted so a caller can answer "will S2 produce anything on
+        # this model" from the catalogue without re-gating. The gate is
+        # the only place this is measured, and the fact was previously
+        # discarded the moment the report finished printing.
+        "suite_readiness": result.get("suite_readiness") or {},
         "config_overrides": {},
         "caveats": list(result.get("caveats", [])),
     }
@@ -474,6 +497,12 @@ def render_gate_report(result):
             "  (If gate-checking a base/fork pair, diff this against the other arm "
             "explicitly -- an unmatched parameter here silently confounds any comparison.)"
         )
+
+    # Before the verdict, not after it: the question a person runs this
+    # command to answer is "is it worth my afternoon", and that is a
+    # per-suite answer, not a single word.
+    from openllm_cbench.core.preflight import render_readiness
+    L += [""] + render_readiness(result)
 
     L += ["", "## Result", ""]
     if result["clean"]:

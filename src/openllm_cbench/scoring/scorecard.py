@@ -156,6 +156,32 @@ def confidence_label(hits, n, effective=None):
 _CONFIDENCE_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
+def _hardware_note():
+    """A short description of the machine this grade was computed on.
+
+    Recorded because a grade is not a property of the model alone. A model
+    that fits in VRAM here and spills to system RAM on a smaller card is
+    slower there, and slower means more requests hitting their timeout and
+    more generations cut off at the budget -- both of which change the
+    exclusion rates, and therefore the rate, and therefore the grade.
+    Without this line a scorecard moved between machines looks like a
+    disagreement about the model.
+
+    Advisory and best-effort: returns None rather than guessing if the
+    probe cannot read the hardware."""
+    try:
+        from openllm_cbench.core.hardware import probe
+        hw = probe() or {}
+    except Exception:
+        return None
+    vram = hw.get("gpu_vram_mb")
+    ram = hw.get("system_ram_mb")
+    vendor = hw.get("gpu_vendor")
+    if not any((vram, ram, vendor)):
+        return None
+    return {"gpu_vendor": vendor, "gpu_vram_mb": vram, "system_ram_mb": ram}
+
+
 def _eff(effective):
     """Pulls n_eff out of an effective_n() tuple, or None if the suite
     did not report one (an older CSV set, or a stats dict from before
@@ -557,6 +583,7 @@ def compute_scorecard(model, generated_at=None):
         "grade": grade_info["grade"],
         "score": grade_info["score"],
         "scoring_version": SCORING_VERSION,
+        "hardware": _hardware_note(),
         "grade_basis": grade_info["basis"],
         "grade_partial": grade_info.get("partial", False),
         "grade_n_scored": grade_info.get("n_scored", 0),
@@ -677,7 +704,30 @@ def render_scorecard_markdown(scorecard):
             for c in s.get("caveats", []):
                 lines.append(f"- **{_SUITE_LABELS[key]}**: {c}")
 
+    hw = scorecard.get("hardware") or {}
+    vram = hw.get("gpu_vram_mb")
+    where = (f"{vram:,} MB of VRAM" if vram else "this machine")
     lines += [
+        "",
+        "## Results vary by hardware",
+        "",
+        f"**This grade was produced on {where}, and a different machine can produce a "
+        f"different one for the same model.** That is not noise to be averaged away, it "
+        f"is the measurement being a joint property of the model, the harness and the "
+        f"hardware together.",
+        "",
+        "The mechanism is concrete. A model that fits in VRAM here may spill to system "
+        "RAM on a smaller card, which makes it slower, which makes more requests hit "
+        "their timeout and more generations stop at the budget. Those rows become "
+        "INCOMPLETE or TRUNCATED and leave the denominator, so the rate changes without "
+        "the model's behaviour changing at all. The same model on a larger or "
+        "enterprise card can finish rows that were dropped here, and those rows can fall "
+        "either way.",
+        "",
+        "So: compare grades produced on the same hardware, at the same generation "
+        "budget, at the same framework version. Treat a grade from someone else's "
+        "machine as evidence about their setup as much as about the model, and read the "
+        "per-row CSVs rather than the letter if the two disagree.",
         "",
         "## Confidence, and what it isn't",
         "",

@@ -83,6 +83,22 @@ The same setting is reachable from the TUI under **Settings**, and the
 dashboard shows the active location on every launch, in yellow when it is
 not pinned.
 
+**Pin the model catalogue too**, for the same reason and with the same
+four layers:
+
+```bash
+cbench config --set-models-file ~/cbench-results/models.json
+```
+
+An unpinned catalogue behaves worse than an unpinned results folder,
+because it does not lose anything visibly -- it silently presents a
+*different* `models.json`. Models you have already gate-checked come back
+as uncatalogued, and the next run goes out ungated without the config
+guidance those gate checks discovered. It is kept as its own setting
+rather than derived from the results location, since one catalogue can
+serve several results corpora and moving your results should not re-gate
+every model.
+
 ## Install
 
 ```bash
@@ -550,6 +566,20 @@ module docstring for the full formula and why worst-suite-dominates rather
 than averaging. `--depth quick` (1 trial) is explicitly exploratory — below
 this framework's own 3-trial citability minimum — and any grade produced
 at that depth says so, prominently, every time.
+
+**A grade is not portable between machines.** It was produced on
+particular hardware, and the same model on a different card can score
+differently. The mechanism is concrete rather than hand-waving: a model
+that fits in VRAM on one machine may spill to system RAM on a smaller
+one, which makes it slower, which makes more requests hit their timeout
+and more generations stop at the token budget. Those rows become
+INCOMPLETE or TRUNCATED and leave the denominator, so the rate moves
+without the model's behaviour moving at all. A larger or enterprise card
+can finish rows that were dropped elsewhere, and those rows can fall
+either way. Every scorecard records the VRAM it was computed on and says
+this in its own "Results vary by hardware" section. Compare grades from
+the same hardware, budget and framework version; treat one from someone
+else's machine as evidence about their setup as much as about the model.
 
 **S2 reports two numbers and the grade takes the worse of them.** *Probe
 failure* is the visible answer doing what an adversarial probe asked

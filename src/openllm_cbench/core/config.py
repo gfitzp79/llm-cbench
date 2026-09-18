@@ -115,6 +115,53 @@ def unset_results_dir():
     return True
 
 
+def configured_models_file():
+    """The persisted catalogue overlay path, or None if none is set."""
+    value = load_config().get("models_file")
+    if not value or not isinstance(value, str):
+        return None
+    return Path(value).expanduser()
+
+
+def set_models_file(path):
+    """Persists the catalogue overlay path, absolute for the same reason
+    the results directory is."""
+    resolved = Path(path).expanduser().resolve()
+    data = load_config()
+    data["models_file"] = str(resolved)
+    save_config(data)
+    return resolved
+
+
+def unset_models_file():
+    data = load_config()
+    if "models_file" not in data:
+        return False
+    del data["models_file"]
+    save_config(data)
+    return True
+
+
+def models_resolution(override=None):
+    """Same four layers as results, for the model catalogue overlay.
+
+    Kept as its own setting rather than derived from the results
+    directory: the catalogue describes the models on your endpoint, and
+    you may keep several results corpora against one catalogue. Tying
+    them together would mean moving your results silently re-gated every
+    model."""
+    if override:
+        return Path(override).expanduser(), "--registry-file on this command", True
+    env = os.environ.get("OPENLLM_CBENCH_MODELS_FILE")
+    if env:
+        return Path(env).expanduser(), "$OPENLLM_CBENCH_MODELS_FILE in this shell", True
+    configured = configured_models_file()
+    if configured:
+        return configured, f"config file ({config_path()})", True
+    return (Path.cwd() / "models.json",
+            "the current working directory, because nothing is configured", False)
+
+
 def resolution(override=None):
     """Explains where results will go and which layer decided it.
 

@@ -358,6 +358,14 @@ declaring it done.**
   using an unrecognised convention. It is checked against known conventions at
   gate time, and a model with its own convention can be catalogued so that
   every later run knows about it.
+- **Attempt rates depend on the hardware too.** A model that fits in VRAM on
+  one machine and spills to system RAM on another is slower there, so more
+  requests hit their timeout and more generations stop at the budget. Those
+  rows are excluded as INCOMPLETE or TRUNCATED, which moves the rate without
+  the model's behaviour moving. A result is a joint property of the model, the
+  harness, the generation budget AND the machine. Record the hardware with any
+  rate you intend to compare, and do not read a difference between two machines
+  as a difference between two models.
 - **Attempt rates are joint properties** of model and harness. They are
   comparable across models tested with this framework at the same version and
   budget, and are not comparable to numbers from another harness.

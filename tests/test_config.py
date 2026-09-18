@@ -150,3 +150,90 @@ def test_cli_config_refuses_contradictory_flags(home):
     import sys
     sys.argv = ["cbench", "config", "--set-results-dir", str(home), "--unset-results-dir"]
     assert cli.main() == 2
+
+
+# -------------------------------------------- the model catalogue
+
+def test_the_catalogue_has_its_own_setting(home):
+    """Deliberately not derived from the results directory. One catalogue
+    can serve several results corpora, and tying them together would mean
+    moving your results silently re-gated every model."""
+    from openllm_cbench.core.registry import default_overlay_path
+
+    cfg.set_results_dir(home / "res")
+    assert default_overlay_path() == home / "models.json", "results must not move it"
+
+    cfg.set_models_file(home / "cat" / "models.json")
+    assert default_overlay_path() == (home / "cat" / "models.json").resolve()
+
+
+def test_catalogue_precedence_matches_results(home, monkeypatch):
+    from openllm_cbench.core.registry import default_overlay_path
+
+    cfg.set_models_file(home / "pinned.json")
+    _p, source, pinned = cfg.models_resolution()
+    assert pinned and "config file" in source
+
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(home / "env.json"))
+    assert default_overlay_path() == home / "env.json"
+    assert default_overlay_path("explicit.json") == Path("explicit.json")
+
+
+def test_unset_catalogue_returns_to_the_working_directory(home):
+    cfg.set_models_file(home / "pinned.json")
+    assert cfg.unset_models_file() is True
+    _p, _s, pinned = cfg.models_resolution()
+    assert pinned is False
+    assert cfg.unset_models_file() is False
+
+
+def test_an_unpinned_catalogue_is_not_silently_the_same_one(home, monkeypatch):
+    """The failure mode worth its own test: an unpinned catalogue does not
+    lose data, it presents a DIFFERENT file, so a model already
+    gate-checked reads as uncatalogued and the next run goes out
+    ungated."""
+    from openllm_cbench.core.registry import default_overlay_path
+
+    here = default_overlay_path()
+    other = home / "elsewhere"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert default_overlay_path() != here, "the CWD default follows the directory"
+
+    cfg.set_models_file(home / "one.json")
+    monkeypatch.chdir(home)
+    assert default_overlay_path() == (home / "one.json").resolve()
+    monkeypatch.chdir(other)
+    assert default_overlay_path() == (home / "one.json").resolve(), \
+        "a pinned catalogue is the same file from anywhere"
+
+
+def test_cli_config_sets_and_unsets_the_catalogue(home, capsys):
+    from openllm_cbench import cli
+    import sys
+    target = home / "cat" / "models.json"
+    sys.argv = ["cbench", "config", "--set-models-file", str(target)]
+    assert cli.main() == 0
+    assert cfg.configured_models_file() == target.resolve()
+
+    sys.argv = ["cbench", "config", "--unset-models-file"]
+    assert cli.main() == 0
+    assert cfg.configured_models_file() is None
+
+
+def test_cli_config_refuses_contradictory_catalogue_flags(home):
+    from openllm_cbench import cli
+    import sys
+    sys.argv = ["cbench", "config", "--set-models-file", str(home),
+                "--unset-models-file"]
+    assert cli.main() == 2
+
+
+def test_config_output_reports_both_settings(home, capsys):
+    from openllm_cbench import cli
+    import sys
+    sys.argv = ["cbench", "config"]
+    assert cli.main() == 0
+    out = capsys.readouterr().out
+    assert "Results directory" in out
+    assert "Model catalogue" in out

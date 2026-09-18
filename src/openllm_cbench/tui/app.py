@@ -1587,8 +1587,19 @@ class SettingsScreen(Screen):
             )
             yield Input(placeholder="Full path, e.g. C:\\Users\\you\\cbench-results",
                         id="settings-results-input")
+            yield Static(
+                "[bold]Model catalogue (models.json)[/bold] -- kept separate on "
+                "purpose: one catalogue can serve several results folders. An "
+                "unpinned catalogue does not lose anything, it silently presents a "
+                "DIFFERENT one, so models you have already gate-checked come back as "
+                "uncatalogued and the next run goes out ungated.",
+                id="settings-models-label",
+            )
+            yield Input(placeholder="Catalogue file path",
+                        id="settings-models-input")
             with Horizontal(id="settings-buttons"):
                 yield Button("Save location", id="settings-save", variant="primary")
+                yield Button("Save catalogue", id="settings-save-models")
                 yield Button("Clear (use current directory)", id="settings-unset")
                 yield Button("Find existing results", id="settings-find")
                 yield Button("Back", id="settings-back")
@@ -1606,16 +1617,28 @@ class SettingsScreen(Screen):
             field = self.query_one("#settings-results-input", Input)
         except NoMatches:
             return
+        from openllm_cbench.core.config import models_resolution
+
         path, source, pinned = resolution()
+        m_path, m_source, m_pinned = models_resolution()
         colour = "green" if pinned else "yellow"
+        m_colour = "green" if m_pinned else "yellow"
         widget.update(
             f"Currently: [bold {colour}]{path}[/bold {colour}]\n"
             f"Decided by: {source}\n"
+            f"Catalogue: [bold {m_colour}]{m_path}[/bold {m_colour}]\n"
+            f"           [dim]{m_source}[/dim]\n"
             f"Config file: {config_path()}"
             f"{'' if config_path().is_file() else '  (does not exist yet)'}"
         )
         if not field.value:
             field.value = str(path)
+        try:
+            m_field = self.query_one("#settings-models-input", Input)
+        except NoMatches:
+            return
+        if not m_field.value:
+            m_field.value = str(m_path)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         log = self.query_one("#settings-log", RichLog)
@@ -1627,6 +1650,12 @@ class SettingsScreen(Screen):
                 log.write("[bold red]Enter a path first.[/bold red]")
                 return
             self._run(["--set-results-dir", path], log)
+        elif event.button.id == "settings-save-models":
+            path = self.query_one("#settings-models-input", Input).value.strip()
+            if not path:
+                log.write("[bold red]Enter a catalogue path first.[/bold red]")
+                return
+            self._run(["--set-models-file", path], log)
         elif event.button.id == "settings-unset":
             self._run(["--unset-results-dir"], log)
         elif event.button.id == "settings-find":

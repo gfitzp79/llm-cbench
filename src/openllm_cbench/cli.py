@@ -526,7 +526,8 @@ def _cmd_config(argv):
     import argparse
 
     from openllm_cbench.core.config import (
-        config_path, resolution, set_results_dir, unset_results_dir,
+        config_path, resolution, set_models_file, set_results_dir,
+        unset_models_file, unset_results_dir,
     )
     from openllm_cbench.core.invariant import epilog as safety_epilog
 
@@ -543,6 +544,13 @@ def _cmd_config(argv):
     p.add_argument("--unset-results-dir", action="store_true",
                    help="Remove the persisted location and go back to ./results "
                         "relative to wherever you launch.")
+    p.add_argument("--set-models-file", metavar="PATH", default=None,
+                   help="Persist the model catalogue overlay (models.json) for this "
+                        "user. Kept separate from the results location on purpose: "
+                        "one catalogue can serve several results corpora.")
+    p.add_argument("--unset-models-file", action="store_true",
+                   help="Remove the persisted catalogue path and go back to "
+                        "./models.json relative to wherever you launch.")
     p.add_argument("--find-results", action="store_true",
                    help="Search the usual places for results trees that already "
                         "exist. Reads only; moves nothing.")
@@ -552,6 +560,28 @@ def _cmd_config(argv):
         print("[!] --set-results-dir and --unset-results-dir contradict each other.",
               file=sys.stderr)
         return 2
+
+    if args.set_models_file and args.unset_models_file:
+        print("[!] --set-models-file and --unset-models-file contradict each other.",
+              file=sys.stderr)
+        return 2
+
+    if args.set_models_file:
+        resolved = set_models_file(args.set_models_file)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Model catalogue set to {resolved}")
+        print(f"Stored in {config_path()}")
+        if not resolved.exists():
+            print("That file does not exist yet -- `cbench gate --model <tag> --save` "
+                  "creates it.")
+        _print_resolution()
+        return 0
+
+    if args.unset_models_file:
+        print("Persisted catalogue location removed." if unset_models_file()
+              else "No persisted catalogue location was set.")
+        _print_resolution()
+        return 0
 
     if args.set_results_dir:
         resolved = set_results_dir(args.set_results_dir)
@@ -583,18 +613,34 @@ def _cmd_config(argv):
 
 
 def _print_resolution():
-    from openllm_cbench.core.config import config_path, resolution
+    from openllm_cbench.core.config import config_path, models_resolution, resolution
 
-    path, source, pinned = resolution()
-    print(f"\nResults directory : {path}")
-    print(f"Decided by        : {source}")
+    r_path, r_source, r_pinned = resolution()
+    m_path, m_source, m_pinned = models_resolution()
+    print()
+    print(f"Results directory : {r_path}")
+    print(f"  decided by      : {r_source}")
+    print(f"Model catalogue   : {m_path}")
+    print(f"  decided by      : {m_source}")
     print(f"Config file       : {config_path()}"
           f"{'' if config_path().is_file() else '  (does not exist yet)'}")
-    print("\nPrecedence, most specific first:")
-    print("  1. --results-dir on the command      this invocation only")
-    print("  2. $OPENLLM_CBENCH_RESULTS_DIR       this shell only")
+    print()
+    print("Precedence, most specific first:")
+    print("  1. --results-dir / --registry-file   this invocation only")
+    print("  2. $OPENLLM_CBENCH_RESULTS_DIR")
+    print("     $OPENLLM_CBENCH_MODELS_FILE       this shell only")
     print("  3. the config file above             this user, everywhere")
-    print("  4. ./results                         whatever directory you are in")
+    print("  4. ./results  /  ./models.json       whatever directory you are in")
+    if not m_pinned:
+        # Its own warning, because an unpinned CATALOGUE does not lose
+        # data the way an unpinned results directory does -- it silently
+        # presents a DIFFERENT one, so models already gate-checked come
+        # back as uncatalogued and the next run goes out ungated.
+        print()
+        print("[!] The catalogue is not pinned, so launching from another directory reads")
+        print("    a different models.json -- models you have already gate-checked come")
+        print("    back as uncatalogued and run ungated.")
+        print("    Pin it with:  cbench config --set-models-file <path>")
 
 
 def _find_results():

@@ -41,11 +41,23 @@ DEFAULT_OVERLAY_FILENAME = "models.json"
 
 
 def default_overlay_path(override=None):
+    """Where the local catalogue overlay lives, most specific first:
+    --registry-file, then $OPENLLM_CBENCH_MODELS_FILE, then the persisted
+    config, then ./models.json relative to the current directory.
+
+    The config layer exists for the same reason the results one does: a
+    CWD-relative catalogue meant launching from a different directory
+    silently produced a DIFFERENT catalogue, so models you had already
+    gate-checked came back as uncatalogued and ran ungated."""
     if override:
         return Path(override)
     env = os.environ.get("OPENLLM_CBENCH_MODELS_FILE")
     if env:
         return Path(env)
+    from openllm_cbench.core.config import configured_models_file
+    configured = configured_models_file()
+    if configured:
+        return configured
     return Path.cwd() / DEFAULT_OVERLAY_FILENAME
 
 

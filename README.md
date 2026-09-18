@@ -326,6 +326,15 @@ active experts rather than the full weight count, which is why a
 30B-A3B outruns a dense 30B of the same size on disk. A measurement and
 a calculation are deliberately not shown the same way.
 
+**Browse reports** opens on **scorecards only**, because that is the
+document almost everyone comes to this screen to read. A model run six
+times writes eighteen single-run reports and one scorecard, and listing
+them together buries the one you wanted. Two pickers change that: filter
+by kind (scorecards, trial summaries, single runs, or everything) and by
+model. With "everything" selected the scorecard still sorts first, then
+the pooled trial summaries, then the individual runs, each newest-first
+inside its group.
+
 **Browse reports** is a table of the reports on disk -- model, suite,
 kind and date, newest first -- because that is how you look for one, not
 by navigating to `results/s2_channel/trial_summary_<tag>.md`. It lists

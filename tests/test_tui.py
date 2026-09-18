@@ -1173,3 +1173,102 @@ def test_a_confirmed_delete_calls_the_real_subcommand_and_disarms(monkeypatch):
             # rather than inheriting this one.
             assert scr.query_one("#models-confirm-delete", Checkbox).value is False
     asyncio.run(scenario())
+
+
+def _write_reports(root):
+    """A results tree shaped like a real one: one scorecard buried under
+    many single-run reports, which is the case this filter exists for."""
+    (root / "scorecards").mkdir(parents=True, exist_ok=True)
+    (root / "scorecards" / "m-1b.md").write_text("# Grade: B", encoding="utf-8")
+    for suite, prefix in (("s1_containment", "containment_report_"),
+                          ("s2_channel", "channel_report_"),
+                          ("s3_persistence", "persistence_report_")):
+        d = root / suite
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"trial_summary_m-1b.md").write_text("# summary", encoding="utf-8")
+        for i in range(1, 4):
+            (d / f"{prefix}m-1b_2026010{i}_00000{i}.md").write_text("# run", encoding="utf-8")
+
+
+def test_reports_screen_defaults_to_scorecards_only(tmp_path, monkeypatch):
+    """A model run six times produces eighteen single-run reports and one
+    scorecard. Listing them together buries the document almost everyone
+    opens this screen to read."""
+    from textual.widgets import DataTable, Select
+
+    _write_reports(tmp_path)
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-reports")
+            for _ in range(30):
+                await pilot.pause()
+            scr = app.screen
+            assert scr.query_one("#reports-kind-select", Select).value == "scorecard"
+            t = scr.query_one("#reports-table", DataTable)
+            assert t.row_count == 1, [str(t.get_row_at(r)[2]) for r in range(t.row_count)]
+            assert str(t.get_row_at(0)[2]) == "scorecard"
+            # ...but everything is still one selection away.
+            assert len(scr._found) == 13
+    asyncio.run(scenario())
+
+
+def test_reports_filter_switches_without_rescanning(tmp_path, monkeypatch):
+    from textual.widgets import DataTable, Select
+
+    _write_reports(tmp_path)
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-reports")
+            for _ in range(30):
+                await pilot.pause()
+            scr = app.screen
+            t = scr.query_one("#reports-table", DataTable)
+            sel = scr.query_one("#reports-kind-select", Select)
+
+            sel.value = "single"
+            for _ in range(5):
+                await pilot.pause()
+            kinds = {str(t.get_row_at(r)[2]) for r in range(t.row_count)}
+            assert t.row_count == 9
+            assert all(k.endswith("single run") for k in kinds), kinds
+
+            sel.value = "all"
+            for _ in range(5):
+                await pilot.pause()
+            assert t.row_count == 13
+            # Scorecards lead, then pooled summaries, then single runs.
+            ordered = [str(t.get_row_at(r)[2]) for r in range(t.row_count)]
+            assert ordered[0] == "scorecard"
+            assert ordered[1:4] == ["trial summary"] * 3, ordered[:5]
+    asyncio.run(scenario())
+
+
+def test_reports_date_column_is_wide_enough_to_show_a_date(tmp_path, monkeypatch):
+    """It was auto-sized in a split pane and rendered as "2026", which is
+    not a date. A column that cannot show its value looks like data and
+    is not."""
+    from textual.widgets import DataTable
+
+    _write_reports(tmp_path)
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(190, 55)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-reports")
+            for _ in range(30):
+                await pilot.pause()
+            t = app.screen.query_one("#reports-table", DataTable)
+            cols = list(t.columns.values())
+            date_col = [c for c in cols if str(c.label) == "Date"][0]
+            assert (date_col.width or 0) >= 16, date_col.width
+    asyncio.run(scenario())

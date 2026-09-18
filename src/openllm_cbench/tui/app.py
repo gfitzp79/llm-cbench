@@ -1598,6 +1598,20 @@ class ReportsScreen(Screen):
                 f"tree below.",
                 id="reports-caption",
             )
+            with Horizontal(id="reports-filter-row"):
+                # Scorecards first and alone by default: that is the
+                # document almost everyone opens this screen to read, and
+                # a model with six trials produces twenty-odd single-run
+                # reports that bury it.
+                yield Select(
+                    [("Scorecards", "scorecard"),
+                     ("Trial summaries", "trial summary"),
+                     ("Single runs", "single"),
+                     ("Everything", "all")],
+                    id="reports-kind-select", value="scorecard", allow_blank=False,
+                )
+                yield Select([("All models", "*")], id="reports-model-select",
+                             value="*", allow_blank=False)
             with Horizontal(id="reports-body"):
                 with Vertical(id="reports-left"):
                     yield DataTable(id="reports-table")
@@ -1619,10 +1633,81 @@ class ReportsScreen(Screen):
 
     def on_mount(self) -> None:
         table = self.query_one("#reports-table", DataTable)
-        table.add_columns("Model", "Suite", "Kind", "Date", "File")
+        # Explicit widths. Auto-sizing in a split pane squeezed Date down
+        # to "2026", which is not a date -- a column that cannot show its
+        # value is worse than one that is not there, because it looks like
+        # data.
+        table.add_column("Model", width=30)
+        table.add_column("Suite", width=15)
+        table.add_column("Kind", width=15)
+        table.add_column("Date", width=17)
+        table.add_column("File")
         table.cursor_type = "row"
         self._paths = {}
+        self._found = []
         self._load_reports()
+
+    # Sort order when nothing is filtered out: the document people
+    # actually cite first, then the pooled summaries, then the individual
+    # runs, each newest-first inside its group.
+    KIND_ORDER = {"scorecard": 0, "trial summary": 1}
+
+    def _kind_rank(self, kind):
+        return self.KIND_ORDER.get(kind, 2)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id in ("reports-kind-select", "reports-model-select"):
+            self._render_rows()
+
+    def _render_rows(self) -> None:
+        """Re-renders from the already-scanned list. Filtering must not
+        re-walk the results tree: that is hundreds of stat() calls to
+        answer a question already answered."""
+        try:
+            table = self.query_one("#reports-table", DataTable)
+            kind_sel = self.query_one("#reports-kind-select", Select).value
+            model_sel = self.query_one("#reports-model-select", Select).value
+        except NoMatches:
+            return
+
+        def keep(row):
+            _, _, _, _, model, kind = row
+            if model_sel not in ("*", Select.BLANK) and model != model_sel:
+                return False
+            if kind_sel in ("all", Select.BLANK):
+                return True
+            if kind_sel == "single":
+                return kind.endswith("single run")
+            return kind == kind_sel
+
+        rows = [r for r in self._found if keep(r)]
+        rows.sort(key=lambda r: (self._kind_rank(r[5]), -r[1]))
+
+        table.clear()
+        self._paths = {}
+        for pth, _sort, when, model, _m2, kind in [
+                (r[0], r[1], r[3], r[4], r[4], r[5]) for r in rows]:
+            suite = self._classify(pth, _results_root())[1]
+            key = table.add_row(model, suite, kind, when, pth.name)
+            self._paths[key] = pth
+
+        try:
+            caption = self.query_one("#reports-caption", Static)
+        except NoMatches:
+            return
+        shown = len(rows)
+        total = len(self._found)
+        scope = {"scorecard": "scorecard(s)", "trial summary": "trial summary/summaries",
+                 "single": "single-run report(s)", "all": "report(s)"}.get(kind_sel, "report(s)")
+        extra = "" if shown == total else f" of {total} total"
+        table_empty = ("  [dim]Nothing matches this filter -- switch to "
+                       "\"Everything\" to see what is there.[/dim]" if shown == 0 else "")
+        caption.update(
+            f"[bold]{shown}[/bold] {scope}{extra} in [bold]{_results_root()}[/bold]. "
+            f"Pick a row to read it. A date marked [b]~[/b] came from the file's mtime "
+            f"rather than its name, so it is when the file was last touched, not when the "
+            f"run happened. Raw CSVs and run logs are in the tree below.{table_empty}"
+        )
 
     @staticmethod
     def _strip_timestamp(tag):
@@ -1679,12 +1764,15 @@ class ReportsScreen(Screen):
 
         found = await asyncio.to_thread(scan)
         try:
-            table = self.query_one("#reports-table", DataTable)
+            self.query_one("#reports-table", DataTable)
         except NoMatches:
             return
 
-        for pth, _sort, stamped, mtime in found:
-            model, suite, kind = self._classify(pth, root)
+        root_now = _results_root()
+        rows = []
+        models = set()
+        for pth, sort_key, stamped, mtime in found:
+            model, _suite, kind = self._classify(pth, root_now)
             if stamped:
                 when = stamped.strftime("%Y-%m-%d %H:%M")
             else:
@@ -1692,18 +1780,24 @@ class ReportsScreen(Screen):
                 # opinion and is marked as such rather than shown as if
                 # it were the run time.
                 when = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M~")
-            key = table.add_row(model, suite, kind, when, pth.name)
-            self._paths[key] = pth
+            rows.append((pth, sort_key, stamped, when, model, kind))
+            models.add(model)
+        self._found = rows
 
+        # Offer only models that actually have a report here. A picker
+        # listing tags with nothing behind them is a way to select an
+        # empty table.
         try:
-            self.query_one("#reports-caption", Static).update(
-                f"{len(found)} report(s) in [bold]{root}[/bold] -- trial summaries and "
-                f"scorecards. Pick a row to read it. Newest first. A date marked [b]~[/b] came "
-                f"from the file's mtime rather than its name, so it is when the file was "
-                f"last touched, not when the run happened. Raw CSVs and run logs are in the tree below."
-            )
+            picker = self.query_one("#reports-model-select", Select)
         except NoMatches:
-            pass
+            picker = None
+        if picker is not None:
+            current = picker.value
+            options = [("All models", "*")] + [(m, m) for m in sorted(models)]
+            picker.set_options(options)
+            picker.value = current if current in {v for _, v in options} else "*"
+
+        self._render_rows()
 
     def _show(self, path: Path) -> None:
         viewer = self.query_one("#reports-viewer", TextArea)
@@ -1745,6 +1839,8 @@ class CBenchTUI(App):
     #reports-viewer-container { width: 60%; }
     #models-buttons { height: auto; }
     #models-buttons Button { margin: 0 1 0 0; }
+    #reports-filter-row { height: auto; margin: 0 0 1 0; }
+    #reports-filter-row Select { width: 1fr; margin: 0 1 0 0; }
     #models-delete-row { height: auto; margin: 0 0 1 0; }
     #models-delete-row Checkbox { width: 1fr; }
     #models-limit-row { height: auto; margin: 0 0 1 0; }

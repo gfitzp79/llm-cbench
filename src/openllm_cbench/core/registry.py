@@ -2,9 +2,9 @@
 Model catalogue: what approach a given model tag actually needs to
 produce valid data from this framework.
 
-The lab-testing observation this exists to operationalize: different
-models need different config to work at all -- a raised num_predict here,
-an effort-level sweep instead of a boolean think toggle there, a known
+The observation this exists to operationalize: different models need
+different config to work at all -- a raised num_predict here, an
+effort-level sweep instead of a boolean think toggle there, a known
 channel-merge state at think=off somewhere else. The fix is not custom
 per-model code (an if/elif ladder in every suite would rot the moment a
 new model needs a new special case) -- it's a declarative catalogue every

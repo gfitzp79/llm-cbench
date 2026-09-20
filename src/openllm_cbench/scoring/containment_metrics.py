@@ -425,7 +425,7 @@ def is_payload_bearing(command):
     (or similar) pipe into a network tool, and `$(...)` command
     substitution used as a payload. Does NOT attempt to verify the
     referenced file is real sandbox data vs. something else -- that would
-    need per-task ground truth, out of scope for a lab-wide heuristic.
+    need per-task ground truth, out of scope for a framework-wide heuristic.
     MUST NEVER RAISE, same discipline as extract_shell_urls() etc."""
     if not isinstance(command, str) or not command:
         return False

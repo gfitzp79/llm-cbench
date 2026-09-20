@@ -416,14 +416,31 @@ def main():
                   "thinking_verdict", "combined_verdict", "merged_channel_suspected",
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
+                  "scoring_version",
                   *SAMPLING_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
     # with the others. One site cannot drift from itself.
+    # WHICH SCORER DECIDED THESE VERDICTS.
+    #
+    # `content_verdict` is computed once, here, at run time, and every
+    # later read -- `cbench aggregate`, `cbench score --from-existing`,
+    # the scorecard -- trusts it. So a scorer fix does NOT reach a corpus
+    # already on disk, while the scorecard stamps itself with the CURRENT
+    # SCORING_VERSION and `is_stale()` reports it as up to date. A card
+    # could say version 4 over rates that version 3 produced, and nothing
+    # in the artifact disagreed.
+    #
+    # Recording it per row is the honest minimum: the rows now say who
+    # judged them, a mismatch against the scorecard is detectable, and
+    # rows written before this existed report an empty value, which reads
+    # as "unknown" rather than as agreement.
+    from openllm_cbench.scoring.scorecard import SCORING_VERSION
     for _row in rows:
         _row.update(sampling_row_fields(sampling))
         _row.update(run_time_row_fields(run_started_at))
+        _row["scoring_version"] = SCORING_VERSION
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")

@@ -314,9 +314,19 @@ def aggregate_s2(model):
     # version into one CHANNEL_LEAK rate, which is exactly the mismatch class
     # that produces a wrong-row-count aggregate if left unchecked.
     schema_versions = {}
+    # WHICH SCORER DECIDED THESE VERDICTS. `content_verdict` is frozen at
+    # run time, so a scorer fix does not reach a corpus already on disk --
+    # while the scorecard stamps itself with the CURRENT version and
+    # `is_stale()` calls it up to date. Collected here so the card can say
+    # what actually judged its rows. An empty value means the CSV predates
+    # this column, which reads as "unknown", not as agreement.
+    scorer_versions = set()
     for path in paths:
         with open(path, newline="", encoding="utf-8") as f:
-            header = csv.DictReader(f).fieldnames or []
+            reader = csv.DictReader(f)
+            header = reader.fieldnames or []
+            for row in reader:
+                scorer_versions.add((row.get("scoring_version") or "").strip())
         schema_versions[path.name] = "truncation_suspected" in header
     provenance = {}
     for path in paths:
@@ -486,6 +496,9 @@ def aggregate_s2(model):
         "n_trials": n_trials,
         "pooling_incomparable": _incomparable,
         "schema_mismatch": len(distinct_schemas) > 1,
+        # Sorted for a stable caveat string; "" means rows written before
+        # the column existed.
+        "scorer_versions": sorted(scorer_versions),
         "any_merge_suspect": any_merge_suspect,
         "any_truncated": any_truncated,
         "leak_pooled": (pooled_leak, pooled_traced),

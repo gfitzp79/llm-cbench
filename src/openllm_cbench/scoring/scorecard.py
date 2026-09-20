@@ -378,8 +378,28 @@ def _s2_verdict(model):
                      f"so this grade depends on that convention as much as on the model.** "
                      f"Read the rows before citing it.")
         caveats.append(note)
+
+    # WHO ACTUALLY JUDGED THESE ROWS. `content_verdict` is frozen into the
+    # CSV at run time, so a scorer fix never reaches a corpus already on
+    # disk -- while this card stamps itself with the current
+    # SCORING_VERSION and `is_stale()` then reports it as up to date. A
+    # card could read "version 4" over rates version 3 produced, with
+    # nothing in the artifact disagreeing. Say it instead.
+    seen = [v for v in (stats.get("scorer_versions") or []) if v]
+    unknown = "" in (stats.get("scorer_versions") or [])
+    stale = [v for v in seen if _as_int(v) < SCORING_VERSION]
+    if unknown or stale:
+        caveats.append(
+            "These verdicts were NOT produced by the current scorer. `content_verdict` is "
+            "computed once, when the suite runs, and every later read trusts it -- so the "
+            "version on this card describes the card, not the rows underneath it. Rows here "
+            "were scored by: "
+            + ", ".join([f"v{v}" for v in seen] + (["an unrecorded version"] if unknown else []))
+            + f"; the current scorer is v{SCORING_VERSION}. Re-run the suite to apply it. "
+              "`--from-existing` will not, because it re-reads these same frozen verdicts.")
     return {
         "status": "ok", "band": band, "rate": rate, "hits": hits, "n": n,
+        "scorer_versions": stats.get("scorer_versions") or [],
         "confidence": confidence_label(
             hits, n,
             _eff(stats.get("fail_effective") if rate != leak_rate
@@ -842,18 +862,53 @@ def catalogue_summary_line(model, root=None):
     return f"{grade_part}  ·  {sc['overall_summary']}  [confidence: {sc['overall_confidence']}]"
 
 
+def _as_int(value, default=0):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def is_stale(sc):
     """True if this saved scorecard was produced under superseded rules.
 
-    Two ways to be stale, and both must be caught by one predicate so the
-    table cell and the detail line underneath it cannot disagree: no
-    `grade` key at all (written before grades existed), or a
-    `scoring_version` older than the current one."""
+    THREE ways to be stale now, and all of them must be caught by one
+    predicate so the table cell and the detail line underneath it cannot
+    disagree: no `grade` key at all (written before grades existed), a
+    `scoring_version` older than the current one, or -- the one that was
+    missing -- ROWS scored by an older version than the card claims.
+
+    That third case is the dangerous one, because the card looked
+    current. `content_verdict` is frozen into the CSV when the suite
+    runs, so re-scoring an existing corpus re-reads the old verdicts and
+    stamps today's version on them. A card read "version 4" over rates
+    version 3 had produced, and `is_stale` said no. Deciding staleness
+    from the card alone was the bug."""
     if not isinstance(sc, dict):
         return True
     if not sc.get("grade"):
         return True
-    return int(sc.get("scoring_version", 0)) < SCORING_VERSION
+    if _as_int(sc.get("scoring_version")) < SCORING_VERSION:
+        return True
+    for suite in (sc.get("suites") or {}).values():
+        if not isinstance(suite, dict):
+            continue
+        versions = suite.get("scorer_versions")
+        if versions is None:
+            continue
+        # A KNOWN older version is stale: re-running clears it, so
+        # "needs re-score" is an instruction that works.
+        #
+        # An UNKNOWN version -- rows written before this column existed --
+        # is NOT marked stale, deliberately. Every corpus predating the
+        # column would carry the label permanently, and re-scoring cannot
+        # clear it because only a fresh run rewrites `content_verdict`.
+        # An instruction the reader cannot act on is the wrong channel
+        # for that fact; the suite's own caveat states it plainly and
+        # says a re-run is what applies a new scorer.
+        if any(v != "" and _as_int(v) < SCORING_VERSION for v in versions):
+            return True
+    return False
 
 
 def catalogue_compact_label(model, root=None):

@@ -460,3 +460,43 @@ def test_both_display_paths_agree_about_staleness(isolated_dirs):
     }), encoding="utf-8")
     assert sc.catalogue_compact_label("old:1b", root=root) == "needs re-score"
     assert "superseded" in sc.catalogue_summary_line("old:1b", root=root)
+
+
+def test_a_card_whose_rows_predate_the_current_scorer_is_stale():
+    """THE CASE THAT LOOKED CURRENT. `content_verdict` is frozen into the
+    CSV at run time, so re-scoring an existing corpus re-reads the old
+    verdicts and stamps today's version on them. The card read "version
+    N" over rates an older version had produced, and is_stale said no,
+    because it decided staleness from the card alone."""
+    from openllm_cbench.scoring.scorecard import SCORING_VERSION, is_stale
+
+    current = {"grade": "B", "scoring_version": SCORING_VERSION,
+               "suites": {"s2": {"scorer_versions": [str(SCORING_VERSION)]}}}
+    assert is_stale(current) is False
+
+    older_rows = {"grade": "B", "scoring_version": SCORING_VERSION,
+                  "suites": {"s2": {"scorer_versions": [str(SCORING_VERSION - 1)]}}}
+    assert is_stale(older_rows) is True, "the card is current; its rows are not"
+
+    # An UNKNOWN row version is NOT stale, deliberately. Every corpus
+    # predating the column would carry "needs re-score" permanently, and
+    # re-scoring cannot clear it -- only a fresh run rewrites
+    # content_verdict. An instruction the reader cannot act on is the
+    # wrong channel for that fact; the suite caveat carries it instead.
+    unrecorded = {"grade": "B", "scoring_version": SCORING_VERSION,
+                  "suites": {"s2": {"scorer_versions": [""]}}}
+    assert is_stale(unrecorded) is False
+
+    mixed = {"grade": "B", "scoring_version": SCORING_VERSION,
+             "suites": {"s2": {"scorer_versions": [str(SCORING_VERSION),
+                                                    str(SCORING_VERSION - 1)]}}}
+    assert is_stale(mixed) is True, "one known-old version is enough"
+
+
+def test_a_suite_without_version_tracking_does_not_force_staleness():
+    """S1 and S3 do not record it yet. Absent must not mean stale, or
+    every card is permanently stale for a reason unrelated to scoring."""
+    from openllm_cbench.scoring.scorecard import SCORING_VERSION, is_stale
+
+    assert is_stale({"grade": "B", "scoring_version": SCORING_VERSION,
+                     "suites": {"s1": {"rate": 0.1}}}) is False

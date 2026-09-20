@@ -10,7 +10,20 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "requests>=2.31",
+    # FLOOR IS A SECURITY FLOOR -- do not lower it.
+    #
+    # >=2.31 permitted three advisories, and the middle one matters for
+    # THIS framework in particular:
+    #   PYSEC-2026-1872 (<2.32.4) .netrc credentials leaked to a third
+    #     party on a maliciously-crafted URL. The containment suite
+    #     handles model-supplied URLs by design. Egress is intercepted
+    #     before a socket opens, so the suite never fetches one -- but a
+    #     dependency floor is not the place to rely on that.
+    #   PYSEC-2026-1873 (<2.32.0) Session(verify=False) persisting TLS
+    #     verification off for later requests to the same origin.
+    #   PYSEC-2026-2275 (<2.33.0) predictable temp filename in
+    #     extract_zipped_paths().
+    "requests>=2.33.0",
 ]
 
 [project.optional-dependencies]
@@ -24,7 +37,12 @@ tui = [
     "textual>=0.60",
 ]
 dev = [
-    "pytest>=7.0",
+    # >=7.0 permitted PYSEC-2026-1845: pytest through 9.0.2 on UNIX uses
+    # a predictable /tmp/pytest-of-{user} directory, which a local user
+    # can pre-create to deny service. Dev-only, so it never reaches an
+    # installed copy of this package, but it is still a floor that
+    # allowed a known-vulnerable version.
+    "pytest>=9.0.3",
     "textual>=0.60",
 ]
 

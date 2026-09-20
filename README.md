@@ -196,6 +196,32 @@ budgets into one rate for exactly that reason. They were applied but not
 recorded before v0.1.0 — the same confound the sampling pin below exists to
 prevent, on the two parameters next to it.
 
+#### The context window is checked, because it fails silently
+
+`--num-predict` running out is loud: the row is marked `TRUNCATED`, leaves the
+denominator, and the report says so. **`--num-ctx` running out is silent.** The
+server does not error — it drops tokens off the front of the conversation and
+answers anyway. The front is where the boundary instruction and the model's own
+earlier turns live, so an over-tight window produces a model that cannot see the
+rule it is being scored against, and a verdict that faithfully records the
+failure.
+
+Every run therefore prints one line, whether or not anything is wrong:
+
+```
+Context window: peak 977 of 8192 tokens (12% of the window).
+```
+
+and a warning when the window may have bound. Note what the warning can and
+cannot claim:
+
+- **`may have been truncated`** — the prompt filled at least half the window.
+  The server reports the token count it evaluated *after* truncating, so a
+  prompt that fit and one cut down to fit report the same number. Re-run with a
+  larger `--num-ctx`: if the count does not move, nothing was truncated.
+- **`the context window bound`** — prompt plus generated tokens reached
+  `num_ctx`. Those rows are unusable; raise the window and re-run.
+
 ### Reproducibility: pinned sampling
 
 Every suite sends the same four sampling parameters with every chat

@@ -239,7 +239,9 @@ channel-merge defects. None are visible from model metadata.
 **When a model truncates, raise `num_predict` before disabling reasoning.**
 Disabling reasoning makes that model's entry measure something different from
 every other model in the comparison. Raise `num_ctx` above `num_predict` by a
-real margin at the same time, or the fix does not take.
+real margin at the same time, or the fix does not take — and note that raising
+`num_predict` alone can push a run into the *other* budget's failure, which is
+silent. Section 6 covers the headroom check that catches it.
 
 **An advertised capability is not a delivered one.** The endpoint's reported
 capabilities are a claim about the model, and the claim is sometimes wrong in
@@ -393,6 +395,7 @@ after the compute is spent. Prefer the ones that run before the work.
 | **catalogue banner** (`core/registry.py`) | at every suite start | citing a run against a model whose gaps were never checked |
 | **pooling-comparability guard** (`scoring/comparability.py`) | at aggregation (`cbench aggregate`/`cbench score`) | pooling CSVs with mixed sampling instrumentation, or disagreeing pinned sampling, into one rate without noticing |
 | **recorded generation budgets** (`num_ctx`, `num_predict`) | in every row | pooling two budgets into one rate: a budget changes how many rows truncate, and a truncated row leaves the denominator |
+| **context-window headroom** (`core/context_window.py`) | at every suite run and every aggregation | scoring a model against a rule the window had already evicted, and recording the result as a behavioural failure |
 
 The capability pre-flight is the gate check made non-optional. The gate was
 advisory, and an advisory check only helps the operator who remembers to run
@@ -425,6 +428,51 @@ There were no columns: `num_ctx` and `num_predict` were applied to every
 call and recorded in none of them, which is the precise failure the
 sampling pin exists to prevent, on the two parameters next to it. Both
 are now written into every row and fingerprinted by the pooling guard.
+
+**The context window needs a different check from the generation budget,
+and the obvious one does not work.** `num_predict` running out is loud --
+`done_reason == "length"`, a `TRUNCATED` row, a warning. `num_ctx` running
+out is silent: the server drops tokens off the front of the conversation
+and answers anyway, and in a multi-turn suite the front is the boundary
+instruction (S1) or the model's own earlier log entries (S3). The scorer
+then records a model failing a rule it could no longer see.
+
+The natural detector -- warn when the token count approaches `num_ctx` --
+is wrong, because `prompt_eval_count` reports the tokens actually
+evaluated, which is the count **after** truncation. Measured directly,
+one 128-token prompt against shrinking windows (qwen3:0.6b,
+`num_predict` 32):
+
+| `num_ctx` | `prompt_eval_count` | `eval_count` | truncated? |
+|---|---|---|---|
+| 4096 | 128 | 32 | no |
+| 512 | 128 | 32 | no |
+| 256 | 128 | 32 | no |
+| 128 | 66 | 32 | **yes** |
+| 96 | 50 | 32 | **yes** |
+| 64 | 34 | 32 | **yes** |
+
+Truncation does not push the count up against the window. It pulls the
+count **down**, to roughly half the window, so an evicted run looks
+comfortable — at `num_ctx` 64 the naive check read "34 of 64, 53% used"
+and reported healthy headroom on a prompt that had lost three quarters of
+its content. This was caught by forcing the detector to fire against a
+live model rather than trusting that it would.
+
+What is sound from a single observation is one-sided. A count below half
+the window is provably untruncated, because truncation would have raised
+it to about half. A count at or above half cannot be distinguished from a
+truncated one, and the framework says exactly that (`AT_RISK`, "cannot be
+ruled out") rather than asserting truncation. The disambiguating action is
+in the warning: re-run at a larger `num_ctx` and see whether the count
+moves. Separately, prompt plus generated tokens reaching `num_ctx` is a
+fact rather than a suspicion, and is reported as `EVICTED`.
+
+Two columns are needed and neither substitutes for the other:
+`max_prompt_tokens` answers "was the input truncated" and
+`peak_context_tokens` answers "did the window bind during generation". A
+live S1 row measured 300 prompt tokens against 812 occupied — recording
+only the prompt would have understated the window's use by 63%.
 
 **What is still on you: two runs straddling a harness fix that changed
 what an already-present column means.** Section 3.5 of the companion

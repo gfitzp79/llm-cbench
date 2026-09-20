@@ -52,6 +52,9 @@ from openllm_cbench.core.endpoint import chat_url, show_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
+from openllm_cbench.core.context_window import (
+    call_occupancy, prompt_tokens, headroom_caveat, headroom_summary, CONTEXT_FIELDS,
+)
 # Named model_registry / load_model_registry throughout this file, distinct
 # from load_registry() below -- that's the unrelated probe-metadata registry
 # (prompt_id -> check info) from scoring/probes.py, not the model catalogue.
@@ -140,11 +143,21 @@ def supports_thinking(model, endpoint=None, timeout=30):
 
 
 def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampling=None, endpoint=None):
-    """One /api/chat call. Returns (content, thinking, done_reason, error).
+    """One /api/chat call.
+
+    Returns (content, thinking, done_reason, prompt_tokens, occupancy, error).
 
     done_reason is persisted (not just used internally) so a future run is
     self-diagnosing about truncation -- "length" means num_predict ran out
-    before the model finished."""
+    before the model finished.
+
+    The two token counts are persisted for the analogous reason on the
+    other budget: `num_ctx` running out is silent, so the only way a later
+    reader can tell whether the window bound is if the tokens were counted
+    at the time. Both are needed, not one -- the prompt count answers
+    "was the input truncated", the occupancy answers "did the window bind
+    during generation", and neither substitutes for the other. See
+    core/context_window.py."""
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -160,10 +173,11 @@ def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampli
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        return "", "", "", str(e)
+        return "", "", "", None, None, str(e)
     msg = data.get("message", {})
     return (msg.get("content", "") or "", msg.get("thinking", "") or "",
-            data.get("done_reason", "") or "", "")
+            data.get("done_reason", "") or "",
+            prompt_tokens(data), call_occupancy(data), "")
 
 
 # The merge guard now lives in core/delimiters.py, because the gate check
@@ -361,7 +375,7 @@ def main():
         for item in prompts:
             pid = item["id"]
             print(f"  -> {pid} ...", end=" ", flush=True)
-            content, thinking, done_reason, err = call_model(
+            content, thinking, done_reason, n_prompt, occupancy, err = call_model(
                 args.model, item["prompt"], api_value,
                 num_ctx, num_predict, timeout, endpoint=endpoint_chat,
                 sampling=sampling,
@@ -374,6 +388,7 @@ def main():
                     "combined_verdict": "", "merged_channel_suspected": "",
                     "truncation_suspected": "", "error": err,
                     "content_full": "", "thinking_full": "", "done_reason": "",
+                    "max_prompt_tokens": "", "peak_context_tokens": "",
                 })
                 continue
 
@@ -411,6 +426,10 @@ def main():
                 "content_full": content,
                 "thinking_full": thinking,
                 "done_reason": done_reason,
+                # One call per probe here, so the peak IS this call. The
+                # per-turn accumulation that S1 and S3 need does not apply.
+                "max_prompt_tokens": "" if n_prompt is None else n_prompt,
+                "peak_context_tokens": "" if occupancy is None else occupancy,
             })
 
     fieldnames = ["model", "prompt_id", "category", "think_label", "content_verdict",
@@ -418,7 +437,7 @@ def main():
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
                   "scoring_version",
-                  *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -471,6 +490,10 @@ def render_report(model, rows, variants):
     note = provenance_note(model)
     if note:
         L += [note.rstrip("\n"), ""]
+    caveat = headroom_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [headroom_summary(rows), ""]
     L += [
         "Each probe scored independently on the visible answer (`content`) and the "
         "hidden reasoning trace (`thinking`), using the same heuristics as the L1 "

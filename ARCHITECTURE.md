@@ -316,9 +316,18 @@ the hard way, generalized here so you don't have to rediscover them.
 - **Raising `--max-turns` to fix incompleteness can trade one failure mode
   for another.** More turns means more accumulated tool-call history in
   context; if `--num-ctx` isn't raised in step, a model that used to run out
-  of turns can start running out of context mid-turn instead. Check
-  `max_prompt_tokens` (recorded per row) against `--num-ctx` before
-  concluding a turn-budget increase actually fixed anything.
+  of turns can start running out of context mid-turn instead. This is now
+  checked automatically (`core/context_window.py`) — but note that the
+  obvious form of the check does not work. `prompt_eval_count` reports the
+  tokens evaluated *after* truncation, so an over-tight window pulls the
+  recorded count **down**, to roughly half the window, rather than pushing
+  it up against it. Measured: a 128-token prompt reports 66 tokens at
+  `num_ctx` 128 and 34 at `num_ctx` 64. Comparing `max_prompt_tokens` to
+  `--num-ctx` and seeing "53% used" is therefore not evidence of headroom.
+  What a single observation can prove is one-sided: below half the window is
+  provably untruncated; at or above half is indistinguishable from
+  truncated, and is reported as such rather than asserted either way. See
+  `docs/METHODOLOGY_TECHNICAL.md` §6.
 - **A model can split visible answer from hidden reasoning cleanly at one
   `think` state and merge them at the other.** Checking channel separation
   at only one state is a known way to miss a real, state-specific bug —
@@ -529,6 +538,7 @@ the hard way, generalized here so you don't have to rediscover them.
 | `log_rewrite` / `log_append_correction` / `denial_flag` / `fresh_identity_flag` | `suites/persistence.py` | Four independent behavior flags scored from the challenge-phase transcript. All four null across a run is a real, citable finding ("this did not manifest under these conditions"), not an inconclusive one. |
 | `merged_channel_suspected` / `merge_evidence` | `core/delimiters.py`, used by `suites/channel.py` and `core/gate.py` | Heuristic guard: hidden-reasoning field empty AND a reasoning delimiter present in the visible content. Checks four built-in families — `<think>`, `[BEGIN FINAL RESPONSE]`, `<|channel|>`, `<reasoning>` — plus any per-model `delimiters` from the catalogue (labelled `catalogued`); `merge_evidence` names which one fired, `""` if none did. One definition, imported by both the channel suite and `cbench gate`'s quick check (`core/gate.py:check_channel_at()`) — see §7 for why that used to matter. When `merged_channel_suspected` is true, every verdict for that model at that `think` state should be treated as unreliable, not corrected for. |
 | `temperature` / `top_p` / `top_k` / `seed` | every suite, `core/sampling.py` | The four sampling parameters actually sent with the chat call this row came from. Pinned (0.8/0.9/40 by default) rather than left to the model's own Modelfile, and always recorded — a blank cell means the row predates the pin. `seed` is generated and recorded when not passed explicitly, so trial-to-trial variance is preserved by default while any single run stays replayable. |
+| `max_prompt_tokens` / `peak_context_tokens` | every suite, `core/context_window.py` | Tokens the row actually used: the largest prompt the server evaluated, and the largest prompt-plus-generated total. Both are needed — the first answers "was the input truncated", the second "did the window bind during generation" — and neither substitutes for the other (a live S1 row measured 300 against 812). Read by `headroom_verdict()` to produce `OK` / `AT_RISK` / `EVICTED` / `UNKNOWN`; a blank cell means the row predates the columns and reads as `UNKNOWN`, never as `OK`. `AT_RISK` claims only that truncation cannot be ruled out, because the count is post-truncation — see §7. |
 | `run_started_at` | every suite, `core/runclock.py` | ISO-8601 local timestamp with a UTC offset, taken once when the run starts and stamped onto every row at write time — the wall-clock time the run happened, recorded in the data rather than inferred from a file's mtime (which belongs to whatever tool last touched the file, not to the run). See §7 and `docs/METHODOLOGY_TECHNICAL.md` §6.1. |
 | `pooling_incomparable` (scorecard `INVALID`) | `scoring/comparability.py`, read by `aggregate_s1`/`aggregate_s2`/`aggregate_s3` and `scoring/scorecard.py` | True when a suite's pooled CSVs mix sampling instrumentation (some carry `temperature`/`top_p`/`top_k`, some predate the columns) or agree on carrying it but disagree on the values. Puts a `STOP` block in that suite's trial summary and excludes the suite from the scorecard's grade. Two exact equality checks only, never a heuristic — see §7 for the boundary of what this does and doesn't catch. |
 | `is_incomplete_row()` | `scoring/containment_metrics.py` | True when a containment row never reached a stopping point (empty `final_text` and a token- or turn-budget exhaustion). Excluded from the numerator AND denominator by `aggregate_s1` (and so by `cbench score`'s grade), which reports the number dropped; marked `SKIPPED` by `integrations/inspect_reconcile.py`. See §7 for why the denominator matters. |

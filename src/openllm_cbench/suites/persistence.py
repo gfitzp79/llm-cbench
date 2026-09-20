@@ -45,6 +45,10 @@ from openllm_cbench.core.sampling import (
     add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
     budget_row_fields, BUDGET_FIELDS,
 )
+from openllm_cbench.core.context_window import (
+    call_occupancy, prompt_tokens, peak as peak_tokens,
+    headroom_caveat, headroom_summary, CONTEXT_FIELDS,
+)
 from openllm_cbench.core.runclock import (
     run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
 )
@@ -218,6 +222,19 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     tools = build_tools()
     log = []
     state = {"log_rewrite": False, "rewrite_detail": [], "log_append_correction": False}
+    # Every call in this scenario shares one growing `messages` list across
+    # the task turns, the challenge and the follow-up. That makes S3 the
+    # suite most exposed to a silent context eviction -- and the eviction
+    # would drop the model's OWN EARLIER LOG ENTRIES, which is precisely
+    # what the challenge phase asks it about. A model that cannot see what
+    # it logged looks identical to a model denying what it logged.
+    #
+    # Both counts, not one: the prompt count answers "was the input
+    # truncated" and the occupancy answers "did the window bind during
+    # generation". See core/context_window.py on why the prompt count
+    # alone cannot answer the second, or the occupancy the first.
+    occupancies = []
+    prompt_counts = []
 
     messages = [{"role": "user", "content": scenario["task_prompt"]}]
 
@@ -236,6 +253,8 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         except Exception as e:
             return {"error": str(e), "log": log, "state": state, "challenge_response": ""}
 
+        occupancies.append(call_occupancy(data))
+        prompt_counts.append(prompt_tokens(data))
         msg = data.get("message", {})
         messages.append(msg)
         tool_calls = msg.get("tool_calls") or []
@@ -269,6 +288,8 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     except Exception as e:
         return {"error": str(e), "log": log, "state": state, "challenge_response": ""}
 
+    occupancies.append(call_occupancy(data))
+    prompt_counts.append(prompt_tokens(data))
     challenge_done_reason = data.get("done_reason", "")
     msg = data.get("message", {})
     messages.append(msg)
@@ -322,6 +343,8 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
             )
             resp.raise_for_status()
             data2 = resp.json()
+            occupancies.append(call_occupancy(data2))
+            prompt_counts.append(prompt_tokens(data2))
             challenge_response = data2.get("message", {}).get("content", "") or ""
             challenge_done_reason = data2.get("done_reason", "")
         except Exception:
@@ -336,6 +359,8 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         "state": state, "challenge_response": challenge_response,
         "denial_flag": denial, "fresh_identity_flag": fresh_identity,
         "challenge_done_reason": challenge_done_reason,
+        "max_prompt_tokens": peak_tokens(prompt_counts),
+        "peak_context_tokens": peak_tokens(occupancies),
     }
 
 
@@ -424,6 +449,7 @@ def main():
                 "log_rewrite": "", "log_append_correction": "", "denial_flag": "",
                 "fresh_identity_flag": "", "log_before_challenge": "", "log_after": "",
                 "challenge_response": "", "challenge_done_reason": "",
+                "max_prompt_tokens": "", "peak_context_tokens": "",
             })
             continue
 
@@ -450,12 +476,14 @@ def main():
             "rewrite_detail": json.dumps(state["rewrite_detail"]),
             "challenge_response": result["challenge_response"],
             "challenge_done_reason": result.get("challenge_done_reason", ""),
+            "max_prompt_tokens": result.get("max_prompt_tokens") or "",
+            "peak_context_tokens": result.get("peak_context_tokens") or "",
         })
 
     fieldnames = ["model", "scenario_id", "error", "log_rewrite", "log_append_correction",
                   "denial_flag", "fresh_identity_flag", "log_before_challenge", "log_after",
                   "rewrite_detail", "challenge_response", "challenge_done_reason",
-                  *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -489,6 +517,12 @@ def render_report(model, rows):
     note = provenance_note(model)
     if note:
         L += [note.rstrip("\n"), ""]
+    # This suite asks the model about its own earlier turns, so an evicted
+    # window and a denial are the same observation. Say so before the table.
+    caveat = headroom_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [headroom_summary(rows), ""]
     L += [
         "**Heuristic keyword/behavior matching -- every non-clean verdict below is "
         "REVIEW, meant to be read manually before it's cited. A row with no flags "

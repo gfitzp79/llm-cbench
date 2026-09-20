@@ -212,26 +212,40 @@ because the settings in force were never recorded.
 Generation budget (`num_ctx`, `num_predict`, `max_turns`) is recorded per row
 for the same reason. So is the wall-clock time the run started, because a
 file's mtime belongs to whatever tool last touched the file rather than to the
-run that produced it.
+run that produced it. So are the tokens each row actually used -- the prompt
+count and the prompt-plus-generated peak -- which is what makes it possible to
+ask afterwards whether the context window bound, a question the endpoint
+answers in no other way.
 
 ### 3.5 Only comparable runs are pooled
 
 Results collected before a harness fix are not pooled with results collected
 after it. Runs at different generation budgets are not pooled.
 
-**One dimension of that is now checked for you: sampling.** `cbench
-aggregate`/`cbench score` compare every pooled CSV's recorded
-temperature/top_p/top_k, and whether it recorded them at all. Pool a CSV
-that predates the sampling columns with one that carries them, or pool two
-that carry them but disagree, and the trial summary carries a
-"STOP -- THESE RUNS ARE NOT COMPARABLE" block and that suite is reported
-`INVALID`, excluded from the grade. The remedy is the same either way:
-re-run so every trial shares one configuration, or point
-`OPENLLM_CBENCH_RESULTS_DIR` at a directory holding only the runs you mean
-to pool.
+**Two dimensions are now checked for you: sampling and the generation
+budget.** `cbench aggregate`/`cbench score` compare every pooled CSV's
+recorded temperature/top_p/top_k and its recorded `num_ctx`/`num_predict`,
+and whether it recorded them at all. Pool a CSV that predates those columns
+with one that carries them, or pool two that carry them but disagree, and
+the trial summary carries a "STOP -- THESE RUNS ARE NOT COMPARABLE" block
+and that suite is reported `INVALID`, excluded from the grade. The remedy
+is the same either way: re-run so every trial shares one configuration, or
+point `OPENLLM_CBENCH_RESULTS_DIR` at a directory holding only the runs you
+mean to pool.
 
-**Every other dimension is still on you.** A mismatched generation budget
-(`num_ctx`/`num_predict`/`max_turns`) does not stop a pool, and neither does
+**Separately, the context window is checked for whether it bound at all.**
+`num_predict` running out is loud -- the row is marked `TRUNCATED` and
+leaves the denominator. `num_ctx` running out is silent: the server drops
+tokens off the front of the conversation and answers anyway, which in a
+multi-turn suite is the boundary instruction or the model's own earlier
+turns. Every run and every aggregation reports the peak tokens against the
+window, and warns when the window may have bound. Because the server
+reports the token count it evaluated *after* truncating, that warning
+claims only that truncation cannot be ruled out; re-running at a larger
+`num_ctx` is what separates a prompt that fit from one cut down to fit.
+
+**Every other dimension is still on you.** A mismatched `max_turns` does
+not stop a pool, and neither does
 a harness correctness fix that changed what an already-present column
 means without changing whether it's present. Every row records the
 sampling parameters, the generation budget and the time the run started,

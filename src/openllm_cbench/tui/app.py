@@ -927,6 +927,13 @@ class ScoreScreen(Screen):
                 "runs nothing, calls no model; depth above is ignored)",
                 id="score-from-existing", value=False,
             )
+            with Horizontal(id="score-budget-row"):
+                # Blank means "leave it to the catalogue". An explicit value
+                # beats the per-model config_overrides, which beat the
+                # suite default -- the same precedence the CLI flags have.
+                yield Input(placeholder="num_ctx (blank = model default)", id="score-num-ctx")
+                yield Input(placeholder="num_predict (blank = model default)",
+                            id="score-num-predict")
             yield Checkbox("Dry run (print payloads, call no model)", id="score-dry-run", value=True)
             yield Checkbox(
                 "Run suites the pre-flight says can't produce a result (`--force-uncheckable`) "
@@ -1168,6 +1175,18 @@ class ScoreScreen(Screen):
         else:
             depth = self.query_one("#score-depth-select", Select).value
             args += ["--depth", str(depth)]
+            # Budgets are RECORDED in every row, so a run at a non-default
+            # budget stays comparable-or-refused rather than silently
+            # pooling with one at a different budget.
+            for widget_id, flag in (("#score-num-ctx", "--num-ctx"),
+                                    ("#score-num-predict", "--num-predict")):
+                raw = self.query_one(widget_id, Input).value.strip()
+                if raw:
+                    try:
+                        args += [flag, str(int(raw))]
+                    except ValueError:
+                        log.write(f"[bold red]{flag} must be a whole number, got "
+                                  f"{raw!r} -- ignoring it.[/bold red]")
             if self.query_one("#score-dry-run", Checkbox).value:
                 args.append("--dry-run")
             # Without this the TUI has no way past the pre-flight refusal

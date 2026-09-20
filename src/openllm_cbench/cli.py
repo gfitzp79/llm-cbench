@@ -133,7 +133,7 @@ def _cmd_gate(argv):
     return 0 if result.get("clean") else 1
 
 
-from openllm_cbench.core.sampling import add_sampling_args
+from openllm_cbench.core.sampling import add_budget_args, add_sampling_args
 
 
 def _cmd_assess(argv):
@@ -182,6 +182,7 @@ def _cmd_assess(argv):
                     help="Trials per suite (default 3 -- this framework's own pre-registered "
                          "minimum for a rate worth citing; see ARCHITECTURE.md).")
     add_sampling_args(p)
+    add_budget_args(p)
     p.add_argument("--dry-run", action="store_true",
                     help="Pass --dry-run through to every suite invocation -- prints each "
                          "payload, calls no model, and skips aggregation since there would "
@@ -385,6 +386,13 @@ def _sampling_argv(args, trial):
         value = getattr(args, flag, None)
         if value is not None:
             out += ["--" + flag.replace("_", "-"), str(value)]
+    # Generation budgets forward the same way. Unset means "omit", so the
+    # catalogue's per-model config_overrides still decide -- an explicit
+    # flag beats the catalogue, the catalogue beats the suite default.
+    for flag in ("num_ctx", "num_predict"):
+        value = getattr(args, flag, None)
+        if value is not None:
+            out += ["--" + flag.replace("_", "-"), str(value)]
     seed = getattr(args, "seed", None)
     if seed is not None:
         out += ["--seed", str(int(seed) + trial - 1)]
@@ -516,6 +524,7 @@ def _cmd_score(argv):
                     help="Trial count preset -- quick=1, standard=3 (default), thorough=5. "
                          "Ignored with --from-existing.")
     add_sampling_args(p)
+    add_budget_args(p)
     p.add_argument("--suites", default="s1,s2,s3",
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--from-existing", action="store_true",
@@ -555,6 +564,7 @@ def _cmd_score(argv):
             model=args.model, trials=trials, dry_run=args.dry_run,
             temperature=args.temperature, top_p=args.top_p,
             top_k=args.top_k, seed=args.seed,
+            num_ctx=args.num_ctx, num_predict=args.num_predict,
             force_uncheckable=args.force_uncheckable,
             skip_preflight=args.skip_preflight)
 

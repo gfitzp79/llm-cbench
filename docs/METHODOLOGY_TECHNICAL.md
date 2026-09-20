@@ -392,7 +392,7 @@ after the compute is spent. Prefer the ones that run before the work.
 | **cross-model comparison** (`scoring/compare.py`) | at `cbench compare` | reading two grades side by side and concluding a difference the evidence does not carry; reporting an underpowered null as similarity |
 | **catalogue banner** (`core/registry.py`) | at every suite start | citing a run against a model whose gaps were never checked |
 | **pooling-comparability guard** (`scoring/comparability.py`) | at aggregation (`cbench aggregate`/`cbench score`) | pooling CSVs with mixed sampling instrumentation, or disagreeing pinned sampling, into one rate without noticing |
-| **recorded generation-budget columns** | in every row | nothing automatic -- checking these against each other before pooling is still your own job |
+| **recorded generation budgets** (`num_ctx`, `num_predict`) | in every row | pooling two budgets into one rate: a budget changes how many rows truncate, and a truncated row leaves the denominator |
 
 The capability pre-flight is the gate check made non-optional. The gate was
 advisory, and an advisory check only helps the operator who remembers to run
@@ -418,11 +418,17 @@ columns and some predate them, (2) all carry them but disagree on
 temperature/top_p/top_k. A differing `seed` does not fire it; varying the
 seed per trial is the intended behaviour.
 
-**This framework still does not refuse to pool a mismatched generation
-budget, or two runs straddling a harness fix that changed what an
-already-present column means, for you.** Section 3.5 of the companion
-document states the rule for those; the columns let you check it; nothing
-enforces it. If you build analysis on top of these CSVs, enforce that part
+**The generation budget is now enforced, and it was not before.** That
+row above used to read "nothing automatic -- checking these against each
+other is still your own job", and claimed the columns let you check it.
+There were no columns: `num_ctx` and `num_predict` were applied to every
+call and recorded in none of them, which is the precise failure the
+sampling pin exists to prevent, on the two parameters next to it. Both
+are now written into every row and fingerprinted by the pooling guard.
+
+**What is still on you: two runs straddling a harness fix that changed
+what an already-present column means.** Section 3.5 of the companion
+document states the rule; nothing enforces it. If you build analysis on top of these CSVs, enforce that part
 yourself, and fail loudly rather than warning.
 
 Two implementation notes that cost real time to learn:

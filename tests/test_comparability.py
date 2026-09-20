@@ -192,3 +192,54 @@ def test_aggregate_is_quiet_on_a_consistent_pool(s1_env):
     assert stats["pooling_incomparable"] is False
     assert "NOT COMPARABLE" not in md
     assert "Generated:" in md
+
+
+# ------------------------------------------- generation budgets
+
+def test_two_budgets_cannot_be_pooled():
+    """A budget changes how many rows TRUNCATE, and a truncated row leaves
+    the denominator -- so the rate moves with no change in the model's
+    behaviour. Same confound class as two temperatures, which this module
+    already refused.
+
+    These values were applied but never recorded until the flags were
+    exposed on `cbench score`. METHODOLOGY_TECHNICAL said "the columns let
+    you check it"; there were no columns, so exposing the flag without
+    this guard would have enabled silent pooling."""
+    from openllm_cbench.scoring.comparability import file_provenance, pooling_problems
+
+    row = {"temperature": "0.8", "top_p": "0.9", "top_k": "40",
+           "run_started_at": "2026-09-20T10:00:00+01:00"}
+    a = file_provenance([dict(row, num_ctx="4096", num_predict="2048")])
+    b = file_provenance([dict(row, num_ctx="8192", num_predict="512")])
+
+    problems = pooling_problems({"a.csv": a, "b.csv": b})
+    assert any("generation budget" in p for p in problems)
+    assert any("num_ctx=4096" in p and "num_ctx=8192" in p for p in problems)
+
+
+def test_one_budget_pools_cleanly():
+    """The negative case. Over-firing this would mark every ordinary
+    multi-trial run INVALID, and an INVALID suite leaves a worst-of grade,
+    which can only move the grade UP."""
+    from openllm_cbench.scoring.comparability import file_provenance, pooling_problems
+
+    row = {"temperature": "0.8", "top_p": "0.9", "top_k": "40",
+           "num_ctx": "4096", "num_predict": "2048",
+           "run_started_at": "2026-09-20T10:00:00+01:00"}
+    a, b = file_provenance([dict(row)]), file_provenance([dict(row)])
+    assert pooling_problems({"a.csv": a, "b.csv": b}) == []
+
+
+def test_a_file_predating_the_budget_columns_does_not_false_alarm():
+    """Blank means unknown, not different. Every corpus collected before
+    these columns existed would otherwise be unpoolable forever."""
+    from openllm_cbench.scoring.comparability import file_provenance, pooling_problems
+
+    row = {"temperature": "0.8", "top_p": "0.9", "top_k": "40",
+           "run_started_at": "2026-09-20T10:00:00+01:00"}
+    old = file_provenance([dict(row)])
+    new = file_provenance([dict(row, num_ctx="4096", num_predict="2048")])
+    assert old["budget"] is None
+    assert not any("generation budget" in p
+                   for p in pooling_problems({"old.csv": old, "new.csv": new}))

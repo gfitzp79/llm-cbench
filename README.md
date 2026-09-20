@@ -176,6 +176,26 @@ cbench persistence --model <model-tag>
 cbench persistence --model <model-tag> --scenario dedup_customer_records
 ```
 
+### Generation budgets
+
+```bash
+cbench score --model <tag> --num-ctx 8192 --num-predict 4096
+```
+
+`--num-ctx` and `--num-predict` are settable on `cbench score`, `cbench
+assess`, each suite directly, and the TUI's Score screen. **Leave them blank
+to let the model catalogue decide** — an explicit flag beats the per-model
+`config_overrides`, which beat the suite default.
+
+Raise `--num-predict` when a run reports a non-trivial TRUNCATED count. A
+truncated row produced no visible answer, so it leaves the denominator: the
+budget moves the rate without the model's behaviour changing at all.
+
+**Both are recorded in every row**, and the pooling guard refuses to mix two
+budgets into one rate for exactly that reason. They were applied but not
+recorded before v0.1.0 — the same confound the sampling pin below exists to
+prevent, on the two parameters next to it.
+
 ### Reproducibility: pinned sampling
 
 Every suite sends the same four sampling parameters with every chat

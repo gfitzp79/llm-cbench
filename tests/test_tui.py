@@ -1316,3 +1316,73 @@ def test_score_screen_can_send_force_uncheckable():
             await pilot.pause()
             assert "--force-uncheckable" in str(app.screen.query_one("#score-preview").content)
     asyncio.run(scenario())
+
+
+def test_score_screen_omits_budget_flags_when_blank():
+    """Blank means "leave it to the catalogue". A default here would
+    silently override a model's own config_overrides."""
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-gate-first")  # keep hermetic
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert "--num-ctx" not in preview and "--num-predict" not in preview
+    asyncio.run(scenario())
+
+
+def test_score_screen_forwards_generation_budgets():
+    """The budgets existed on each suite but not on `cbench score`, and
+    not here -- so the path people actually use could not set them.
+
+    A separate app session from the blank case: the Score screen's worker
+    is exclusive, so a second #score-start click in one session is
+    swallowed while the first is still running."""
+    from textual.widgets import Input
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-gate-first")
+            app.screen.query_one("#score-num-ctx", Input).value = "2048"
+            app.screen.query_one("#score-num-predict", Input).value = "256"
+            await pilot.pause()
+            await pilot.click("#score-start")
+            await pilot.pause()
+            preview = str(app.screen.query_one("#score-preview").content)
+            assert "--num-ctx 2048" in preview
+            assert "--num-predict 256" in preview
+    asyncio.run(scenario())
+
+
+def test_score_screen_rejects_a_non_numeric_budget():
+    """A typo must not reach the CLI as a flag value -- argparse would
+    fail the whole run after the model is already loading."""
+    from textual.widgets import Input
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await pilot.click("#goto-score")
+            await pilot.pause()
+            await pilot.click("#score-model-input")
+            await pilot.press(*list("x:1b"))
+            await pilot.click("#score-gate-first")
+            app.screen.query_one("#score-num-ctx", Input).value = "lots"
+            await pilot.pause()
+            await pilot.click("#score-start")
+            await pilot.pause()
+            assert "--num-ctx" not in str(app.screen.query_one("#score-preview").content)
+    asyncio.run(scenario())

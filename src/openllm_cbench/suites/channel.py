@@ -75,6 +75,7 @@ from openllm_cbench.core.delimiters import (
 )
 from openllm_cbench.core.sampling import (
     add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
+    budget_row_fields, BUDGET_FIELDS,
 )
 from openllm_cbench.core.runclock import (
     run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
@@ -417,7 +418,7 @@ def main():
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
                   "scoring_version",
-                  *SAMPLING_FIELDS, *RUN_TIME_FIELDS]
+                  *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -439,6 +440,10 @@ def main():
     from openllm_cbench.scoring.scorecard import SCORING_VERSION
     for _row in rows:
         _row.update(sampling_row_fields(sampling))
+        # Stamped at WRITE time beside sampling, for the same reason:
+        # a suite builds rows in several places and per-site drift is
+        # how one of them ends up disagreeing with the others.
+        _row.update(budget_row_fields(num_ctx, num_predict))
         _row.update(run_time_row_fields(run_started_at))
         _row["scoring_version"] = SCORING_VERSION
 

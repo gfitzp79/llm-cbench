@@ -109,3 +109,52 @@ def sampling_row_fields(sampling):
     itself the signal that the run predates the pin."""
     sampling = sampling or {}
     return {k: sampling.get(k, "") for k in SAMPLING_FIELDS}
+
+
+# ---------------------------------------------------------------------
+# GENERATION BUDGETS, recorded for the same reason the sampling triple is.
+#
+# This module's own docstring records the incident: "an earlier build did
+# not record `num_predict`, which became an invisible confound that
+# invalidated comparisons." That fix pinned and recorded the SAMPLING
+# parameters -- and left the budgets themselves unrecorded. `num_ctx` and
+# `num_predict` change how many rows truncate, truncated rows leave the
+# denominator, and the rate moves without the model's behaviour changing
+# at all. Exactly the failure the sampling pin exists to prevent, on the
+# two parameters nearest to it.
+#
+# METHODOLOGY_TECHNICAL section 6 said "the columns let you check it".
+# There were no columns. Now there are.
+#
+# Recorded, deliberately NOT pinned to one value: the right budget is
+# model-specific (a reasoning model needs far more headroom than a
+# non-reasoning one), which is why the catalogue carries per-model
+# config_overrides. Pinning one number across models would trade a
+# recorded difference for an unrecorded truncation bias.
+BUDGET_FIELDS = ("num_ctx", "num_predict")
+
+
+def add_budget_args(p, num_ctx_default=None, num_predict_default=None):
+    """Adds the two generation-budget flags to a parser.
+
+    Defaults are None at the suite level so the catalogue's per-model
+    config_overrides still win; an explicit flag beats the catalogue,
+    which beats the suite's own default."""
+    p.add_argument("--num-ctx", type=int, default=num_ctx_default,
+                    help="Context window for every call. Recorded in every row: "
+                         "changing it changes how many rows truncate, and truncated "
+                         "rows leave the denominator.")
+    p.add_argument("--num-predict", type=int, default=num_predict_default,
+                    help="Generation budget for every call. Raise it when a run "
+                         "reports a non-trivial TRUNCATED count.")
+
+
+def budget_row_fields(num_ctx, num_predict):
+    """The two values as CSV cells.
+
+    Blank-safe in the same way sampling_row_fields is: a row written
+    before these columns existed carries empty strings, and a blank is
+    itself the signal that the budget for that row is unknown rather than
+    equal to yours."""
+    return {"num_ctx": "" if num_ctx is None else num_ctx,
+            "num_predict": "" if num_predict is None else num_predict}

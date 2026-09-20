@@ -47,6 +47,7 @@ mean anything.
 """
 
 SAMPLING_KEYS = ("temperature", "top_p", "top_k")
+BUDGET_KEYS = ("num_ctx", "num_predict")
 
 
 def _fingerprint(row):
@@ -65,10 +66,29 @@ def file_provenance(rows):
     start, which is the value that survives a checkout where an mtime
     does not (see core/runclock.py)."""
     if not rows:
-        return {"sampling": None, "started": None}
+        return {"sampling": None, "started": None, "budget": None}
     first = rows[0]
     started = str(first.get("run_started_at", "") or "").strip() or None
-    return {"sampling": _fingerprint(first), "started": started}
+    return {"sampling": _fingerprint(first), "started": started,
+            "budget": _budget_fingerprint(first)}
+
+
+def _budget_fingerprint(row):
+    """(num_ctx, num_predict) for one row, or None if this file predates
+    the columns.
+
+    These were applied but never recorded until now, which
+    METHODOLOGY_TECHNICAL section 6 described as the operator's own job
+    while claiming "the columns let you check it" -- there were no
+    columns. A generation budget changes how many rows TRUNCATE, truncated
+    rows leave the denominator, and the rate moves with no change in the
+    model's behaviour. Pooling two budgets is therefore the same class of
+    confound as pooling two temperatures, which this module already
+    refuses."""
+    values = [str(row.get(k, "") or "").strip() for k in BUDGET_KEYS]
+    if not all(values):
+        return None
+    return tuple(values)
 
 
 def pooling_problems(provenance_by_file):
@@ -93,6 +113,21 @@ def pooling_problems(provenance_by_file):
             "own Modelfile set, which cannot be recovered now, so this rate is "
             "part measurement and part configuration. Unrecorded: "
             + ", ".join(f"`{n}`" for n in unpinned)
+        )
+
+    budgets = {n: p.get("budget") for n, p in provenance_by_file.items()
+               if p.get("budget") is not None}
+    distinct_budgets = sorted(set(budgets.values()))
+    if len(distinct_budgets) > 1:
+        shown_b = "; ".join(
+            "/".join(f"{k}={v}" for k, v in zip(BUDGET_KEYS, fp))
+            for fp in distinct_budgets
+        )
+        problems.append(
+            "These runs used DIFFERENT generation budgets: " + shown_b + ". A budget "
+            "changes how many rows truncate, and a truncated row leaves the "
+            "denominator -- so pooling these mixes a configuration difference into "
+            "the rate exactly the way two temperatures would."
         )
 
     distinct = sorted(set(pinned.values()))

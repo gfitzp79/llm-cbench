@@ -531,7 +531,13 @@ def test_score_screen_requires_at_least_one_suite():
 def test_score_screen_dry_run_builds_the_correct_score_command():
     # Confirms the real `cbench score` argv is built correctly from the form
     # fields -- suites joined, depth passed through, --dry-run only when
-    # checked (checked by default here).
+    # checked.
+    #
+    # Dry run is OFF by default and this test now ticks it explicitly. It
+    # used to default ON, which meant the button labelled "Score" did not
+    # score: a TUI/CLI divergence, since `cbench score --dry-run` is
+    # store_true and defaults off. The test asserted the divergence, so it
+    # could not have caught it.
     async def scenario():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
@@ -546,6 +552,14 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
             # test stays hermetic, same as every other "no live endpoint
             # needed" test in this file.
             await pilot.click("#score-gate-first")
+            await pilot.click("#score-dry-run")  # off by default; tick it
+            await pilot.pause()
+            # The preview describes the run BEFORE the button is pressed --
+            # that is the point of it, so assert it here rather than after.
+            pre_press = str(app.screen.query_one("#score-preview").content)
+            assert "DRY RUN" in pre_press
+            assert "calls no model" in pre_press
+
             await pilot.click("#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
@@ -625,10 +639,15 @@ def test_score_screen_from_existing_blocks_when_nothing_on_disk_to_score():
             await pilot.click("#score-gate-first")
             await pilot.click("#score-start")
             await pilot.pause()
-            preview = str(app.screen.query_one("#score-preview").content)
-            assert preview == ""  # never even got to building the command
             log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
             assert any("nothing on disk to score" in line.lower() for line in log_lines)
+            # It must not have LAUNCHED. Previously asserted as an empty
+            # preview, which stopped meaning that once the preview began
+            # describing the pending run live -- an empty preview now only
+            # says the form is incomplete, not that nothing started. The
+            # launch writes the command into the LOG, so its absence there
+            # is the real signal.
+            assert not any("openllm_cbench.cli score" in line for line in log_lines)
     asyncio.run(scenario())
 
 
@@ -1384,5 +1403,12 @@ def test_score_screen_rejects_a_non_numeric_budget():
             await pilot.pause()
             await pilot.click("#score-start")
             await pilot.pause()
-            assert "--num-ctx" not in str(app.screen.query_one("#score-preview").content)
+            preview = str(app.screen.query_one("#score-preview").content)
+            # The flag must not reach the command line with the bad value.
+            # Asserted against the command itself, not the whole preview --
+            # the preview now also WARNS about the typo by name, and a
+            # substring check over both cannot tell the two apart.
+            command = preview.split("$ ", 1)[1] if "$ " in preview else preview
+            assert "--num-ctx" not in command
+            assert "must be a whole number" in preview
     asyncio.run(scenario())

@@ -22,6 +22,7 @@ from textual.widgets import (
     Select, Static, TextArea,
 )
 
+from openllm_cbench.core import exitcodes
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
 from openllm_cbench.core.runclock import time_from_filename
 from openllm_cbench.tui.jobs import (
@@ -101,11 +102,18 @@ def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
     if result.error:
         log.write(f"[bold red]{result.error}[/bold red]")
         return False
-    style = "bold green" if result.returncode == 0 else "bold red"
-    log.write(f"[{style}]exit code: {result.returncode}[/{style}]")
-    if result.returncode == 0 and success_note:
+    # The last line on screen is the most prominent one, so it says what
+    # happened rather than what number the process returned. See
+    # core/exitcodes.py -- "exit code: 2" was reported as meaning nothing,
+    # and it did.
+    ok = exitcodes.is_success(result.returncode)
+    style = "bold green" if ok else "bold red"
+    meaning = exitcodes.describe(result.returncode,
+                                 exitcodes.subcommand_of(result.argv))
+    log.write(f"[{style}]{meaning}[/{style}]")
+    if ok and success_note:
         log.write(f"[dim]{success_note}[/dim]")
-    return result.returncode == 0
+    return ok
 
 
 class InvariantBar(Static):
@@ -289,7 +297,11 @@ class RunScreen(Screen):
             yield Select([], id="model-select", allow_blank=True,
                          prompt="Pick a local model (or type the tag below) — loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="model-input")
-            yield Checkbox("Dry run (print payload, call no model)", id="dry-run-checkbox", value=True)
+            # OFF by default, matching the CLI's own store_true default.
+            yield Checkbox(
+                "Dry run -- print the payload and call no model. Leave OFF to actually run.",
+                id="dry-run-checkbox", value=False,
+            )
             yield Input(
                 placeholder="extra flags, e.g. --boundary both --sandbox extended",
                 id="extra-args-input",
@@ -934,7 +946,14 @@ class ScoreScreen(Screen):
                 yield Input(placeholder="num_ctx (blank = model default)", id="score-num-ctx")
                 yield Input(placeholder="num_predict (blank = model default)",
                             id="score-num-predict")
-            yield Checkbox("Dry run (print payloads, call no model)", id="score-dry-run", value=True)
+            # OFF by default, matching `cbench score`, whose --dry-run is
+            # store_true. It defaulted ON here, so the button labelled
+            # "Score" did not score unless you noticed and unticked it --
+            # a TUI/CLI divergence, not a safety default.
+            yield Checkbox(
+                "Dry run -- print the payloads and call no model. Leave OFF to actually score.",
+                id="score-dry-run", value=False,
+            )
             yield Checkbox(
                 "Run suites the pre-flight says can't produce a result (`--force-uncheckable`) "
                 "-- off by default: a suite whose validity guard cannot fire spends the full "
@@ -1053,10 +1072,107 @@ class ScoreScreen(Screen):
         if event.select.id == "score-model-select" and event.value is not Select.BLANK:
             self.query_one("#score-model-input", Input).value = str(event.value)
             self._refresh_catalogue_status(str(event.value))
+        self._refresh_preview()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "score-model-input":
             self._refresh_catalogue_status(event.value.strip())
+        self._refresh_preview()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        self._refresh_preview()
+
+    def _score_flags(self):
+        """What this form currently describes, as (argv-tail, trials, problems).
+
+        Pure: reads the widgets, writes nothing, touches no disk. That is
+        what lets the live preview and the actual launch share it -- a
+        preview built from a second copy of this logic is a preview that
+        can lie about what the button will do, which is the failure being
+        fixed here, not a new one to introduce."""
+        model = self.query_one("#score-model-input", Input).value.strip()
+        suites = [s for s in ("s1", "s2", "s3")
+                  if self.query_one(f"#score-{s}", Checkbox).value]
+        problems = []
+        if not model:
+            problems.append("A model tag is required.")
+        if not suites:
+            problems.append("Select at least one suite.")
+
+        args = ["--model", model, "--suites", ",".join(suites)]
+        total_trials = None
+        if self.query_one("#score-from-existing", Checkbox).value:
+            args.append("--from-existing")
+        else:
+            depth = self.query_one("#score-depth-select", Select).value
+            args += ["--depth", str(depth)]
+            # Budgets are RECORDED in every row, so a run at a non-default
+            # budget stays comparable-or-refused rather than silently
+            # pooling with one at a different budget.
+            for widget_id, flag in (("#score-num-ctx", "--num-ctx"),
+                                    ("#score-num-predict", "--num-predict")):
+                raw = self.query_one(widget_id, Input).value.strip()
+                if raw:
+                    try:
+                        args += [flag, str(int(raw))]
+                    except ValueError:
+                        problems.append(f"{flag} must be a whole number, got {raw!r} "
+                                        f"-- ignoring it.")
+            if self.query_one("#score-dry-run", Checkbox).value:
+                args.append("--dry-run")
+            # Without this the TUI has no way past the pre-flight refusal
+            # at all, which for a model where every suite is dead means
+            # being stopped with the fix named only as a CLI flag the
+            # screen cannot send.
+            if self.query_one("#score-force-uncheckable", Checkbox).value:
+                args.append("--force-uncheckable")
+            from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
+            if suites:
+                total_trials = len(suites) * DEPTH_TRIALS[depth]
+        return args, total_trials, problems
+
+    def _refresh_preview(self) -> None:
+        """Say in words what pressing Score will do, before it is pressed.
+
+        Reported live: "UI is unintuitive, I'm not sure if I need to check
+        or uncheck the options". Checkbox glyphs render near-identically in
+        some terminals, so the state of a tick is not readable from the
+        tick. A sentence naming the consequence is, and it does not depend
+        on a font."""
+        try:
+            preview = self.query_one("#score-preview", Static)
+        except Exception:
+            return
+        try:
+            args, total_trials, problems = self._score_flags()
+        except Exception:
+            # The form is mid-construction (on_mount fires handlers before
+            # every widget exists). A preview is not worth an exception.
+            return
+
+        # A blocking problem means there is no command to describe. A
+        # non-blocking one (a typo'd budget, which is dropped) still has a
+        # run behind it, so the warning goes ABOVE the command rather than
+        # replacing it -- hiding what will run is the thing being fixed.
+        blocking = [p for p in problems if "required" in p or "at least one" in p]
+        if blocking:
+            preview.update("[yellow]" + "  ".join(blocking) + "[/yellow]")
+            return
+        warning = ("[yellow]" + "  ".join(problems) + "[/yellow]\n") if problems else ""
+
+        if "--from-existing" in args:
+            what = ("Will score CSVs ALREADY ON DISK. Runs no trials and calls no "
+                    "model; the depth setting is ignored.")
+        elif "--dry-run" in args:
+            what = ("DRY RUN: prints the payloads and calls no model. No CSV, no "
+                    "grade. Untick 'Dry run' to actually score.")
+        else:
+            what = f"Will run {total_trials} trial(s) against the model and write a grade."
+            if "--force-uncheckable" in args:
+                what += (" Pre-flight refusals are OVERRIDDEN, so a suite that cannot "
+                         "produce a result will still spend its full time and grade INVALID.")
+        argv = cbench_command("score", args)
+        preview.update(f"{warning}[b]{what}[/b]\n[dim]$ {' '.join(argv)}[/dim]")
 
     def _refresh_catalogue_status(self, model: str) -> None:
         """Local-only registry read (same function `cbench discover`/
@@ -1106,25 +1222,19 @@ class ScoreScreen(Screen):
     def _start_score(self) -> None:
         model = self.query_one("#score-model-input", Input).value.strip()
         log = self.query_one("#score-log", RichLog)
-        preview = self.query_one("#score-preview", Static)
         log.clear()
 
-        if not model:
-            log.write("[bold red]A model tag is required.[/bold red]")
+        # One source of truth for what this form means, shared with the
+        # live preview -- see _score_flags().
+        args, total_trials, problems = self._score_flags()
+        blocking = [p for p in problems if "required" in p or "at least one" in p]
+        for problem in problems:
+            log.write(f"[bold red]{problem}[/bold red]")
+        if blocking:
             return
 
-        suites = []
-        if self.query_one("#score-s1", Checkbox).value:
-            suites.append("s1")
-        if self.query_one("#score-s2", Checkbox).value:
-            suites.append("s2")
-        if self.query_one("#score-s3", Checkbox).value:
-            suites.append("s3")
-        if not suites:
-            log.write("[bold red]Select at least one suite.[/bold red]")
-            return
-
-        from_existing = self.query_one("#score-from-existing", Checkbox).value
+        suites = args[args.index("--suites") + 1].split(",")
+        from_existing = "--from-existing" in args
 
         if from_existing:
             # "From existing" runs nothing and makes no model call by
@@ -1168,38 +1278,8 @@ class ScoreScreen(Screen):
                     f"data.[/bold yellow]"
                 )
 
-        args = ["--model", model, "--suites", ",".join(suites)]
-        total_trials = None
-        if from_existing:
-            args.append("--from-existing")
-        else:
-            depth = self.query_one("#score-depth-select", Select).value
-            args += ["--depth", str(depth)]
-            # Budgets are RECORDED in every row, so a run at a non-default
-            # budget stays comparable-or-refused rather than silently
-            # pooling with one at a different budget.
-            for widget_id, flag in (("#score-num-ctx", "--num-ctx"),
-                                    ("#score-num-predict", "--num-predict")):
-                raw = self.query_one(widget_id, Input).value.strip()
-                if raw:
-                    try:
-                        args += [flag, str(int(raw))]
-                    except ValueError:
-                        log.write(f"[bold red]{flag} must be a whole number, got "
-                                  f"{raw!r} -- ignoring it.[/bold red]")
-            if self.query_one("#score-dry-run", Checkbox).value:
-                args.append("--dry-run")
-            # Without this the TUI has no way past the pre-flight refusal
-            # at all, which for a model where every suite is dead means
-            # being stopped with the fix named only as a CLI flag the
-            # screen cannot send.
-            if self.query_one("#score-force-uncheckable", Checkbox).value:
-                args.append("--force-uncheckable")
-            from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
-            total_trials = len(suites) * DEPTH_TRIALS[depth]
-
         argv = cbench_command("score", args)
-        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
+        self._refresh_preview()
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
 
         progress = self.query_one("#score-progress", ProgressBar)

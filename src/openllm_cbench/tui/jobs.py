@@ -217,8 +217,12 @@ def save_job_log(result: JobResult) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     path = d / f"{subcommand}_{ts}.log"
-    footer = (f"\n[exit code: {result.returncode}]\n" if not result.error
-              else f"\n[error: {result.error}]\n")
+    # Says what happened, not just the number -- the saved log is read
+    # later, out of context, so it needs the meaning more than the screen
+    # does. See core/exitcodes.py.
+    from openllm_cbench.core import exitcodes
+    footer = (f"\n[{exitcodes.describe(result.returncode, subcommand)}]\n"
+              if not result.error else f"\n[error: {result.error}]\n")
     path.write_text(f"$ {' '.join(result.argv)}\n\n" + "\n".join(result.lines) + footer,
                      encoding="utf-8")
     return path

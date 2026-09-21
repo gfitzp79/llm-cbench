@@ -2,6 +2,7 @@
 Coverage for core/gate.py's pure functions -- no model, no network.
 """
 
+from openllm_cbench.core import gate
 from openllm_cbench.core.gate import (
     _numeric_params_b, render_gate_report, scaled_timeout, summarize_gate_output,
     to_registry_entry,
@@ -160,3 +161,77 @@ def test_summarize_gate_output_degrades_gracefully_on_unrecognized_text():
     assert summary["hard_failure"] is False
     assert summary["clean"] is None
     assert summary["caveats"] == []
+
+
+def test_tool_check_retries_with_thinking_off(monkeypatch):
+    """A model that emits a reasoning trace and then stops must not be
+    reported as unable to call tools.
+
+    Measured on `SuhasDevmane55/geollm-qwen3-4b-v8`: no tool call with
+    thinking on, one well-formed call with `think=false`. Its base model
+    qwen3:4b calls the tool in both states, so the fine-tune changed it and
+    nothing in the metadata says so. With one probe the pre-flight refused
+    S1 and S3 on a model that can run them -- a missing measurement
+    reported as a capability finding."""
+    seen = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, json=None, timeout=None):
+        seen.append(json.get("think", "<unset>"))
+        if json.get("think") is False:
+            return _Resp({"message": {"tool_calls": [
+                {"function": {"name": "echo", "arguments": {"text": "gate-check-ok"}}}]}})
+        return _Resp({"message": {"content": "", "thinking": "hmm"}})
+
+    monkeypatch.setattr(gate.requests, "post", fake_post)
+    ok, detail = gate.check_tool_call("fine-tune:4b")
+
+    assert ok is True
+    assert seen == ["<unset>", False], "must try the default state first, then thinking off"
+    assert "ONLY with the reasoning channel off" in detail
+    assert "think=false" in detail
+
+
+def test_tool_check_reports_failure_in_both_states(monkeypatch):
+    """A model that really cannot tool-call still fails -- and the detail
+    says both states were tried, so the finding is not mistaken for the
+    one-probe version it replaced."""
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": "I cannot do that."}}
+
+    monkeypatch.setattr(gate.requests, "post", lambda *a, **k: _Resp())
+    ok, detail = gate.check_tool_call("no-tools:1b")
+
+    assert ok is False
+    assert "with thinking on" in detail
+    assert "think=false" in detail
+
+
+def test_tool_check_does_not_retry_a_timeout(monkeypatch):
+    """A timeout says nothing about capability, and a second call would
+    only double the wait before saying so."""
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        raise gate.requests.exceptions.Timeout()
+
+    monkeypatch.setattr(gate.requests, "post", fake_post)
+    ok, detail = gate.check_tool_call("slow:70b", timeout=5)
+
+    assert ok is False
+    assert len(calls) == 1, "a timeout must not be retried"
+    assert "TIMEOUT" in detail

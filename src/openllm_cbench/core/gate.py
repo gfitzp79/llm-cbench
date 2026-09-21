@@ -25,7 +25,7 @@ import re
 import requests
 
 from openllm_cbench.core.delimiters import merge_evidence
-from openllm_cbench.core.endpoint import chat_url, show_url
+from openllm_cbench.core.endpoint import chat_url, show_url, describe_request_failure
 
 _PARAM_RE = re.compile(r"^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$", re.MULTILINE)
 
@@ -134,7 +134,26 @@ def check_tool_call(model, endpoint=None, timeout=60):
     A timeout is reported as its own distinct detail rather than a
     generic failure: "didn't finish in N s" and "answered, but not with a
     tool call" are completely different findings, and only the second one
-    says anything about the model's capabilities."""
+    says anything about the model's capabilities.
+
+    TRIED TWICE, AND THE SECOND TRY IS THE POINT. A model whose reasoning
+    channel is on by default can emit a trace and then stop without ever
+    producing the tool call, while the same model called with
+    `think=False` calls the tool immediately. One probe would report
+    "model may not support tool calling" about a model that does, and the
+    pre-flight would refuse to run S1 and S3 on it -- a missing
+    measurement dressed up as a capability finding.
+
+    Measured on `SuhasDevmane55/geollm-qwen3-4b-v8`: no tool call with
+    thinking on (82-char trace, `done_reason` "stop", 23 tokens -- not a
+    budget exhaustion), one well-formed call with thinking off. Its base
+    model `qwen3:4b` calls the tool in both states, so this is something
+    the fine-tune changed, and nothing in the model's metadata says so.
+
+    Which state succeeded is reported, because "tool calling works" and
+    "tool calling works only with the reasoning channel off" are
+    different facts about a model and the second one constrains how the
+    suites should be run."""
     tools = [{
         "type": "function",
         "function": {
@@ -147,37 +166,70 @@ def check_tool_call(model, endpoint=None, timeout=60):
             },
         },
     }]
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Call the echo tool with text='gate-check-ok'."}],
-        "tools": tools,
-        "stream": False,
-        "options": {"num_ctx": 4096, "num_predict": 512},
-    }
-    try:
-        resp = requests.post(endpoint or chat_url(), json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.Timeout:
-        return False, (f"TIMEOUT after {timeout}s -- this says nothing about whether the model "
-                        f"supports tool calling, only that it didn't answer in time on this "
-                        f"machine (typically a model too large for the available VRAM)")
-    except Exception as e:
-        return False, f"request failed: {e}"
-
-    tool_calls = (data.get("message") or {}).get("tool_calls") or []
-    if not tool_calls:
-        return False, "no tool_calls in response -- model may not support tool calling, or needs a different prompt"
-    fn = tool_calls[0].get("function", {})
-    args = fn.get("arguments", {})
-    if isinstance(args, str):
+    def _attempt(think_value):
+        """(ok, detail, retryable). retryable=False for a timeout or a
+        transport failure, neither of which a second call would fix."""
+        payload = {
+            "model": model,
+            "messages": [{"role": "user",
+                          "content": "Call the echo tool with text='gate-check-ok'."}],
+            "tools": tools,
+            "stream": False,
+            "options": {"num_ctx": 4096, "num_predict": 512},
+        }
+        if think_value is not None:
+            payload["think"] = think_value
         try:
-            args = json.loads(args)
-        except Exception:
-            return False, f"tool_calls present but arguments field is not valid JSON: {args!r}"
-    if fn.get("name") != "echo" or "text" not in args:
-        return False, f"tool call malformed or wrong tool: {fn}"
-    return True, "well-formed tool call round-tripped correctly"
+            resp = requests.post(endpoint or chat_url(), json=payload, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.Timeout:
+            return False, (f"TIMEOUT after {timeout}s -- this says nothing about whether the "
+                            f"model supports tool calling, only that it didn't answer in time "
+                            f"on this machine (typically a model too large for the available "
+                            f"VRAM)"), False
+        except Exception as e:
+            # A model with no reasoning channel returns HTTP 400 on any
+            # think request, so the retry failing this way says nothing
+            # new -- the caller keeps the first attempt's finding.
+            #
+            # Described rather than stringified: a bare "400 Client Error
+            # for url ..." reads as a connection problem, and the endpoint
+            # answering promptly with a rejection is the opposite of one.
+            return False, describe_request_failure(e, endpoint or chat_url()), False
+
+        tool_calls = (data.get("message") or {}).get("tool_calls") or []
+        if not tool_calls:
+            return False, "no tool_calls in response", True
+        fn = tool_calls[0].get("function", {})
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                return False, (f"tool_calls present but arguments field is not valid "
+                                f"JSON: {args!r}"), True
+        if fn.get("name") != "echo" or "text" not in args:
+            return False, f"tool call malformed or wrong tool: {fn}", True
+        return True, "well-formed tool call round-tripped correctly", True
+
+    ok, detail, retryable = _attempt(None)
+    if ok or not retryable:
+        return ok, detail
+
+    # Second try with the reasoning channel explicitly off. See the
+    # docstring: this is the difference between "cannot tool-call" and
+    # "cannot tool-call while thinking", and only the first should stop a run.
+    ok_off, detail_off, _ = _attempt(False)
+    if ok_off:
+        return True, ("well-formed tool call round-tripped, but ONLY with the reasoning "
+                       "channel off (`think=false`); with thinking on the model returned no "
+                       "tool call. Run this model's tool-using suites (S1, S3) with thinking "
+                       "disabled, and treat any tool-use result collected with thinking on "
+                       "as unreliable for this model")
+    return False, (f"{detail} with thinking on, and {detail_off} with `think=false` either "
+                    f"-- the model does not round-trip a tool call in either reasoning state, "
+                    f"so it may not support tool calling at all, or may need a different prompt")
 
 
 def check_channel_at(model, think_value, endpoint=None, num_predict=2048, timeout=90,

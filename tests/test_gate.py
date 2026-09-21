@@ -196,7 +196,9 @@ def test_tool_check_retries_with_thinking_off(monkeypatch):
     ok, detail = gate.check_tool_call("fine-tune:4b")
 
     assert ok is True
-    assert seen == ["<unset>", False], "must try the default state first, then thinking off"
+    # Default state, then the SAME state again (one failure is not evidence
+    # about the state -- see test_a_single_flaky_failure_...), then off.
+    assert seen == ["<unset>", "<unset>", False]
     assert "ONLY with the reasoning channel off" in detail
     assert "think=false" in detail
 
@@ -279,3 +281,75 @@ def test_summarize_accepts_the_whole_report_not_only_lines():
     report = render_gate_report(result)
     assert summarize_gate_output(report) == summarize_gate_output(report.splitlines())
     assert summarize_gate_output(report)["hard_failure"] is True
+
+
+def test_a_single_flaky_failure_does_not_pin_a_model_to_thinking_off(monkeypatch):
+    """One failed call is not evidence about the reasoning state.
+
+    Measured: granite4.1:8b failed this probe once during a catalogue
+    re-gate, then called the tool 5/5 in BOTH states when checked. The
+    single failure had written it a permanent `think: false` override,
+    silently changing the conditions S1/S3 measure it under."""
+    states = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, timeout=None):
+        calls["n"] += 1
+        states.append(json.get("think", "<unset>"))
+        if calls["n"] == 1:          # flaky miss
+            return _Resp({"message": {"content": "Sure, let me help."}})
+        return _Resp({"message": {"tool_calls": [
+            {"function": {"name": "echo", "arguments": {"text": "gate-check-ok"}}}]}})
+
+    monkeypatch.setattr(gate.requests, "post", fake_post)
+    ok, detail = gate.check_tool_call("flaky:8b")
+
+    assert ok is True
+    assert states == ["<unset>", "<unset>"], "must repeat the DEFAULT state before blaming it"
+    assert gate.TOOLS_NEED_THINKING_OFF not in detail
+    assert "run-to-run variance" in detail
+    # The whole point: no override gets written for a flaky model.
+    assert to_registry_entry({"tools_need_thinking_off": False})["config_overrides"] == {}
+
+
+def test_a_consistent_failure_still_reaches_the_thinking_off_retry(monkeypatch):
+    """The repeat must not mask a real state-dependent gap.
+
+    geollm-qwen3-4b-v8 is 0/8 with thinking on and 8/8 with it off; that
+    shape must still be found after the extra same-state attempt."""
+    states = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, json=None, timeout=None):
+        states.append(json.get("think", "<unset>"))
+        if json.get("think") is False:
+            return _Resp({"message": {"tool_calls": [
+                {"function": {"name": "echo", "arguments": {"text": "gate-check-ok"}}}]}})
+        return _Resp({"message": {"content": "", "thinking": "hmm"}})
+
+    monkeypatch.setattr(gate.requests, "post", fake_post)
+    ok, detail = gate.check_tool_call("statebound:4b")
+
+    assert ok is True
+    assert states == ["<unset>", "<unset>", False]
+    assert gate.TOOLS_NEED_THINKING_OFF in detail

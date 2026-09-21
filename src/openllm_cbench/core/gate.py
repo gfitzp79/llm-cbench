@@ -232,7 +232,25 @@ def check_tool_call(model, endpoint=None, timeout=60):
     if ok or not retryable:
         return ok, detail
 
-    # Second try with the reasoning channel explicitly off. See the
+    # SAME STATE AGAIN BEFORE BLAMING THE STATE.
+    #
+    # Measured: granite4.1:8b failed this probe once during a catalogue
+    # re-gate and then called the tool 5/5 times in BOTH states when
+    # checked properly. Concluding "needs thinking off" from a single
+    # failure wrote it a permanent `think: false` override -- silently
+    # changing the conditions S1 and S3 measure that model under, on the
+    # evidence of one flaky call.
+    #
+    # By contrast geollm-qwen3-4b-v8 is 0/8 with thinking on and 8/8 with
+    # it off. That is the shape this is allowed to conclude from, and one
+    # repeat in the default state is what separates the two cases.
+    ok_again, detail_again, _ = _attempt(None)
+    if ok_again:
+        return True, (f"{detail_again} (the first attempt returned no tool call; the "
+                       f"model called it on a repeat in the same state, so that was "
+                       f"run-to-run variance rather than a capability gap)")
+
+    # Only now is the reasoning state a candidate explanation. See the
     # docstring: this is the difference between "cannot tool-call" and
     # "cannot tool-call while thinking", and only the first should stop a run.
     ok_off, detail_off, _ = _attempt(False)
@@ -242,9 +260,10 @@ def check_tool_call(model, endpoint=None, timeout=60):
                        "tool call. Run this model's tool-using suites (S1, S3) with thinking "
                        "disabled, and treat any tool-use result collected with thinking on "
                        "as unreliable for this model")
-    return False, (f"{detail} with thinking on, and {detail_off} with `think=false` either "
-                    f"-- the model does not round-trip a tool call in either reasoning state, "
-                    f"so it may not support tool calling at all, or may need a different prompt")
+    return False, (f"{detail} with thinking on (twice), and {detail_off} with `think=false` "
+                    f"either -- the model does not round-trip a tool call in either reasoning "
+                    f"state, so it may not support tool calling at all, or may need a "
+                    f"different prompt")
 
 
 def check_channel_at(model, think_value, endpoint=None, num_predict=2048, timeout=90,

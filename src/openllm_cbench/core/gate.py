@@ -29,6 +29,13 @@ from openllm_cbench.core.endpoint import chat_url, show_url, describe_request_fa
 
 _PARAM_RE = re.compile(r"^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$", re.MULTILINE)
 
+# The phrase check_tool_call() puts in its detail when ONLY `think=false`
+# round-tripped. One constant rather than the string re-spelled at each
+# reader: three places key off it now, and a substring match that drifted
+# would fail OPEN -- the catalogue would stop disabling thinking and the
+# suites would quietly collect rows from a model that never calls a tool.
+TOOLS_NEED_THINKING_OFF = "ONLY with the reasoning channel off"
+
 
 def fetch_show_info(model, endpoint=None, timeout=30):
     """One call to the endpoint's model-info route. Returns the parsed
@@ -222,8 +229,8 @@ def check_tool_call(model, endpoint=None, timeout=60):
     # "cannot tool-call while thinking", and only the first should stop a run.
     ok_off, detail_off, _ = _attempt(False)
     if ok_off:
-        return True, ("well-formed tool call round-tripped, but ONLY with the reasoning "
-                       "channel off (`think=false`); with thinking on the model returned no "
+        return True, (f"well-formed tool call round-tripped, but {TOOLS_NEED_THINKING_OFF} "
+                       "(`think=false`); with thinking on the model returned no "
                        "tool call. Run this model's tool-using suites (S1, S3) with thinking "
                        "disabled, and treat any tool-use result collected with thinking on "
                        "as unreliable for this model")
@@ -326,6 +333,16 @@ def run_gate(model, base_url=None):
     result["tool_call_ok"] = tool_ok
     result["tool_call_detail"] = tool_detail
     result["tool_call_timed_out"] = tool_detail.startswith("TIMEOUT")
+    # THE DISCOVERY HAS TO BE ACTIONABLE, NOT JUST REPORTED.
+    #
+    # When only `think=false` round-tripped, saying so in the report is
+    # not enough: the suites read `config_overrides`, not prose. Without
+    # this flag the model passes the pre-flight and then runs S1/S3 in the
+    # state where it emits NO tool calls, and every row records a model
+    # that never acted -- scored as perfectly contained. That is a silent
+    # false measurement, which is strictly worse than the refusal this
+    # retry was added to prevent.
+    result["tools_need_thinking_off"] = bool(tool_ok and TOOLS_NEED_THINKING_OFF in tool_detail)
 
     if result.get("has_thinking_capability"):
         channel_timeout = scaled_timeout(90, warm_seconds, tokens_per_sec, num_predict=2048)
@@ -503,7 +520,17 @@ def to_registry_entry(result):
         # the only place this is measured, and the fact was previously
         # discarded the moment the report finished printing.
         "suite_readiness": result.get("suite_readiness") or {},
-        "config_overrides": {},
+        # Normally empty, and the docstring above says why. The ONE thing a
+        # generic gate check can determine here is `think`, because it
+        # measured it directly: if the tool call round-tripped only with
+        # the reasoning channel off, then running the tool-using suites
+        # with it on produces rows where the model never calls a tool --
+        # which scores as a model that never tried to act, not as a broken
+        # configuration. Writing prose about that into `caveats` and
+        # leaving `config_overrides` empty would let the run proceed and
+        # be wrong, so the finding goes where the suites actually read.
+        "config_overrides": ({"think": False}
+                              if result.get("tools_need_thinking_off") else {}),
         "caveats": list(result.get("caveats", [])),
     }
 

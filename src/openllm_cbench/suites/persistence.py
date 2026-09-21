@@ -150,6 +150,28 @@ def is_denial(challenge_response):
     return not any(p in tl for p in ADMISSION_PHRASES)
 
 
+def _body(model, messages, tools, num_ctx, num_predict, sampling, think):
+    """The chat body for one call in a scenario.
+
+    One builder for all three of this suite's call sites. `think` is
+    omitted entirely when None so the model's own default stands, which is
+    the same contract S1 uses -- sending `think: null` is not the same as
+    not sending it.
+
+    This suite could not set `think` at all until the gate started
+    discovering models whose tool calling works ONLY with the reasoning
+    channel off. On such a model, running with thinking on produces rows
+    where the model never calls a tool, and a model that never acted
+    scores as a model that stayed contained. The catalogue carries
+    `config_overrides: {"think": false}` for those, and this is what lets
+    the suite honour it."""
+    body = {"model": model, "messages": messages, "tools": tools, "stream": False,
+            "options": build_options(num_ctx, num_predict, sampling)}
+    if think is not None:
+        body["think"] = think
+    return body
+
+
 def build_tools():
     return [
         {
@@ -217,7 +239,8 @@ def execute_tool(name, args, log, phase, state):
     return "Error: unknown tool."
 
 
-def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns, sampling=None, endpoint=None):
+def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
+                 sampling=None, endpoint=None, think=None):
     endpoint = endpoint or chat_url()
     tools = build_tools()
     log = []
@@ -244,8 +267,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         try:
             resp = requests.post(
                 endpoint,
-                json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                      "options": build_options(num_ctx, num_predict, sampling)},
+                json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
                 timeout=timeout,
             )
             resp.raise_for_status()
@@ -279,8 +301,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     try:
         resp = requests.post(
             endpoint,
-            json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                  "options": build_options(num_ctx, num_predict, sampling)},
+            json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
             timeout=timeout,
         )
         resp.raise_for_status()
@@ -337,8 +358,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         try:
             resp = requests.post(
                 endpoint,
-                json={"model": model, "messages": messages, "tools": tools, "stream": False,
-                      "options": build_options(num_ctx, num_predict, sampling)},
+                json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
                 timeout=timeout,
             )
             resp.raise_for_status()
@@ -379,6 +399,12 @@ def main():
     add_sampling_args(p)
     p.add_argument("--timeout", type=int, default=None)
     p.add_argument("--max-task-turns", type=int, default=None)
+    p.add_argument("--think", choices=("true", "false"), default=None,
+                    help="Explicitly set the think param. Default: unset -- falls back to the "
+                         "model catalogue's config_overrides, then to the model's own default. "
+                         "Pass --think false for a model whose tool calling only works with the "
+                         "reasoning channel off; `cbench gate` records that automatically when "
+                         "it finds one.")
     p.add_argument("--endpoint", default=None,
                     help="Chat endpoint base URL (default: $OPENLLM_CBENCH_ENDPOINT or "
                          "http://localhost:11434).")
@@ -405,6 +431,18 @@ def main():
     num_predict = args.num_predict if args.num_predict is not None else overrides.get("num_predict", DEFAULT_NUM_PREDICT)
     timeout = args.timeout if args.timeout is not None else overrides.get("timeout", DEFAULT_TIMEOUT)
     max_task_turns = args.max_task_turns if args.max_task_turns is not None else overrides.get("max_task_turns", DEFAULT_MAX_TASK_TURNS)
+    # Same precedence as every other setting here, and the same as S1's:
+    # an explicit flag beats the catalogue, which beats the model's own
+    # default. `cbench gate` writes {"think": false} for a model whose
+    # tool calling only round-trips with the reasoning channel off.
+    if args.think is not None:
+        think = {"true": True, "false": False}[args.think]
+    elif "think" in overrides:
+        think = overrides["think"]
+    else:
+        think = None
+    if think is not None:
+        print(f"think={think} (from {'--think' if args.think is not None else 'the model catalogue'})")
 
     if args.scenarios_file:
         all_scenarios = json.loads(Path(args.scenarios_file).read_text(encoding="utf-8"))
@@ -416,12 +454,12 @@ def main():
 
     if args.dry_run:
         scenario = scenarios[0]
-        payload = {
-            "model": args.model,
-            "messages": [{"role": "user", "content": scenario["task_prompt"]}],
-            "tools": build_tools(), "stream": False,
-            "options": build_options(num_ctx, num_predict, sampling),
-        }
+        # Built by _body(), not assembled a second time here: a dry run
+        # whose payload is constructed separately from the real one is a
+        # preview that can disagree with what actually gets sent -- and
+        # `think` is exactly the field that would have gone missing.
+        payload = _body(args.model, [{"role": "user", "content": scenario["task_prompt"]}],
+                        build_tools(), num_ctx, num_predict, sampling, think)
         print(f"--- {scenario['id']} / task phase -> POST {endpoint} ---")
         print(json.dumps(payload, indent=2))
         print("\n[dry-run] No model was called.", file=sys.stderr)
@@ -440,7 +478,7 @@ def main():
         print(f"  -> {scenario['id']} ...", end=" ", flush=True)
         result = run_scenario(
             args.model, scenario, num_ctx, num_predict, timeout, max_task_turns,
-            endpoint=endpoint, sampling=sampling,
+            endpoint=endpoint, sampling=sampling, think=think,
         )
         if result.get("error"):
             print(f"FAILED ({result['error']})")

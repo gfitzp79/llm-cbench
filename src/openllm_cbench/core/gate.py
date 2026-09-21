@@ -36,6 +36,14 @@ _PARAM_RE = re.compile(r"^\s*PARAMETER\s+(\S+)\s+(.+?)\s*$", re.MULTILINE)
 # suites would quietly collect rows from a model that never calls a tool.
 TOOLS_NEED_THINKING_OFF = "ONLY with the reasoning channel off"
 
+# The report heading for "the model-info route gave us nothing usable".
+# A constant because summarize_gate_output() matches on it to set
+# hard_failure, and the two used to be the same literal written twice --
+# editing the wording in one place would have silently stopped the
+# summarizer recognising a hard failure, which fails OPEN: the gate would
+# report no problem on a model it could not read at all.
+SHOW_INFO_FAILED_HEADING = "**The endpoint's model-info route did not return usable info**"
+
 
 def fetch_show_info(model, endpoint=None, timeout=30):
     """One call to the endpoint's model-info route. Returns the parsed
@@ -311,7 +319,15 @@ def run_gate(model, base_url=None):
         result["show_info_ok"] = True
     except Exception as e:
         result["show_info_ok"] = False
-        result["show_info_error"] = str(e)
+        # Described, not stringified. Measured on a real catalogue entry:
+        # Ollama answered this route promptly with HTTP 500 and the body
+        # `read GGUF metadata ...: unsupported tensor "output.weight" size
+        # overflows` -- a corrupt model file, nothing to do with reach.
+        # Reporting it as unreachable sends someone to check their
+        # endpoint and their network when the fix is to re-pull or drop
+        # that model. Same correction core/endpoint.py already carries for
+        # the chat route.
+        result["show_info_error"] = describe_request_failure(e, show_endpoint or show_url())
         result["capabilities"] = []
         result["has_tools_capability"] = None
         result["has_thinking_capability"] = None
@@ -538,8 +554,11 @@ def to_registry_entry(result):
 def render_gate_report(result):
     L = [f"# Gate check -- `{result['model']}`", ""]
     if not result.get("show_info_ok"):
-        L.append(f"**Could not reach the endpoint's model-info route**: {result.get('show_info_error')}")
-        L.append("Nothing further was checked. Confirm the endpoint is reachable and the model is pulled.")
+        L.append(f"{SHOW_INFO_FAILED_HEADING}: {result.get('show_info_error')}")
+        L.append("Nothing further was checked. If the endpoint answered and rejected the "
+                 "request, the model file itself is usually the problem -- re-pull the tag, "
+                 "or drop it. If it could not be reached at all, check the endpoint and that "
+                 "the model is pulled.")
         return "\n".join(L) + "\n"
 
     L += [
@@ -613,7 +632,18 @@ def summarize_gate_output(lines):
     "caveats": list[str]}. `clean` is None if neither a "Clean." nor a
     "Caveats found" line was seen at all (e.g. the process crashed before
     printing a report). Never raises -- an unrecognized or future-changed
-    report shape just yields empty/None fields rather than guessing."""
+    report shape just yields empty/None fields rather than guessing.
+
+    Accepts the report as a string OR as a list of lines. It took lines
+    only, and handing it the whole report -- the obvious thing to do, and
+    what render_gate_report() returns -- iterated it CHARACTER by
+    character, matched nothing, and returned "no hard failure" for a model
+    the gate could not read at all. That is a fail-open on the one field
+    a caller uses to decide whether a run is worth starting, so the shape
+    is normalised here rather than left as a contract each caller has to
+    remember."""
+    if isinstance(lines, str):
+        lines = lines.splitlines()
     hard_failure = False
     reason = None
     clean = None
@@ -621,7 +651,7 @@ def summarize_gate_output(lines):
     collecting = False
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("**Could not reach the endpoint's model-info route**"):
+        if stripped.startswith(SHOW_INFO_FAILED_HEADING):
             hard_failure = True
             reason = stripped.split(":", 1)[1].strip() if ":" in stripped else stripped
             collecting = False

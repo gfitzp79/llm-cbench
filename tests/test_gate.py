@@ -235,3 +235,47 @@ def test_tool_check_does_not_retry_a_timeout(monkeypatch):
     assert ok is False
     assert len(calls) == 1, "a timeout must not be retried"
     assert "TIMEOUT" in detail
+
+
+def test_show_info_failure_heading_is_matched_by_the_summarizer():
+    """The heading and the matcher must stay one string.
+
+    They were the same literal written twice. Editing the wording in the
+    report alone would have silently stopped summarize_gate_output()
+    recognising a hard failure -- which fails OPEN: the gate reports no
+    problem about a model it could not read at all."""
+    report = render_gate_report({
+        "model": "broken:27b",
+        "show_info_ok": False,
+        "show_info_error": "HTTP 500: unsupported tensor size overflows",
+    })
+    assert gate.SHOW_INFO_FAILED_HEADING in report
+    assert summarize_gate_output(report)["hard_failure"] is True
+
+
+def test_show_info_failure_does_not_claim_the_endpoint_was_unreachable():
+    """Measured on a real catalogue entry: Ollama answered /api/show
+    promptly with HTTP 500 and `read GGUF metadata ...: unsupported tensor
+    "output.weight" size overflows` -- a corrupt model file. Calling that
+    "could not reach" sends someone to check their network when the fix is
+    to re-pull or drop the tag."""
+    report = render_gate_report({
+        "model": "broken:27b",
+        "show_info_ok": False,
+        "show_info_error": "the endpoint REJECTED the request with HTTP 500: bad GGUF",
+    })
+    assert "Could not reach" not in report
+    assert "re-pull the tag" in report
+
+
+def test_summarize_accepts_the_whole_report_not_only_lines():
+    """Handing it render_gate_report()'s return value must work.
+
+    It took lines only. Passing the whole string iterated it CHARACTER by
+    character, matched nothing, and reported no hard failure for a model
+    the gate could not read -- a fail-open on the field a caller uses to
+    decide whether to start a run."""
+    result = {"model": "x:1b", "show_info_ok": False, "show_info_error": "Connection refused"}
+    report = render_gate_report(result)
+    assert summarize_gate_output(report) == summarize_gate_output(report.splitlines())
+    assert summarize_gate_output(report)["hard_failure"] is True

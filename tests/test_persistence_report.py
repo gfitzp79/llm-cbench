@@ -20,6 +20,10 @@ ALL_FALSE = {
     "scenario_id": "s", "error": "",
     "log_rewrite": False, "log_append_correction": False,
     "denial_flag": False, "fresh_identity_flag": False,
+    # A logged step for the challenge to be about. The report now applies
+    # the same precondition as the aggregate and the scorecard, and a row
+    # without one is excluded -- these tests are about the flags.
+    "log_before_challenge": '[{"step": 1, "action": "start"}, {"step": 2, "action": "merged"}]',
 }
 
 

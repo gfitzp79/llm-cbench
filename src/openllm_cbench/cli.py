@@ -120,8 +120,9 @@ def _cmd_gate(argv):
                          "any num_predict/num_ctx/etc a real run turns out to need by hand-editing "
                          "the saved entry. Nothing is saved if the check never reached the model.")
     p.add_argument("--registry-file", default=None,
-                    help="Overlay file to write to with --save (default: $OPENLLM_CBENCH_MODELS_FILE "
-                         "or ./models.json).")
+                    help="Overlay file to write to with --save (default: $OPENLLM_CBENCH_MODELS_FILE, "
+                         "then the location pinned with `cbench config --set-models-file`, then "
+                         "./models.json).")
     args = p.parse_args(argv)
 
     base_url = resolve_base_url(args.endpoint)
@@ -310,30 +311,57 @@ def _assess_preflight(args, suites, narrowed=None):
     about this machine, and turning a stopwatch into a capability verdict
     is the exact mistake `gate.warm_up()` was written to prevent.
 
-    It will not stop because the gate itself failed. An unreachable
-    endpoint, a changed API, a bug in here -- none of those are evidence
-    about the model, and a pre-flight that can block a run on its own
+    It will not stop because the gate itself failed. A changed API, one
+    sub-check erroring, a bug in here -- none of those are evidence about
+    the model, and a pre-flight that can block a run on its own
     malfunction is worse than no pre-flight. It warns and returns None.
 
     It will not refuse without saying what to run instead. When some
     suites survive, the message names the narrowed `--suites` flag,
     because a user who wanted three suites and can have two is better
-    served by the command than by the diagnosis."""
+    served by the command than by the diagnosis.
+
+    ONE THING IT DOES STOP ON, which it once did not: the gate ran and
+    NEITHER the model's info route NOR a real chat request got an answer
+    (gate.model_answered). That is not a verdict about the model -- the
+    message says nothing was measured, not that the model failed. It is
+    that every trial would make the same call and fail it: measured live,
+    the run carried on, spent its time, and left a trial file of error
+    rows that still counted toward the trial total. The warm-up allows
+    600 s, so a slow cold load does not trip this; --skip-preflight
+    overrides it."""
     from openllm_cbench.core.endpoint import resolve_base_url
-    from openllm_cbench.core.gate import run_gate
+    from openllm_cbench.core.gate import model_answered, run_gate
     from openllm_cbench.core.preflight import SUITE_LABELS, suite_readiness, unrunnable
 
     print("Pre-flight: checking this model can produce a gradeable result ...")
+    base_url = resolve_base_url(getattr(args, "endpoint", None))
     try:
         # `assess` takes no --endpoint of its own; resolve_base_url(None)
         # is the same resolution each suite will make for itself, so the
         # pre-flight and the run cannot end up checking different
         # endpoints.
-        result = run_gate(args.model, resolve_base_url(getattr(args, "endpoint", None)))
+        result = run_gate(args.model, base_url)
     except Exception as e:
         print(f"[!] Pre-flight could not complete ({e}) -- continuing anyway. "
               f"Nothing here is evidence about the model.", file=sys.stderr)
         return None
+
+    # Not the gate malfunctioning -- the gate RAN, and neither the model's
+    # info route nor a chat request got an answer. Every trial would make
+    # the same calls and fail them the same way, so nothing would be
+    # measured. Measured live: the run carried on past this and spent its
+    # time writing rows that were all connection errors.
+    if not model_answered(result):
+        reason = result.get("show_info_error") or "no response"
+        sys.stdout.flush()
+        print(f"[!] NOT STARTING -- the pre-flight could not reach '{args.model}' at "
+              f"{base_url}: {reason}", file=sys.stderr)
+        print("    Every trial would fail the same way, so nothing would be measured.\n"
+              "    Check the endpoint is up and serves this tag: cbench doctor, then "
+              "cbench gate --model <tag>.\n"
+              "    (--skip-preflight runs anyway, if you know better.)", file=sys.stderr)
+        return 2
 
     readiness = suite_readiness(result)
     for suite in suites:
@@ -618,6 +646,7 @@ def _cmd_score(argv):
             print("\n[!] At least one trial exited non-zero -- scoring anyway, but read the "
                   "output above before trusting the result.", file=sys.stderr)
     else:
+        rc = 0
         print(f"Scoring '{args.model}' from existing CSVs (no suites run, no model call)")
 
     card = compute_scorecard(args.model)
@@ -627,6 +656,20 @@ def _cmd_score(argv):
     print(f"       {md_path}")
     print("\nThis model's catalogue entries (`cbench discover`, the TUI Models browser) will "
           "show this scorecard's summary line from now on.")
+    # It exited 0 beside a card reading "an upper bound, not a grade". A
+    # selected suite that came back INVALID, or a trial that failed, is
+    # "ran, and something in it failed". A suite with no data under
+    # --from-existing is not: scoring what exists is what that flag is for.
+    invalid = [s for s in suites if card["suites"].get(s, {}).get("status") == "invalid"]
+    if invalid or rc != 0:
+        why = []
+        if invalid:
+            why.append(f"{', '.join(s.upper() for s in invalid)} came back INVALID")
+        if rc != 0:
+            why.append("at least one trial exited non-zero")
+        print(f"\n[!] Scored, but {' and '.join(why)} -- the grade covers only what "
+              f"could be measured. The card above says why for each suite.", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -30,6 +30,9 @@ def ensure_utf8_stdio():
     aborting the command over a display-layer concern."""
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
+            # Line-buffered as well: redirected to a file, stdout was
+            # block-buffered, so a long run's log stayed empty for tens of
+            # seconds and stderr lines landed in the middle of stdout ones.
+            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except Exception:
             pass

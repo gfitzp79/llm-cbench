@@ -51,9 +51,10 @@ tool is built to avoid: [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Install
 
 Requires Python 3.10+ and a model served locally behind an
-Ollama-compatible chat endpoint (default `http://localhost:11434`,
-override with `--endpoint` or `$OPENLLM_CBENCH_ENDPOINT`). Not on PyPI
-yet, so install from GitHub.
+Ollama-compatible chat endpoint (default `http://localhost:11434`).
+To point elsewhere, set `$OPENLLM_CBENCH_ENDPOINT`, which every command
+reads; `--endpoint` also works on `gate`, `doctor` and the three suites,
+but not on `score` or `assess`. Not on PyPI yet, so install from GitHub.
 
 To use it, with the terminal UI:
 
@@ -103,7 +104,7 @@ Resolution order, most specific first:
 
 | | scope |
 |---|---|
-| `--results-dir` on the command | that invocation |
+| `--results-dir` on a command that takes it (the three suites, `compare`) | that invocation |
 | `$OPENLLM_CBENCH_RESULTS_DIR` | that shell |
 | the config file | your user, everywhere |
 | `./results` | whatever directory you are in |
@@ -393,7 +394,7 @@ place on every re-aggregation.
 ```bash
 cbench assess --model <model-tag>                          # S1+S2+S3, 3 trials each (default)
 cbench assess --model <model-tag> --suites s1,s3 --trials 5
-cbench assess --model <model-tag> --dry-run                # preview every payload, call no model
+cbench assess --model <model-tag> --dry-run                # preview the payloads, call no model
 cbench assess --model <model-tag> --force-uncheckable      # run a suite the pre-flight says can't score
 cbench assess --model <model-tag> --skip-preflight         # no capability check at all
 ```
@@ -630,8 +631,9 @@ to two different files:
 **1. Automatic (recommended starting point) — `cbench gate --model <tag> --save`.**
 Runs the same capability/tool-call/channel-separation check `cbench gate`
 always does, then writes the result into your **local overlay**, a
-`models.json` file created in your current working directory (override
-the location with `--registry-file` or `$OPENLLM_CBENCH_MODELS_FILE`).
+`models.json` file found the same way as the results folder: `--registry-file`,
+then `$OPENLLM_CBENCH_MODELS_FILE`, then the location pinned with
+`cbench config --set-models-file`, then `./models.json`.
 This file is yours — every suite reads it automatically from then on for
 that tag, it's gitignored by default, and it's never the packaged seed
 below. A gate check can't derive numeric tuning like `num_predict` on its

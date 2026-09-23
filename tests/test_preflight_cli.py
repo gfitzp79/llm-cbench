@@ -155,21 +155,40 @@ def test_from_existing_is_not_preflighted(monkeypatch, capsys, tmp_path):
 
 # --------------------------------------------- what must not block a run
 
-def test_an_unreachable_endpoint_does_not_block(monkeypatch, capsys):
-    """An unreachable endpoint is not evidence about the model.
-
-    Note which path this actually takes: `run_gate()` catches its own
-    sub-check failures by contract, so this arrives as UNVERIFIED rather
-    than as an exception. The test below covers the exception path
-    separately -- an audit pass pointed out that this one was named for a
-    mechanism it was not exercising."""
+def test_an_unreachable_endpoint_refuses_before_spending_the_run(monkeypatch, capsys):
+    """REVERSED 2026-09-23. This test used to assert the opposite: an
+    unreachable endpoint "is not evidence about the model", so the run
+    went ahead. It still is not evidence about the model, and the refusal
+    does not claim it is -- it says nothing would be measured. But going
+    ahead was measured live: every trial made the same failing call,
+    spent its time, and left a file of error rows that counted toward the
+    trial total. Only BOTH routes failing refuses (see the next test for
+    one route answering); a pre-flight that crashes still never blocks
+    (the test after that)."""
     monkeypatch.setattr(gate, "fetch_show_info",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("connection refused")))
     monkeypatch.setattr(gate, "warm_up", lambda *a, **k: (False, 0.0, None))
     monkeypatch.setattr(gate, "check_tool_call", lambda *a, **k: (False, "request failed"))
+    ran = []
+    monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: ran.append(1) or 0)
+    assert _run(["assess", "--model", "unreachable:8b"], monkeypatch) == 2
+    err = capsys.readouterr().err
+    assert "NOT STARTING" in err
+    assert "nothing would be measured" in err
+    assert not ran
+
+
+def test_a_model_that_answers_chat_is_not_refused_for_a_missing_info_route(monkeypatch, capsys):
+    """An endpoint without Ollama's /api/show still serves chat. One
+    route answering is enough -- that is what keeps this refusal from
+    becoming a pre-flight that blocks a working setup."""
+    monkeypatch.setattr(gate, "fetch_show_info",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("404 not found")))
+    monkeypatch.setattr(gate, "warm_up", lambda *a, **k: (True, 1.0, 50.0))
+    monkeypatch.setattr(gate, "check_tool_call", lambda *a, **k: (False, "request failed"))
     monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: 0)
-    assert _run(["assess", "--model", "unreachable:8b"], monkeypatch) == 0
-    assert "NOT STARTING" not in capsys.readouterr().err
+    _run(["assess", "--model", "no-show-route:8b"], monkeypatch)
+    assert "could not reach" not in capsys.readouterr().err
 
 
 def test_the_preflight_cannot_block_a_run_by_failing_itself(monkeypatch, capsys):

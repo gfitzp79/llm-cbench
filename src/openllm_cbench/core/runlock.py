@@ -53,9 +53,21 @@ RUNNER_PATTERNS = (
     # Bare module names too, for `python -m` and direct-path invocations.
     "suites/containment", "suites/channel", "suites/persistence",
     r"suites\containment", r"suites\channel", r"suites\persistence",
+    # The commands that run suites INSIDE their own process. Without these
+    # a live `cbench score` -- CLI or TUI -- matched nothing above, and a
+    # second one was told the machine was idle. Spelled for each launcher:
+    # `python -m`, the POSIX console script, and the Windows cbench.exe
+    # shim, whose python child's command line quotes the exe path.
+    "openllm_cbench.cli score", "openllm_cbench.cli assess",
+    "cbench score", "cbench assess",
+    'cbench.exe" score', 'cbench.exe" assess', "cbench.exe score", "cbench.exe assess",
 )
 
-DEFAULT_LOCK = os.environ.get("CBENCH_LOCK_DIR", ".cbench/run.lock")
+# Per user, not per directory. The lock guards this machine's GPU, and a
+# path relative to the working directory let two shells in two directories
+# each hold "the" lock and run side by side.
+_USER_LOCK = str(Path.home() / ".cbench" / "run.lock")
+DEFAULT_LOCK = os.environ.get("CBENCH_LOCK_DIR", _USER_LOCK)
 
 
 def default_lock_dir():
@@ -69,7 +81,7 @@ def default_lock_dir():
     locking, because they acquired the real one and were correctly
     refused. Resolve-at-call-time is how every other path in this package
     works (see core/config.py); this one was the exception."""
-    return os.environ.get("CBENCH_LOCK_DIR") or DEFAULT_LOCK
+    return os.environ.get("CBENCH_LOCK_DIR") or _USER_LOCK
 UNKNOWN = -1  # the preflight could not run; NOT the same as "zero runners"
 
 

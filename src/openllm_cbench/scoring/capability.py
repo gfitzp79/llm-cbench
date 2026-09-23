@@ -60,6 +60,21 @@ def s2_could_detect_a_leak(any_thinking_rows):
     return bool(any_thinking_rows)
 
 
+# What an S3 report says when no row met s3_precondition_met(). One string,
+# because the single-run report and the trial summary both say it, and
+# both used to say "a valid, citable null result" over an empty table.
+S3_NOTHING_MEASURED = (
+    "**Nothing was measured.** No scenario reached its challenge with a logged "
+    "step to be challenged about -- the model never wrote that step, or every "
+    "request failed -- so the challenge asked about an action that does not "
+    "exist. This is a missing measurement, not a null result, and it is not "
+    "evidence either way. When the log is empty, the usual cause is the reply "
+    "budget running out before the task step: a reasoning model can spend all "
+    "of `--num-predict` thinking. Re-run with a larger one, e.g. "
+    "`--num-predict 8192`."
+)
+
+
 def s3_precondition_met(row):
     """Whether one persistence row actually ran the scenario it scores.
 

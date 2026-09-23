@@ -27,6 +27,23 @@ If a change touches `core/canary.py`, `core/sandbox.py`, or any suite's
 and after and say so explicitly in the PR description. This test requires
 no model and no network — there's no excuse for skipping it.
 
+## Setting up
+
+```bash
+git clone https://github.com/gfitzp79/llm-cbench
+cd llm-cbench
+python -m venv .venv                # then activate it
+python -m pip install --upgrade pip setuptools
+pip install -e ".[dev,tui]"
+pytest -q                           # no model or network needed
+```
+
+The `--upgrade` line matters: a fresh venv is seeded with whatever
+setuptools your Python shipped, which can carry known advisories that
+nothing here would otherwise update. CI runs the suite on Linux, macOS
+and Windows at both ends of the supported Python range; a pass on your
+machine is one of those six.
+
 ## Layout
 
 ```
@@ -34,7 +51,7 @@ src/openllm_cbench/
   cli.py              `cbench` entry point — thin passthrough to each
                        module's own main(), plus native subcommands
                        (doctor, gate, discover, search, pull, remove, config,
-                       assess, score, catalogue, community-validate,
+                       assess, score, compare, catalogue, community-validate,
                        community-package, community-submit, tui)
   core/                shared primitives, no suite-specific logic
     canary.py           loopback HTTP listener + bind assertion
@@ -119,6 +136,14 @@ src/openllm_cbench/
                          and a level earned on rigour rather than volume.
                          Reads local files only -- no account, no server,
                          nothing transmitted
+    context_window.py       whether the context window bound a run:
+                         max_prompt_tokens / peak_context_tokens per row,
+                         and the half-window rule that separates a
+                         provably untruncated run from one at risk
+    exitcodes.py            what an exit code means in words (0 done, 1 ran
+                         and something failed, 2 refused to start), and
+                         after_run(), which fails a suite run whose
+                         requests did not reach the model
   suites/
     containment.py       S1 -- egress & containment
     channel.py            S2 -- reasoning-channel divergence
@@ -166,9 +191,9 @@ src/openllm_cbench/
                          suite logic of its own, only screens and forms,
                          plus the _report_job_result() tail every
                          action-taking screen shares
-data/
-  tasks/, probes/, scenarios/    the actual task/probe/scenario JSON
-  models/verified.json           packaged model-catalogue seed
+  data/                    packaged with the wheel, read via core/paths.py
+    tasks/, probes/, scenarios/  the actual task/probe/scenario JSON
+    models/verified.json         packaged model-catalogue seed
 community-results/
   README.md                      submission convention for sharing raw
                                  trial CSVs on a model you can't run
@@ -196,7 +221,8 @@ existing ones if it introduces any new tool.
 
 ### A new task set / probe set / scenario file
 
-Drop the JSON under `data/tasks/`, `data/probes/`, or `data/scenarios/`
+Drop the JSON under `src/openllm_cbench/data/tasks/`, `.../data/probes/`,
+or `.../data/scenarios/`
 and point `--tasks-file`/`--prompts-file`/`--scenarios-file` at it — no
 suite requires editing to support a new file, only a new file. If it
 reads sandbox fixtures the standard set doesn't, gate it the way the

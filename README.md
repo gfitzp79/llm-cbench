@@ -168,7 +168,23 @@ cbench gate --model <model-tag>
 # Save that gate result into your local model catalogue so every suite
 # picks up the right config for this tag automatically from now on.
 cbench gate --model <model-tag> --save
+
+# Grade it: all three suites, one A-F scorecard. quick = 1 trial per
+# suite, to see it work; standard (3, the default) for a grade worth citing.
+cbench score --model <model-tag> --depth quick
 ```
+
+Every command ends with an exit code that means one thing:
+
+| exit code | meaning | what to do |
+|---|---|---|
+| `0` | done | read the output |
+| `1` | it ran, and something in it failed -- a request that never reached the model, a gate check that was not clean | the output says what; there is a result to look at |
+| `2` | it refused to start, and nothing ran or was written -- bad input, an unreachable model, a pre-flight that found no suite could produce a result | fix what the message names, then run again |
+
+A suite run where a request to the endpoint failed exits `1` and says how
+many. Those rows measured nothing, so they are left out of every rate
+rather than scored as a model that did nothing.
 
 ### Containment
 
@@ -559,7 +575,7 @@ Different models need different configuration to produce valid data —
 a raised generation budget here, an effort-level sweep instead of a
 boolean think toggle there, a known channel-merge state at one think
 setting. This framework handles that declaratively rather than with
-per-model code: `data/models/verified.json` ships a small set of
+per-model code: `src/openllm_cbench/data/models/verified.json` ships a small set of
 gate-checked worked examples, and a local `models.json` overlay (grown
 via `cbench gate --save`) extends it with your own. Every suite consults
 the catalogue for a model's config before falling back to its own
@@ -619,9 +635,14 @@ the location with `--registry-file` or `$OPENLLM_CBENCH_MODELS_FILE`).
 This file is yours — every suite reads it automatically from then on for
 that tag, it's gitignored by default, and it's never the packaged seed
 below. A gate check can't derive numeric tuning like `num_predict` on its
-own, so `config_overrides` is saved empty; if a real run tells you this
-model needs a raised budget or a longer timeout, add that yourself
-(schema below).
+own, so `config_overrides` is saved empty, with one exception: when the
+check finds the model only calls tools with its reasoning channel off, it
+saves `{"think": false}`, and the containment and persistence suites send
+that from then on (an explicit `--think` still wins). If a real run tells
+you this model needs a raised budget or a longer timeout, add that
+yourself (schema below). Nothing is saved if the check never reached the
+model -- an unreachable endpoint, an unknown tag -- since nothing about it
+was measured.
 
 **2. Manual — edit `models.json` (your overlay) or, if you're
 contributing a worked example back to the project,
@@ -638,7 +659,7 @@ before hand-writing an entry. Quick reference:
 | `thinking_mode` | The channel suite | `"effort"` → auto-selects an `--effort all` sweep instead of `--think`. `"ignores_think"` → auto-selects `--think false` only. Omit for an ordinary boolean toggle. |
 | `channel_separation` | Nothing — informational | `{"think_on": ..., "think_off": ...}`, each `"clean"` / `"UNRELIABLE"` / `null`. Put the actual consequence in `caveats` too — this field alone doesn't change any suite's behavior. |
 | `delimiters` | The channel suite **and** `cbench gate` | This model's reasoning delimiters, for a model that marks its reasoning in a way none of the four built-in conventions recognise. Written the way you read them, open and close joined by an ellipsis: `["<odd>...</odd>"]`. Both halves are matched separately, because a model emits the opening marker and then runs out of budget far more often than it emits the exact joined string. A hit is recorded as `catalogued` in the CSV's `merge_evidence` column rather than attributed to a built-in family, so you can tell an operator's confirmed convention from a guess. The nested `reasoning.delimiters` spelling is accepted too. |
-| `config_overrides` | Every suite, before its own hardcoded default | Recognized keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (containment), `max_task_turns` (persistence). An explicit CLI flag still wins over this. |
+| `config_overrides` | Every suite, before its own hardcoded default | Recognized keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (containment), `max_task_turns` (persistence), `think` (containment and persistence -- `cbench gate --save` writes `false` here itself when the model's tool calling only works with reasoning off). An explicit CLI flag still wins over this. |
 | `caveats` | Nothing directly — printed verbatim | Shown in every suite's startup banner and in `cbench gate`'s report when this tag is used. Free text; this is where "think=off is unreliable for this model" belongs. |
 
 `config_overrides`, `thinking_mode` and `delimiters` are the fields
@@ -839,7 +860,7 @@ things without a terminal.
 
 "Local" here means served entirely on hardware you control, at whatever
 quantization your endpoint runs — the gate-checked worked examples in
-`data/models/verified.json` span roughly 8B to 21B parameters at Q4_K_M/
+`src/openllm_cbench/data/models/verified.json` span roughly 8B to 21B parameters at Q4_K_M/
 Q4_0/MXFP4/F16, the range this framework's own scoring heuristics and
 task set were actually tuned and validated against. It also runs fine
 well below that: models under 1B (down to 0.6B, gate-checked and put

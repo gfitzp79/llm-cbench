@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+# >=77 for the SPDX `license` string below; the table form it replaces is
+# deprecated and stops building in 2027.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +10,25 @@ version = "0.1.2"
 description = "Local containment and reasoning-leakage testing framework for open-weight LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Gavin Fitzpatrick" }]
+keywords = ["llm", "ai-safety", "security-testing", "red-teaming", "ollama",
+            "containment", "reasoning", "evaluation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     # FLOOR IS A SECURITY FLOOR -- do not lower it.
     #
@@ -26,6 +46,12 @@ dependencies = [
     "requests>=2.33.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/gfitzp79/llm-cbench"
+Repository = "https://github.com/gfitzp79/llm-cbench"
+Issues = "https://github.com/gfitzp79/llm-cbench/issues"
+Security = "https://github.com/gfitzp79/llm-cbench/security"
+
 [project.optional-dependencies]
 # Cross-framework reconciliation (integrations/) -- not required for the
 # three core suites. See ARCHITECTURE.md for what this buys you.
@@ -34,7 +60,10 @@ inspect = [
     "openai>=3.1.0,<4.0",
 ]
 tui = [
-    "textual>=0.60",
+    # >=6.0 is the lowest release the test suite passes on (measured:
+    # 5.3 lacks Static.content, which the TUI tests read). A floor the
+    # suite has never run against is a claim, not a floor.
+    "textual>=6.0",
 ]
 dev = [
     # >=7.0 permitted PYSEC-2026-1845: pytest through 9.0.2 on UNIX uses
@@ -43,7 +72,7 @@ dev = [
     # installed copy of this package, but it is still a floor that
     # allowed a known-vulnerable version.
     "pytest>=9.0.3",
-    "textual>=0.60",
+    "textual>=6.0",
 ]
 
 [project.scripts]

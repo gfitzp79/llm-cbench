@@ -19,6 +19,10 @@ def test_the_catalogue_measurement_decides_before_the_endpoint(monkeypatch):
 def test_reasoning_switched_off_is_not_reasoning():
     assert model_reasons("m:1b", {"thinking": True, "config_overrides": {"think": False}}) is False
     assert model_reasons("m:1b", {"thinking": True}, think=False) is False
+    # A caller that knows reasoning is on (S2) is not overruled by the
+    # catalogue's tool-calling setting.
+    assert model_reasons("m:1b", {"thinking": True, "config_overrides": {"think": False}},
+                         think=True) is True
 
 
 def test_an_uncatalogued_model_asks_the_endpoint_unless_told_not_to(monkeypatch):

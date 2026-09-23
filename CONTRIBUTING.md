@@ -96,9 +96,10 @@ src/openllm_cbench/
     preflight.py            the single mapping from gate findings to a
                             per-suite verdict (READY, INVALID or UNVERIFIED),
                             used by the gate report and by the pre-flight in
-                            `cbench score` and `cbench assess`, which refuses
-                            a suite that cannot produce a gradeable result
-                            before the run rather than after it
+                            `cbench score` and `cbench assess`, which skips a
+                            suite that cannot produce a gradeable result
+                            before the run rather than after it, and refuses
+                            the run when no selected suite can
     runlock.py              launch-time exclusivity guard for `cbench score`
                             and `cbench assess`: one assessment at a time per
                             user, refused while another holds the run lock,
@@ -130,6 +131,12 @@ src/openllm_cbench/
                             top_k, seed) and the generation-budget flags
                             shared by every suite; see the sampling convention
                             below
+    budget.py               the automatic generation budget: resolve_budget()
+                            takes num_ctx and num_predict from the flag, then
+                            the catalogue's config_overrides, then a larger
+                            budget for a model that reasons (model_reasons()),
+                            then the suite default; budget_line() and
+                            run_summary() print what was chosen and why
     delimiters.py           the reasoning-delimiter merge guard shared by
                             `cbench gate` and the S2 suite: the built-in
                             delimiter families plus a model's catalogued
@@ -257,8 +264,12 @@ A suite is a module under `suites/` with a `main()` and its own
 `argparse` parser, declared once in the module and not repeated in
 `cli.py` (see how `containment.py`, `channel.py` and `persistence.py` do
 it). It needs a `--dry-run` flag that prints the payload without calling
-a model. If it gives the model any tool with real-world reach, it must
-intercept that tool exactly as `containment.py`'s `execute_tool()` does.
+a model. Resolve its generation budget with
+`core/budget.py:resolve_budget()` and print `budget_line()`, as the three
+suites do, so the same precedence (flag, then catalogue, then automatic)
+applies to it. If it gives the model any tool with real-world reach, it
+must intercept that tool exactly as `containment.py`'s `execute_tool()`
+does.
 Register it in the `_PASSTHROUGH` dict in `cli.py`, and add a
 safety-invariant test alongside the existing ones for any new tool.
 
@@ -287,9 +298,11 @@ catalogue, or run `cbench gate --model <model-tag> --save` for a single
 tag before anything else runs against it. The gate check saves what it
 can discover into your local catalogue (`models.json`). It leaves
 `config_overrides` empty, except for `think: false`, which it sets itself
-when the model calls tools only with its reasoning channel off. Once a
-real run shows what the model needs, edit the saved entry to add
-`config_overrides` such as a larger `num_predict` or a longer `timeout`.
+when the model calls tools only with its reasoning channel off. The
+`thinking` field it records sets the model's automatic generation budget
+(README.md, "Generation budgets"). If a real run shows the model needs
+something else, edit the saved entry to add `config_overrides` such as a
+different `num_predict` or a longer `timeout`.
 The `_schema` key in `data/models/verified.json` documents every
 catalogue field.
 
@@ -341,10 +354,11 @@ what each guard prevents.
   `asyncio.to_thread` when the call can be slow. For example, the Models
   screen lists local models through `core/discover.py` and reads each
   saved scorecard through `scoring/scorecard.py:catalogue_compact_label()`.
-  The Score screen reads the catalogue status
-  (`core/registry.py:lookup()`), builds its hardware fit warning from
-  `core/hardware.py:probe()` and `fit_assessment()`, checks whether any
-  CSV exists for the tag before a "From existing" run
+  The Score screen reads the catalogue status and the suite readiness the
+  gate check recorded (`core/registry.py:lookup()`), builds its hardware
+  fit warning from `core/hardware.py:probe()` and `fit_assessment()`,
+  checks whether any CSV exists for the tag before a "Re-score saved
+  results only" run
   (`scoring/aggregate.py:find_csvs()`), and reads back the report printed
   by its own gate subprocess (`core/gate.py:summarize_gate_output()`).
   Each calls the same function the CLI calls, and none changes anything.

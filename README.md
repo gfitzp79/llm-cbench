@@ -212,16 +212,17 @@ cbench doctor
 # Gate-check a model before trusting any real run against it: tool-call
 # well-formedness, reasoning-channel separation at both think states, and
 # the sampling parameters the endpoint reports. The report says, per suite,
-# whether S1, S2 and S3 can produce a gradeable result on this model.
+# whether S1, S2 and S3 can produce a gradeable result on this model;
+# cbench score and cbench assess skip any suite that cannot.
 cbench gate --model <model-tag>
 
 # The same check, with the result saved to your local model catalogue, so
 # every suite picks up the right configuration for this tag from then on.
 cbench gate --model <model-tag> --save
 
-# Grade it: all three suites, one A-F scorecard. quick runs 1 trial per
-# suite (2 for S3, the fewest it can rate) to see it work; standard (3
-# trials, the default) gives a grade worth citing.
+# Grade it: one A-F scorecard from every suite that can measure the model.
+# quick runs 1 trial per suite (2 for S3, the fewest it can rate) to see it
+# work; standard (3 trials, the default) gives a grade worth citing.
 cbench score --model <model-tag> --depth quick
 ```
 
@@ -234,7 +235,7 @@ below:
 |---|---|---|
 | `0` | Done. | Read the output. |
 | `1` | It ran, and something in it failed: a request that never reached the model, a gate check that was not clean, a scored suite that came back INVALID. | The output says what failed; there is a result to inspect. |
-| `2` | It refused to start, and nothing ran or was written: bad input, a model the pre-flight could not reach, a selected suite the pre-flight found cannot produce a gradeable result, or a run lock refusal (another assessment or a suite run already in progress). | Fix what the message names, then run again. |
+| `2` | It refused to start, and nothing ran or was written: bad input, a model the pre-flight could not reach, a model on which no selected suite can produce a gradeable result, or a run lock refusal (another assessment or a suite run already in progress). | Fix what the message names, then run again. |
 
 A suite run in which any request to the endpoint failed exits `1` and says
 how many failed. Those rows measured nothing, so they are left out of every
@@ -279,25 +280,82 @@ cbench persistence --model <model-tag> --scenario dedup_customer_records
 ### Generation budgets
 
 ```bash
-cbench score --model <model-tag> --num-ctx 8192 --num-predict 4096
+cbench score --model <model-tag> --num-ctx 32768 --num-predict 16384   # override the automatic budget
 ```
 
-`--num-ctx` (the context window) and `--num-predict` (the reply budget) can
-be set on `cbench score`, `cbench assess`, each suite, and the TUI's Score
-screen. **Leave them unset to let the model catalogue decide:** an explicit
-flag overrides the model's `config_overrides` in the catalogue, which
-override the suite default.
+Every chat request carries two budgets: the context window (`num_ctx`) and
+the reply limit (`num_predict`, the most tokens the model may generate in
+one reply). **Leave them unset and cbench sizes them to the model.** Each
+value comes from the first of these that sets it:
+
+1. `--num-ctx` or `--num-predict` on `cbench score`, `cbench assess` or a
+   suite, or the budget boxes on the TUI's Score screen.
+2. The model's `config_overrides` in the catalogue.
+3. The automatic budget: 8,192 reply tokens in a 16,384-token context
+   window for a model that reasons (never less than the suite's own
+   default), and the suite's own default for any other model.
+
+| Suite | Default context window | Default reply limit |
+|---|---|---|
+| S1 containment | 8,192 | 2,048 |
+| S2 channel | 4,096 | 2,048 |
+| S3 persistence | 8,192 | 2,048 |
+
+A model counts as reasoning when its catalogue entry records `thinking` as
+true (the endpoint reported a `thinking` capability when `cbench gate`
+checked it), unless reasoning is switched off for the run: by `--think
+false` on a suite, or, in S1 and S3, by `{"think": false}` in the model's
+`config_overrides`. S2 does not apply that catalogue setting, so it budgets
+such a model as reasoning, and it budgets a model with `thinking_mode`
+`"ignores_think"` as reasoning too, since that model reasons inline whatever
+S2 sends. For a model with no catalogue entry, the endpoint's own
+capability list decides; reading it is one request to the
+model-information route, not a model call. A dry run does not ask the
+endpoint, so for an uncatalogued model it shows each suite's default
+budget, which the real run may raise. When neither the catalogue nor the
+endpoint can say, the suite defaults apply.
+
+Every suite prints the budget it uses and where the values came from:
+
+```
+Generation budget for this suite: 8192 reply tokens in a 16384-token context window (automatic, sized for a reasoning model). Override with --num-predict and --num-ctx.
+```
+
+`cbench score` and `cbench assess` also print a one-line
+`Generation budget:` summary before the first suite starts.
+
+**A model that reasons gets the larger budget because it spends part of
+every reply thinking before it answers**, and at 2,048 reply tokens it
+often runs out mid-thought. Measured on qwen3:4b at quick depth, all four
+S3 rows ended with an empty log at 2,048 reply tokens and S3 came back
+INVALID; at 8,192 every row finished and S3 was rated. The context window
+rises with the reply limit because it has to hold the conversation and the
+reply together, and a window that runs out fails silently (see below). The
+automatic budget is decided before the run from the model and its reasoning
+setting, never from how a row turned out, so the same model always gets the
+same budget and its runs pool.
+
+The larger budget has two costs. A run of a reasoning model takes longer,
+because each reply can run to 8,192 tokens rather than stopping at 2,048.
+The larger window also needs more GPU memory, so a model close to the
+card's limit can spill into system RAM: slower, and still valid.
 
 Raise `--num-predict` when a run reports more than a handful of TRUNCATED
-rows (S2) or INCOMPLETE rows (S1). Such a row produced no final answer, so
-it leaves the denominator, and the budget moves the rate without any change
-in the model's behaviour.
+rows (S2) or INCOMPLETE rows (S1), and raise `--num-ctx` with it. Such a
+row produced no final answer, so it leaves the denominator, and the budget
+moves the rate without any change in the model's behaviour.
 
 **Both values are recorded in every row**, and for that reason the pooling
 guard refuses to mix two budgets into one rate (see
 [Run comparability is checked before pooling](#run-comparability-is-checked-before-pooling)).
 A budget that was applied but not recorded would be the same kind of
-confound that the sampling pin below exists to prevent.
+confound that the sampling pin below exists to prevent. It also means that
+a model's results at one budget do not pool with its results at another:
+scored together, a reasoning model's rows at 2,048 reply tokens and its
+rows at the automatic budget make that suite INVALID. To grade such a model
+at the automatic budget, move its older CSVs out of the results folder (or
+point `$OPENLLM_CBENCH_RESULTS_DIR` at a new one) and run it again.
+`--from-existing` cannot help, because it re-reads the same mixed results.
 
 #### The context window is checked, because it fails silently
 
@@ -389,50 +447,55 @@ confidence: it attempts nothing because it can attempt nothing, and "no
 escape attempts observed" would read as perfect containment.
 
 `cbench score` and `cbench assess` do not rely on you checking first. Before
-spending anything, they run a gate check of their own (the pre-flight) and
-**refuse a suite that cannot produce a gradeable result**, naming the suite,
-the reason, and the narrowed command that runs the rest:
+spending anything, they run a gate check of their own (the pre-flight),
+print a verdict and a reason for each selected suite, and **skip a suite
+that cannot produce a gradeable result**, running the rest. One line says
+what was skipped and what the grade covers:
 
 ```
-[!] NOT STARTING: S2 channel cannot produce a gradeable result on this model.
-    Running it would spend the full time and score INVALID, which is a missing
-    measurement rather than a finding. See the reasons above.
+[!] Skipping S2 channel: it cannot produce a result on this model (reason above). Running S1 containment, S3 persistence; the grade covers only those suites.
+```
 
-    What you CAN run:
-      cbench score --model llama3.1:8b --suites s1,s3 --depth quick
-    Read any grade from that as covering only those suites.
+A skipped suite writes no new results, so the scorecard shows it as
+`not run` (or grades whatever results for it are already on disk). When no
+selected suite can produce a gradeable result, they refuse to start
+instead, with exit code `2`:
+
+```
+[!] NOT STARTING: no suite can produce a gradeable result on this model.
 ```
 
 The pre-flight catches three cases, each of which occurs on real models:
 
 | What the endpoint reports | What happens |
 |---|---|
-| `completion` only | No tool calls and no reasoning trace: all three suites come back INVALID. |
-| `completion, tools` | S1 and S3 are fine; S2 has no separate channel for a leak to be found in. |
-| `tools, thinking`, but the trace comes back **empty** | The capability is advertised and not delivered, so S2 has nothing to measure. |
+| `completion` only | No tool calls and no reasoning trace: no suite can produce a result, so the run is refused. |
+| `completion, tools` | S1 and S3 run; S2 is skipped, because there is no separate channel for a leak to be found in. |
+| `tools, thinking`, but the trace comes back **empty** | S1 and S3 run; S2 is skipped, because the capability is advertised and not delivered, so S2 has nothing to measure. |
 
-The last case is the worst, because the advertised capability makes S2 look
-supported right up until the scorecard reports a 0% leak rate that is a
-property of the instrument, not of the model.
+The last case is the worst, because without the pre-flight the advertised
+capability makes S2 look supported right up until the scorecard reports a
+0% leak rate that is a property of the instrument, not of the model.
 
 The pre-flight also refuses to start when it cannot reach the model at all
 (an endpoint that is down, or a tag it does not serve), because every trial
 would make the same failing calls. That refusal is not a verdict about the
 model: nothing was measured.
 
-A check that could not complete is **not** a refusal. A tool call that timed
-out, or got no response at all, says something about your machine or the
-connection, not about the model, so that suite is reported `UNVERIFIED` and
-the run proceeds; `core/gate.py:warm_up()` exists to stop a stopwatch being
-turned into a capability verdict. Likewise, if the pre-flight itself fails
-with an error, it warns and the run carries on, because a malfunction in the
-check is not evidence about the model.
+A check that could not complete is **not** a reason to skip a suite. A tool
+call that timed out, or got no response at all, says something about your
+machine or the connection, not about the model, so that suite is reported
+`UNVERIFIED` and runs; `core/gate.py:warm_up()` exists to stop a stopwatch
+being turned into a capability verdict. Likewise, if the pre-flight itself
+fails with an error, it warns and the run carries on, because a malfunction
+in the check is not evidence about the model.
 
-Overrides, on both commands: `--force-uncheckable` runs a refused suite
-anyway (it still grades INVALID, and the transcripts are all you get), and
-`--skip-preflight` skips the check entirely, for an endpoint that misreports
-its own capabilities. `--dry-run`, and `--from-existing` on `cbench score`,
-skip it too, since neither calls a model.
+Overrides, on both commands: `--force-uncheckable` runs every selected
+suite, including any the pre-flight would skip (those still grade INVALID,
+and the transcripts are all you get), and `--skip-preflight` skips the check
+entirely, for an endpoint that misreports its own capabilities.
+`--dry-run`, and `--from-existing` on `cbench score`, skip it too, since
+neither calls a model.
 
 A grade computed from fewer than three suites says so. The headline is the
 worst suite's rate, so adding the missing suites could only lower it or
@@ -482,7 +545,7 @@ re-aggregation.
 cbench assess --model <model-tag>                          # S1, S2 and S3, 3 trials each (the default)
 cbench assess --model <model-tag> --suites s1,s3 --trials 5
 cbench assess --model <model-tag> --dry-run                # preview the payloads; calls no model
-cbench assess --model <model-tag> --force-uncheckable      # run a suite the pre-flight refused
+cbench assess --model <model-tag> --force-uncheckable      # also run a suite the pre-flight would skip
 cbench assess --model <model-tag> --skip-preflight         # no capability check at all
 ```
 
@@ -494,11 +557,13 @@ and then aggregating (see
 rather than replacing it: the same CSVs land in the same place either way.
 `--trials` defaults to 3, this framework's pre-registered minimum for a rate
 worth citing. A run can take from minutes to hours depending on model size
-and trial count, so start with `--dry-run` to see what will run.
+and trial count, so start with `--dry-run` to see what will run. A dry run
+skips the pre-flight, so it also shows any suite the real run would skip.
 
 The capability pre-flight runs first; see
 [A suite that never fired its positive control is refused](#a-suite-that-never-fired-its-positive-control-is-refused)
-for what it refuses, and what it deliberately does not.
+for what it skips, when it refuses to start, and what it deliberately does
+not do.
 
 **One assessment at a time.** `cbench assess` and `cbench score` take a run
 lock before the first trial, and refuse to start (exit `2`) if another
@@ -570,7 +635,8 @@ plus a level and a suggested next action. Its buttons open these screens:
 
 The Run a suite, Gate a model and Score a model screens each have a picker
 listing the models pulled into your endpoint, which fills in the model-tag
-field. Dry run is off by default wherever it appears, matching the CLI.
+field. "Preview only", the TUI's name for `--dry-run`, is off by default
+wherever it appears, matching the CLI.
 
 The progress counts and the level are deliberately different things. The
 counts are neutral inventory. The **level** (newcomer, novice, intermediate,
@@ -687,37 +753,65 @@ same trials and aggregation as `cbench assess` and produces a grade on top,
 so a separate button would be two doors into one room. The one thing
 `cbench assess` offers that `cbench score` does not is an arbitrary
 `--trials N` (`cbench score` offers 1, 3 or 5 through `--depth`); run
-`cbench assess` in a terminal for that, as the Score screen itself says.
+`cbench assess` in a terminal for that.
 
-The Score screen has a tick box per suite, a depth picker, "From existing",
-optional `--num-ctx` and `--num-predict` fields (blank leaves them to the
-catalogue), "Dry run" (off by default), the `--force-uncheckable` override
-(off by default; the usual fix for a refused suite is to untick it instead)
-and "Gate-check first" (on by default). As soon as you enter a tag, the
-screen shows whether it is catalogued. A live preview says in words what
-pressing Score will do and shows the exact command line, including the gate
-step whenever it will run.
+The Score screen's form has five sections:
 
-- **Gate-check first.** For a model that is not in your catalogue, this
-  runs `cbench gate --model <tag> --save` before scoring, so a new model
-  does not run ungated. It is skipped for a dry run and for "From
-  existing", both of which promise no model call. The log then reports one
-  of three distinct outcomes: the gate check could not reach the endpoint
-  for this model (the score run makes the same calls and will most likely
-  fail the same way), it ran and found caveats (listed verbatim, for
-  example no tool-calling support), or it was clean. The gate step itself
-  never stops the score run; the pre-flight inside `cbench score` then
-  decides, as described in
+- **Model:** a picker listing the models pulled into your endpoint, or a
+  field to type a tag. As soon as you enter a tag, the screen says whether
+  the model is in your catalogue.
+- **Suites:** a tick box per suite. Whenever the model changes, every
+  suite is ticked except any that the model's catalogue entry records as
+  unable to run on it, and a one-line reason under the boxes says why. You
+  can tick it back, but the pre-flight then skips it anyway unless "Also
+  run suites that cannot measure this model" is ticked (see
+  [A suite that never fired its positive control is refused](#a-suite-that-never-fired-its-positive-control-is-refused)).
+- **Depth:** Quick (1 trial per suite, 2 for S3), Standard (3 trials per
+  suite, the minimum for a grade worth citing, and the default) or
+  Thorough (5 trials per suite).
+- **Generation budget (optional):** "Context window in tokens" and "Reply
+  limit in tokens", sent as `--num-ctx` and `--num-predict`. Leave both
+  blank for the automatic budget (see
+  [Generation budgets](#generation-budgets)).
+- **Options**, in this order:
+  - "Gate-check the model first if it is not in your catalogue
+    (recommended)", ticked by default.
+  - "Re-score saved results only (runs nothing and calls no model)", which
+    adds `--from-existing`; the depth and budget settings are then ignored.
+  - "Preview only: show the requests without calling the model", which
+    adds `--dry-run`; unticked by default.
+  - "Also run suites that cannot measure this model (they grade INVALID;
+    only useful for their transcripts)", which adds `--force-uncheckable`;
+    unticked by default.
+
+The form scrolls; the Score button, the preview and the log stay in place
+below it. The preview says in words what pressing Score will do and shows
+the exact command line, including the gate step whenever it will run.
+
+- **Gate-check the model first.** For a model that is not in your
+  catalogue, this runs `cbench gate --model <tag> --save` before scoring,
+  so a new model does not run ungated. It is skipped with "Preview only"
+  and with "Re-score saved results only", both of which promise no model
+  call. The log then reports one of three distinct outcomes: the gate
+  check could not reach the endpoint for this model (the score run makes
+  the same calls and will most likely fail the same way), it ran and found
+  caveats (listed verbatim, for example no tool-calling support), or it was
+  clean. The gate step itself never stops the score run; the pre-flight
+  inside `cbench score` then decides, as described in
   [A suite that never fired its positive control is refused](#a-suite-that-never-fired-its-positive-control-is-refused).
 - **Hardware warning.** If this machine's GPU looks too small for the
   model, an advisory warning says so before the run starts (from the
   best-effort probe in `core/hardware.py`; it never blocks a run).
-- **Progress.** A run that is not "From existing" shows a progress bar,
-  driven by the `--- suite trial N/M ---` lines in the log, with an
-  estimated time remaining that appears once the first trial has finished.
-- **From existing** refuses to start when nothing is on disk yet for the
-  tag you entered, rather than producing grade N/A with exit code `0`,
-  which looks like a real result until you investigate.
+- **Progress.** A run that is not a re-score shows a progress bar, driven
+  by the `--- suite trial N/M ---` lines in the log, with an estimated time
+  remaining that appears once the first trial has finished.
+- **Re-score saved results only** refuses to start when no results are
+  saved yet for the tag you entered, rather than producing grade N/A with
+  exit code `0`, which looks like a real result until you investigate.
+- **A refused run says why.** When `cbench score` refuses to start (exit
+  code `2`), the last two lines of the log are a `Why:` line, taken from
+  the command's own `NOT STARTING` line, and the verdict, so the reason
+  stays on screen after the rest of the output has scrolled away.
 
 ## The model catalogue
 
@@ -788,15 +882,16 @@ then the location pinned with `cbench config --set-models-file`, then
 then on, this repository's `.gitignore` excludes it, and it is never the
 packaged seed described below.
 
-A gate check cannot derive numeric tuning such as `num_predict`, so
-`config_overrides` is saved empty, with one exception: when the check finds
-that the model only calls tools with its reasoning channel off, it saves
+A gate check does not write numeric tuning such as `num_predict`; the
+`thinking` field it records is what sets a model's automatic generation
+budget (see [Generation budgets](#generation-budgets)). `config_overrides`
+is saved empty, with one exception: when the check finds that the model
+only calls tools with its reasoning channel off, it saves
 `{"think": false}`, and S1 and S3 send that from then on (an explicit
-`--think` still wins). If a real run shows that
-the model needs a larger budget or a longer timeout, add that yourself
-(schema below). Nothing is saved if the check never reached the model (an
-unreachable endpoint or an unknown tag), since nothing about it was
-measured.
+`--think` still wins). If a real run shows that the model needs a
+different budget or a longer timeout, add that yourself (schema below).
+Nothing is saved if the check never reached the model (an unreachable
+endpoint or an unknown tag), since nothing about it was measured.
 
 **2. Manual: edit `models.json` (your overlay) or, if you are contributing
 a worked example back to the project,
@@ -808,16 +903,20 @@ read it before writing an entry by hand. Quick reference:
 
 | Field | Acted on by | Meaning |
 |---|---|---|
-| `architecture`, `tools`, `thinking` | Nothing (informational) | What `cbench gate` found; context for a person reading the catalogue. |
+| `architecture` | The Score screen's hardware fit warning | The model family `cbench gate` found. |
+| `tools` | Nothing (informational) | Whether the endpoint reported a `tools` capability; context for a person reading the catalogue. |
+| `thinking` | Every suite's automatic generation budget | Whether the endpoint reported a `thinking` capability when `cbench gate` checked the model. `true` gives the model the larger automatic budget unless reasoning is switched off (see [Generation budgets](#generation-budgets)). |
+| `suite_readiness` | The TUI's Score screen | The per-suite verdict and reason from the gate check (the same verdicts the pre-flight uses). The Score screen unticks a suite recorded as unable to run on the model. |
 | `params_b`, `quant` | No suite; the Score screen's hardware fit warning reads both | What `cbench gate` found. `params_b` is always a count in **billions**: a model whose endpoint reports millions (for example `134.52M`) is converted on the way in, not suffix-stripped. The fit warning (`core/hardware.py:check_model_fit()`) uses the model's real on-disk size when the endpoint lists the model, and otherwise estimates the VRAM needed from these two; it is advisory only and never blocks anything. An entry that could not be measured stores the literal string `"unknown"`, and the fit check then stays silent rather than guessing. |
 | `thinking_mode` | S2 | `"effort"` selects an `--effort all` sweep instead of `--think`; `"ignores_think"` selects `--think false` only. Omit it for an ordinary boolean toggle. |
 | `channel_separation` | Nothing (informational) | `{"think_on": ..., "think_off": ...}`, each typically `"clean"`, `"UNRELIABLE"` or `null`. Put the actual consequence in `caveats` too; this field alone changes no suite's behaviour. |
 | `delimiters` | S2 **and** `cbench gate` | This model's reasoning delimiters, for a model that marks its reasoning in a way none of the built-in conventions recognise. Write them as you read them, opening and closing markers joined by an ellipsis: `["<odd>...</odd>"]`. The two halves are matched separately, because a model emits the opening marker and then runs out of budget far more often than it emits the exact joined string. A match is recorded as `catalogued` in the CSV's `merge_evidence` column rather than attributed to a built-in family, so an operator's confirmed convention can be told apart from a guess. The nested `reasoning.delimiters` spelling is also accepted. |
-| `config_overrides` | Every suite, before its own built-in default | Recognised keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (S1), `max_task_turns` (S3), and `think` (S1 and S3; `cbench gate --save` writes `false` here itself when the model's tool calling only works with reasoning off). An explicit CLI flag still wins. |
+| `config_overrides` | Every suite, ahead of the automatic generation budget and the suite's own defaults | Recognised keys: `num_ctx`, `num_predict`, `timeout`, `max_turns` (S1), `max_task_turns` (S3), and `think` (S1 and S3; `cbench gate --save` writes `false` here itself when the model's tool calling only works with reasoning off). An explicit CLI flag still wins. |
 | `caveats` | Nothing directly; printed verbatim | Shown in every suite's startup banner and in `cbench gate`'s report when this tag is used. Free text; this is where "think=off is unreliable for this model" belongs. |
 
-`config_overrides`, `thinking_mode` and `delimiters` are the fields that
-something acts on. The rest exist so that the next person, including you at
+`config_overrides`, `thinking`, `thinking_mode` and `delimiters` change
+what a run does, and `suite_readiness`, `params_b` and `quant` inform the
+Score screen. The rest exist so that the next person, including you at
 a later date, does not have to rediscover the same quirk by watching a run
 go wrong.
 
@@ -833,9 +932,10 @@ cbench score --model <model-tag> --depth standard   # quick=1 trial (S3: 2), sta
 cbench catalogue                                     # every pulled model, with catalogue and score status
 ```
 
-Like `cbench assess`, `cbench score` runs the capability pre-flight first and
-refuses a suite that cannot produce a gradeable result, with the same
-`--force-uncheckable` and `--skip-preflight` overrides (see
+Like `cbench assess`, `cbench score` runs the capability pre-flight first,
+skips a suite that cannot produce a gradeable result and refuses to start
+when no selected suite can, with the same `--force-uncheckable` and
+`--skip-preflight` overrides (see
 [A suite that never fired its positive control is refused](#a-suite-that-never-fired-its-positive-control-is-refused)).
 
 **Comparing two scorecards is its own command; see
@@ -859,9 +959,10 @@ a rate from.
 **A scorecard made under older scoring rules shows `needs re-score`**
 instead of its grade, in `cbench catalogue` and on the Local models screen,
 because a grade computed by superseded rules can be wrong. Re-score it with
-`cbench score --model <model-tag> --from-existing`, or tick **From
-existing** on the Score screen: it reads the CSVs already on disk and calls
-no model. If the label stays, a suite's rows were written by an older
+`cbench score --model <model-tag> --from-existing` (the command
+`cbench catalogue` prints beside such a model), or tick **Re-score saved
+results only** on the Score screen: it reads the CSVs already on disk and
+calls no model. If the label stays, a suite's rows were written by an older
 scorer, and only a fresh run clears it.
 
 **A grade is not portable between machines.** It was produced on particular

@@ -55,8 +55,7 @@ def describe(returncode, subcommand=None):
         meaning = _MEANING[returncode]
         if returncode == REFUSED and subcommand in ("score", "assess"):
             meaning = ("did not start: no trial ran and no CSV was written. The reason "
-                       "is printed above, with what you can run instead where there is "
-                       "an alternative")
+                       "is printed above")
         elif returncode == FAILED and subcommand == "gate":
             meaning = ("finished, but the check was not clean; the report above lists "
                        "what it found")

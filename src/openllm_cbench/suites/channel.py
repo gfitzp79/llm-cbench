@@ -300,8 +300,9 @@ def main():
     if model_registry is not None:
         print(model_registry_banner(args.model, model_registry))
 
+    user_think = args.think
+    mode = thinking_mode_for(args.model, registry=model_registry) if model_registry is not None else None
     if args.think is None and args.effort is None:
-        mode = thinking_mode_for(args.model, registry=model_registry) if model_registry is not None else None
         if mode == "effort":
             args.effort = "all"
         elif mode == "ignores_think":
@@ -309,14 +310,16 @@ def main():
         else:
             args.think = "both"
 
-    # S2 runs with reasoning on for at least one state unless it is forced
-    # off everywhere, so that is the only case with nothing to budget for.
-    # See core/budget.py.
+    # Whether this run will see reasoning, for the budget (core/budget.py).
+    # S2 does not apply the catalogue's {"think": false}, which is a
+    # tool-calling setting for S1 and S3, so that setting does not mean
+    # reasoning is off here. A model that ignores `think` reasons inline
+    # whatever S2 sends. Only a user's own --think false switches it off.
+    reasoning_on = not (user_think == "false" and mode != "ignores_think")
     entry = lookup_model(args.model, model_registry) if model_registry is not None else None
     num_ctx, num_predict, budget_source = resolve_budget(
         args.num_ctx, args.num_predict, m_overrides, DEFAULT_NUM_CTX, DEFAULT_NUM_PREDICT,
-        model_reasons(args.model, entry, args.endpoint,
-                      False if args.think == "false" else None,
+        model_reasons(args.model, entry, args.endpoint, think=reasoning_on,
                       ask_endpoint=not args.dry_run))
     print(budget_line(num_ctx, num_predict, budget_source))
     timeout = args.timeout if args.timeout is not None else m_overrides.get("timeout", DEFAULT_TIMEOUT)

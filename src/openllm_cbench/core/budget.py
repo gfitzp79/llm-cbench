@@ -48,8 +48,10 @@ def model_reasons(model, entry=None, base_url=None, think=None, ask_endpoint=Tru
     """Whether this model will reason during the run: True, False, or None
     when that cannot be told.
 
-    Reasoning switched off (an explicit --think false, or the catalogue's
-    {"think": false}) means no thinking to budget for. Otherwise the
+    `think` is the caller's reasoning setting for this run: False when it
+    is switched off, True when the caller knows it is on (S2 does not
+    apply the catalogue's {"think": false}), None to read that catalogue
+    setting. Switched off means no thinking to budget for. Otherwise the
     catalogue entry's `thinking`, which `cbench gate` measured, and for an
     uncatalogued model the endpoint's capability list."""
     overrides = (entry or {}).get("config_overrides") or {}

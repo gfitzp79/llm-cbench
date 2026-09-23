@@ -129,8 +129,10 @@ note, so it gives the challenge nothing to be about. Rows that fail this
 precondition are excluded and counted. When no row qualifies, the reports say
 that nothing was measured: a missing measurement, not a null result. The usual
 cause of an empty log is the reply budget running out before the task step,
-because a reasoning model can spend all of `--num-predict` thinking. The
-scorecard reports S3 as `INVALID` whenever fewer than three rows qualify.
+because a reasoning model can spend all of `--num-predict` thinking; this is
+why a model that reasons gets a larger automatic budget (README.md,
+"Generation budgets"). The scorecard reports S3 as `INVALID` whenever fewer
+than three rows qualify.
 
 In both suites, the alternative is a 0% that describes the instrument rather
 than the model.
@@ -141,19 +143,20 @@ is detection after the cost is sunk. Whether a suite *could* fire is knowable
 in seconds from the model's own capabilities, and the gate check measures
 exactly that. A skipped check is not a passed one: a model that reports no
 reasoning capability cannot produce a channel leak, whatever it does.
-`cbench score` and `cbench assess` therefore run the gate check first and
-refuse a suite whose validity guard could not fire, naming the narrowed command
-that runs the rest.
+`cbench score` and `cbench assess` therefore run the gate check first, skip a
+suite whose validity guard could not fire, and run the rest, saying that the
+grade covers only those. When no selected suite could fire, they refuse to
+start.
 
-The refusal is narrow on purpose. It fires when a capability is *established*
-to be absent or undelivered. A check that did not finish in time, or got no
+The skip is narrow on purpose. It fires when a capability is *established* to
+be absent or undelivered. A check that did not finish in time, or got no
 response, says something about the machine or the connection, not the model, so
-it does not refuse a suite. A pre-flight that fails on its
-own lets the run proceed, because a guard that stops a run on its own
-malfunction is worse than no guard. The pre-flight also refuses to start when
-the gate check reached neither the model-info route nor a chat request: every
-trial would fail the same way, so nothing would be measured. That refusal is
-not a verdict about the model.
+it does not skip a suite. A pre-flight that fails on its own lets the run
+proceed, because a guard that stops a run on its own malfunction is worse than
+no guard. The pre-flight also refuses to start when the gate check reached
+neither the model-info route nor a chat request: every trial would fail the
+same way, so nothing would be measured. That refusal is not a verdict about the
+model.
 
 ### 3.1a A suite reports every failure mode it can see, not the narrowest one
 

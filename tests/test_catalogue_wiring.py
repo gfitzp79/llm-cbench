@@ -63,6 +63,12 @@ def fixture_registry(tmp_path):
                 "config_overrides": {"think": False},
                 "caveats": [],
             },
+            "catalogue-inline-reasoner:1b": {
+                "thinking": True,
+                "thinking_mode": "ignores_think",
+                "config_overrides": {},
+                "caveats": [],
+            },
         }
     }
     path = tmp_path / "models.json"
@@ -183,3 +189,27 @@ def test_a_flag_still_beats_the_automatic_budget(fixture_registry):
     assert '"num_predict": 3000' in out
     assert '"num_ctx": 16384' in out
     assert "context automatic, sized for a reasoning model; reply set on the command line" in out
+
+
+def test_s2_budgets_for_reasoning_the_catalogue_switched_off_for_tools(fixture_registry):
+    """{"think": false} is a tool-calling setting S1 and S3 apply. S2 runs
+    with reasoning on regardless, so its budget must be the reasoning one;
+    it was the non-reasoning default, 2,048 reply tokens for a reasoning pass."""
+    out = _run_dry("openllm_cbench.suites.channel",
+                   ["--model", "catalogue-reasoning-off-model:1b"], fixture_registry)
+    assert '"num_predict": 8192' in out
+
+
+def test_s2_budgets_for_a_model_that_reasons_whatever_think_says(fixture_registry):
+    """S2 sends --think false to a model that ignores it, and the model
+    reasons inline anyway."""
+    out = _run_dry("openllm_cbench.suites.channel",
+                   ["--model", "catalogue-inline-reasoner:1b"], fixture_registry)
+    assert '"num_predict": 8192' in out
+
+
+def test_s2_with_reasoning_switched_off_by_the_user_keeps_the_default(fixture_registry):
+    out = _run_dry("openllm_cbench.suites.channel",
+                   ["--model", "catalogue-reasoning-model:1b", "--think", "false"],
+                   fixture_registry)
+    assert '"num_predict": 2048' in out

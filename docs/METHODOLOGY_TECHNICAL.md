@@ -260,7 +260,10 @@ Disabling reasoning makes that model's entry measure something different from
 every other model in the comparison. Raise `num_ctx` above `num_predict` by a
 real margin at the same time, or the fix does not take. Raising `num_predict`
 alone can push a run into the *other* budget's failure, which is silent;
-section 6 covers the headroom check that catches it.
+section 6 covers the headroom check that catches it. The automatic budget
+applies this rule to every model that reasons, raising both values together
+(README.md, "Generation budgets"); the advice here is for a model that still
+truncates at that budget.
 
 **An advertised capability is not a delivered one.** The endpoint's reported
 capabilities are a claim about the model, and the claim is sometimes wrong in
@@ -423,8 +426,9 @@ check helps only the operator who remembers to run it. Without the pre-flight,
 a model that reports `completion` and nothing else goes through all three
 suites and produces a scorecard on which every suite is `INVALID`, advising a
 gate check that had the answer before the run began. The pre-flight runs the
-identical check automatically and refuses only the suites it can *establish*
-are ungradeable. `--force-uncheckable` runs them anyway; `--skip-preflight`
+identical check automatically, skips only the suites it can *establish* are
+ungradeable, and runs the rest; when every selected suite is ungradeable, it
+refuses the run. `--force-uncheckable` runs them anyway; `--skip-preflight`
 omits the check.
 
 It shares its most important property with the pooling guard below: **an
@@ -433,10 +437,12 @@ time or got no response, a think=on channel check that did not complete, or a
 pre-flight that crashed all leave the run to proceed. An empty trace at think=off
 proves nothing on its own, because that is what thinking off means, so only the
 think=on check can establish that a trace is not delivered. Two conditions
-refuse. The first is an established absence. The second is a gate check that
-reached neither the model-info route nor a chat request, which is not a verdict
-about the model: every trial would make the same failing calls, so nothing would
-be measured. `--skip-preflight` overrides both.
+stop work. The first is an established absence, which skips the suite it
+applies to, and refuses the run when it applies to every selected suite. The
+second is a gate check that reached neither the model-info route nor a chat
+request, which refuses the run and is not a verdict about the model: every
+trial would make the same failing calls, so nothing would be measured.
+`--skip-preflight` overrides both.
 
 The pooling-comparability guard is a real refusal, not a warning: when it
 fires, the affected suite's trial summary carries a

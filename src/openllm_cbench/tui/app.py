@@ -488,7 +488,10 @@ class ModelsScreen(Screen):
                 "30B-A3B MoE outruns a dense 30B of the same size on disk.\n"
                 "Score column: an A-F grade (0-100), the worst of the three suites "
                 "run, not an average (see \"Scoring a model\" in README.md). "
-                "\"not scored\" = never run through `cbench score`. \"N/A\" = nothing "
+                "\"not scored\" = never run through `cbench score`. \"needs re-score\" = "
+                "scored under older scoring rules, so the grade is hidden: re-score it on "
+                "the Score screen with \"From existing\" ticked, which reads the saved CSVs "
+                "and calls no model. \"N/A\" = nothing "
                 "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
                 "task sets, or pooled CSVs that disagree on sampling or generation "
                 "budgets, or mix CSVs that recorded sampling with ones that predate it). "
@@ -952,7 +955,7 @@ class ScoreScreen(Screen):
                 yield Checkbox("S2 channel", id="score-s2", value=True)
                 yield Checkbox("S3 persistence", id="score-s3", value=True)
             yield Select(
-                [("quick: 1 trial (exploratory only, below this framework's own "
+                [("quick: 1 trial, 2 for S3 (exploratory only, below this framework's own "
                   "3-trial citability minimum)", "quick"),
                  ("standard: 3 trials (default; this framework's own pre-registered "
                   "minimum for a rate worth citing)", "standard"),
@@ -1154,9 +1157,9 @@ class ScoreScreen(Screen):
             # screen cannot send.
             if self.query_one("#score-force-uncheckable", Checkbox).value:
                 args.append("--force-uncheckable")
-            from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
+            from openllm_cbench.scoring.scorecard import depth_trials
             if suites:
-                total_trials = len(suites) * DEPTH_TRIALS[depth]
+                total_trials = sum(depth_trials(depth, s) for s in suites)
         return args, total_trials, problems
 
     def _gate_first_argv(self, args):

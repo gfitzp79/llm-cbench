@@ -500,3 +500,16 @@ def test_a_suite_without_version_tracking_does_not_force_staleness():
 
     assert is_stale({"grade": "B", "scoring_version": SCORING_VERSION,
                      "suites": {"s1": {"rate": 0.1}}}) is False
+
+
+def test_every_depth_gives_s3_enough_trials_to_rate():
+    """S3 writes one row per scenario per trial. At quick depth, one trial
+    of its two scenarios gave 2 rows against MIN_SCOREABLE_ROWS, so S3 came
+    back INVALID for every model and the README's first score command
+    exited 1. Found by running that command live."""
+    per_trial = sc._packaged_scenario_count()
+    for depth, trials in sc.DEPTH_TRIALS.items():
+        assert sc.depth_trials(depth, "s3") * per_trial >= sc.MIN_SCOREABLE_ROWS, depth
+        assert sc.depth_trials(depth, "s3") >= trials
+        assert sc.depth_trials(depth, "s1") == trials
+        assert sc.depth_trials(depth, "s2") == trials

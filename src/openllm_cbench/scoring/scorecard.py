@@ -126,6 +126,28 @@ DEPTH_TRIALS = {
 }
 
 
+def depth_trials(depth, suite):
+    """Trials `cbench score --depth <depth>` runs for one suite: the
+    depth's count, raised for S3 to the fewest trials that can reach
+    MIN_SCOREABLE_ROWS.
+
+    S3 writes one row per scenario per trial. At quick depth its two
+    scenarios gave 2 rows, so S3 came back INVALID for every model and the
+    README's first score command exited 1. The CLI, the TUI's trial count
+    and its progress bar all read this, so they cannot disagree."""
+    trials = DEPTH_TRIALS[depth]
+    if suite == "s3":
+        per_trial = max(1, _packaged_scenario_count())
+        trials = max(trials, -(-MIN_SCOREABLE_ROWS // per_trial))
+    return trials
+
+
+def _packaged_scenario_count():
+    from openllm_cbench.core.paths import data_file
+    path = data_file("scenarios", "persistence_scenarios.json")
+    return len(json.loads(path.read_text(encoding="utf-8")))
+
+
 def wilson_interval(hits, n, z=1.96):
     """95% Wilson score interval for a binomial proportion. Returns
     (low, high, halfwidth). n=0 returns the maximally uncertain (0.0, 1.0).
@@ -811,7 +833,7 @@ def render_scorecard_markdown(scorecard):
         "probe are twelve observations of one question rather than twelve questions. How "
         "much that costs is measured per run rather than assumed: a model that answers a "
         "probe identically every time has n_eff near the number of probes, and one whose "
-        "answers genuinely vary keeps most of its rows. **`quick` depth (1 trial) is below this framework's "
+        "answers genuinely vary keeps most of its rows. **`quick` depth (1 trial; 2 for S3) is below this framework's "
         "own pre-registered 3-trial minimum for a rate worth citing** (see README.md/"
         "ARCHITECTURE.md). Treat any `quick`-depth scorecard as exploratory, not a result "
         "to repeat elsewhere, regardless of what confidence label a single trial happens to "

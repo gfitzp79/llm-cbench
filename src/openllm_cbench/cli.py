@@ -463,11 +463,15 @@ def _assess_body(args, suites, SUITE_INFO):
 
     report_paths = []
     failures = []
+    # `cbench score` can give one suite more trials than the rest (see
+    # scorecard.depth_trials); `cbench assess` runs --trials for every suite.
+    per_suite = getattr(args, "trials_by_suite", None) or {}
     for suite in suites:
         label, module_path, aggregate_fn, results_subdir = SUITE_INFO[suite]
-        print(f"=== {suite.upper()} ({label}): {args.trials} trial(s) ===")
-        for trial in range(1, args.trials + 1):
-            print(f"\n--- {suite} trial {trial}/{args.trials} ---")
+        n_trials = per_suite.get(suite, args.trials)
+        print(f"=== {suite.upper()} ({label}): {n_trials} trial(s) ===")
+        for trial in range(1, n_trials + 1):
+            print(f"\n--- {suite} trial {trial}/{n_trials} ---")
             trial_args = ["--model", args.model]
             trial_args += _sampling_argv(args, trial)
             if args.dry_run:
@@ -495,7 +499,13 @@ def _assess_body(args, suites, SUITE_INFO):
         print(f"Report: {out_path}\n")
 
     print("=" * 60)
-    print(f"Assessment complete: {len(suites)} suite(s), {args.trials} trial(s) each"
+    counts = {suite: per_suite.get(suite, args.trials) for suite in suites}
+    distinct = set(counts.values()) or {args.trials}
+    if len(distinct) == 1:
+        each = f"{distinct.pop()} trial(s) each"
+    else:
+        each = "trials " + ", ".join(f"{s.upper()} {n}" for s, n in counts.items())
+    print(f"Assessment complete: {len(suites)} suite(s), {each}"
           f"{' (dry-run, no reports)' if args.dry_run else ''}.")
     if failures:
         print(f"\n[!] {len(failures)} trial(s) exited non-zero. Read the output above "
@@ -522,7 +532,9 @@ def _cmd_score(argv):
 
         quick     1 trial   -- exploratory only, below this framework's own
                                 3-trial citability minimum. Says so in the
-                                rendered scorecard every time.
+                                rendered scorecard every time. S3 gets 2,
+                                the fewest that reach its 3-row minimum
+                                (scorecard.depth_trials).
         standard  3 trials  -- this framework's own pre-registered minimum
                                 for a rate worth citing (the same default
                                 `cbench assess` itself uses).
@@ -550,7 +562,8 @@ def _cmd_score(argv):
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3
     from openllm_cbench.scoring.scorecard import (
-        DEPTH_TRIALS, compute_scorecard, render_scorecard_markdown, save_scorecard,
+        DEPTH_TRIALS, compute_scorecard, depth_trials, render_scorecard_markdown,
+        save_scorecard,
     )
 
     SUITE_INFO = {
@@ -568,8 +581,9 @@ def _cmd_score(argv):
     )
     p.add_argument("--model", required=True)
     p.add_argument("--depth", choices=sorted(DEPTH_TRIALS), default="standard",
-                    help="Trial count preset: quick=1, standard=3 (default), thorough=5. "
-                         "Ignored with --from-existing.")
+                    help="Trial count preset: quick=1 (2 for S3, the fewest it can rate "
+                         "from), standard=3 (default), thorough=5. Ignored with "
+                         "--from-existing.")
     add_sampling_args(p)
     add_budget_args(p)
     p.add_argument("--suites", default="s1,s2,s3",
@@ -605,10 +619,13 @@ def _cmd_score(argv):
 
     if not args.from_existing:
         trials = DEPTH_TRIALS[args.depth]
-        print(f"Scoring '{args.model}' at depth={args.depth} ({trials} trial(s) per suite, "
-              f"suites={','.join(suites)}){' (dry-run)' if args.dry_run else ''}")
+        by_suite = {s: depth_trials(args.depth, s) for s in suites}
+        raised = "".join(f", {by_suite[s]} for {s.upper()} so it has enough rows to rate"
+                         for s in suites if by_suite[s] != trials)
+        print(f"Scoring '{args.model}' at depth={args.depth} ({trials} trial(s) per suite"
+              f"{raised}, suites={','.join(suites)}){' (dry-run)' if args.dry_run else ''}")
         assess_args = argparse.Namespace(
-            model=args.model, trials=trials, dry_run=args.dry_run,
+            model=args.model, trials=trials, trials_by_suite=by_suite, dry_run=args.dry_run,
             temperature=args.temperature, top_p=args.top_p,
             top_k=args.top_k, seed=args.seed,
             num_ctx=args.num_ctx, num_predict=args.num_predict,

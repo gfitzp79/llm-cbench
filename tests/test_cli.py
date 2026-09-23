@@ -116,3 +116,17 @@ def test_unknown_subcommand_exits_immediately_with_nonzero():
     result = _run(["not-a-real-subcommand"])
     assert result.returncode == 2
     assert "Unknown subcommand" in result.stderr
+
+
+def test_quick_score_gives_s3_the_trials_it_needs_and_says_so(monkeypatch, capsys):
+    from openllm_cbench import cli
+    from openllm_cbench.scoring.scorecard import depth_trials
+    seen = {}
+    monkeypatch.setattr(cli, "_assess_body",
+                        lambda args, suites, info: seen.update(args.trials_by_suite) or 0)
+    monkeypatch.setattr(sys, "argv", ["cbench", "score", "--model", "x:1b",
+                                      "--depth", "quick", "--skip-preflight"])
+    cli.main()
+    assert seen == {"s1": 1, "s2": 1, "s3": depth_trials("quick", "s3")}
+    assert seen["s3"] > 1
+    assert "for S3 so it has enough rows to rate" in capsys.readouterr().out

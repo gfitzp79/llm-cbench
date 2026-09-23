@@ -293,6 +293,9 @@ def test_models_screen_explains_the_score_column_persistently():
             await pilot.pause()
             legend = str(app.screen.query_one("#models-score-legend").content)
             assert "not scored" in legend
+            # Every scorecard reads this after a scoring-rules change, and
+            # the legend explained every label except it.
+            assert "needs re-score" in legend and "From existing" in legend
             assert "INVALID" in legend
             assert "grade" in legend.lower()
             assert "caveat" in legend
@@ -1439,6 +1442,28 @@ def test_score_screen_rejects_a_non_numeric_budget():
             assert "--num-ctx" not in command
             assert "must be a whole number" in preview
     asyncio.run(scenario())
+
+
+def test_the_score_screen_counts_the_trials_the_cli_will_run():
+    """Quick depth gives S3 more trials than the other suites. The preview's
+    count and the progress bar's total read the same helper as the CLI, so
+    the bar cannot finish early or stall short of the end."""
+    from textual.widgets import Select
+    from openllm_cbench.scoring.scorecard import depth_trials
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-score")
+            await pilot.pause()
+            await _click(pilot, "#score-model-input")
+            await pilot.press(*list("x:1b"))
+            app.screen.query_one("#score-depth-select", Select).value = "quick"
+            await pilot.pause()
+            _, total, _ = app.screen._score_flags()
+            return total
+    assert asyncio.run(scenario()) == sum(depth_trials("quick", s) for s in ("s1", "s2", "s3"))
 
 
 # --- Pre-release review fixes (2026-09-23) ------------------------------

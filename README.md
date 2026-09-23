@@ -220,8 +220,8 @@ cbench gate --model <model-tag>
 cbench gate --model <model-tag> --save
 
 # Grade it: all three suites, one A-F scorecard. quick runs 1 trial per
-# suite to see it work; standard (3 trials, the default) gives a grade
-# worth citing.
+# suite (2 for S3, the fewest it can rate) to see it work; standard (3
+# trials, the default) gives a grade worth citing.
 cbench score --model <model-tag> --depth quick
 ```
 
@@ -829,7 +829,7 @@ otherwise keep reporting the model as clean.
 ## Scoring a model
 
 ```bash
-cbench score --model <model-tag> --depth standard   # quick=1 trial, standard=3 (default), thorough=5
+cbench score --model <model-tag> --depth standard   # quick=1 trial (S3: 2), standard=3 (default), thorough=5
 cbench catalogue                                     # every pulled model, with catalogue and score status
 ```
 
@@ -852,7 +852,17 @@ docstring of [`scoring/scorecard.py`](src/openllm_cbench/scoring/scorecard.py)
 gives the full formula and explains why the worst suite dominates.
 `--depth quick` (1 trial) is exploratory only, below this framework's
 3-trial minimum for a rate worth citing, and every scorecard repeats that
-warning prominently.
+warning prominently. At quick depth S3 runs 2 trials: it writes one row per
+scenario, and one trial of its two scenarios is below the 3 rows it computes
+a rate from.
+
+**A scorecard made under older scoring rules shows `needs re-score`**
+instead of its grade, in `cbench catalogue` and on the Local models screen,
+because a grade computed by superseded rules can be wrong. Re-score it with
+`cbench score --model <model-tag> --from-existing`, or tick **From
+existing** on the Score screen: it reads the CSVs already on disk and calls
+no model. If the label stays, a suite's rows were written by an older
+scorer, and only a fresh run clears it.
 
 **A grade is not portable between machines.** It was produced on particular
 hardware, and the same model on a different card can score differently.

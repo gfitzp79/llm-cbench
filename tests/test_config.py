@@ -24,6 +24,10 @@ from openllm_cbench.core.paths import results_dir, results_root
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENLLM_CBENCH_CONFIG", str(tmp_path / "cfg" / "config.json"))
     monkeypatch.delenv("OPENLLM_CBENCH_RESULTS_DIR", raising=False)
+    # Both, not just the results one: these tests are about what applies
+    # when neither variable is set, and a developer who had exported the
+    # catalogue one failed four of them for a reason outside the repo.
+    monkeypatch.delenv("OPENLLM_CBENCH_MODELS_FILE", raising=False)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 

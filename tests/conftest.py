@@ -38,6 +38,19 @@ def isolate_run_lock(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_results_and_catalogue(tmp_path, monkeypatch):
+    """Keeps every test off the working directory's results/ and models.json.
+
+    With neither set, both resolve relative to wherever pytest runs. A
+    scorecard test wrote `results/scorecards/test-1b.*` into the checkout,
+    and a test reading the catalogue read the developer's own local overlay
+    -- passing or failing on a file that CI never has. A test about the
+    resolution order sets or deletes these itself."""
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path / "results"))
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(tmp_path / "models.json"))
+
+
+@pytest.fixture(autouse=True)
 def isolate_endpoint_runtime(monkeypatch):
     """Keeps community packaging off the live endpoint.
 

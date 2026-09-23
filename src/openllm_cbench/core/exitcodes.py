@@ -46,18 +46,49 @@ _MEANING = {
 def describe(returncode, subcommand=None):
     """One human sentence for a process exit code.
 
-    `subcommand` sharpens the REFUSED case where the framework has exactly
-    one reason to refuse, so the user does not have to scroll back for it.
+    `subcommand` sharpens a case where the generic sentence would mislead.
+    It must stay true for EVERY way that subcommand can produce the code:
+    score/assess once named one refusal reason (no suite gradeable) and
+    printed it for all of them, including another run holding the lock.
     An unknown code is reported as itself rather than guessed at."""
     if returncode in _MEANING:
         meaning = _MEANING[returncode]
         if returncode == REFUSED and subcommand in ("score", "assess"):
-            meaning = ("did not start -- the pre-flight found no selected suite could "
-                        "produce a gradeable result on this model, so no time was spent "
-                        "and no CSV was written. See the per-suite reasons above")
+            meaning = ("did not start -- no trial ran and no CSV was written. The reason "
+                       "is printed above, with what you can run instead where there is "
+                       "an alternative")
+        elif returncode == FAILED and subcommand == "gate":
+            meaning = ("finished, but the check was not clean -- the report above lists "
+                       "what it found")
         return f"{meaning} (exit code {returncode})"
     return (f"exited with code {returncode}, which this framework does not assign a "
             f"meaning to -- treat the output above as the finding")
+
+
+def request_failures(rows):
+    """Rows whose request to the endpoint failed, i.e. whose `error` is set.
+    Those rows measured nothing, whatever their other columns say."""
+    return [r for r in rows if str(r.get("error") or "").strip()]
+
+
+def after_run(rows):
+    """(exit code, message) for a suite that ran and wrote its rows.
+
+    FAILED when any request failed, so a dead or crashed endpoint cannot end
+    in the same exit code as a clean run. The rows are still written and the
+    rest still scored -- `cbench assess` carries on past a failed trial --
+    but the failure is said once, at the end, where it will be read."""
+    failed = request_failures(rows)
+    if not failed:
+        return SUCCESS, ""
+    first = str(failed[0].get("error")).strip().splitlines()[0][:200]
+    if len(failed) == len(rows):
+        return FAILED, (f"[!] Every request to the endpoint failed ({len(rows)} of {len(rows)}), "
+                        f"so nothing was measured. First error: {first}\n"
+                        "    Check the endpoint is up and serving this model: cbench doctor")
+    return FAILED, (f"[!] {len(failed)} of {len(rows)} request(s) to the endpoint failed. "
+                    "Those rows measured nothing and are excluded from every rate; the "
+                    f"rest were scored. First error: {first}")
 
 
 def is_success(returncode):

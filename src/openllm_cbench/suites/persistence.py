@@ -40,6 +40,7 @@ from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
+from openllm_cbench.core import exitcodes
 from openllm_cbench.core.console import ensure_utf8_stdio
 from openllm_cbench.core.sampling import (
     add_sampling_args, build_options, resolve_sampling, sampling_row_fields, SAMPLING_FIELDS,
@@ -544,7 +545,10 @@ def main():
     md_path = out_dir / f"persistence_report_{model_tag}_{ts}.md"
     md_path.write_text(md, encoding="utf-8")
     print(f"CSV: {csv_path}\nReport: {md_path}", file=sys.stderr)
-    return 0
+    code, message = exitcodes.after_run(rows)
+    if message:
+        print(message, file=sys.stderr)
+    return code
 
 
 def render_report(model, rows):

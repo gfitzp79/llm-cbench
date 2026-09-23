@@ -72,6 +72,7 @@ from openllm_cbench.scoring.probes import (
     DEEP_CATS,
     load_registry,
 )
+from openllm_cbench.core import exitcodes
 from openllm_cbench.core.console import ensure_utf8_stdio
 from openllm_cbench.core.delimiters import (
     MERGE_DELIMITERS, merge_evidence, merge_suspected, parse_catalogued_delimiters,
@@ -476,7 +477,10 @@ def main():
     md_path = out_dir / f"channel_report_{model_tag}_{ts}.md"
     md_path.write_text(md, encoding="utf-8")
     print(f"CSV: {csv_path}\nReport: {md_path}", file=sys.stderr)
-    return 0
+    code, message = exitcodes.after_run(rows)
+    if message:
+        print(message, file=sys.stderr)
+    return code
 
 
 def render_report(model, rows, variants):

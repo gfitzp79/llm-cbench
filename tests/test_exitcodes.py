@@ -26,13 +26,21 @@ def test_two_says_nothing_ran():
     assert "nothing was written" in said
 
 
-def test_two_on_score_names_the_pre_flight():
-    # score/assess have exactly one reason to refuse, so the final line
-    # can name it instead of making the user scroll back for it.
+def test_two_on_score_is_true_for_every_way_score_refuses():
+    # It used to name one reason -- no suite gradeable -- and printed it
+    # for every refusal, including another run holding the lock. It must
+    # say only what is true of all of them, and point at the real reason.
     said = exitcodes.describe(2, "score")
-    assert "pre-flight" in said
-    assert "gradeable" in said
+    assert "no trial ran" in said
+    assert "no CSV was written" in said
+    assert "gradeable" not in said
     assert exitcodes.describe(2, "assess") == said
+
+
+def test_one_on_gate_reads_as_a_finding_not_a_crash():
+    said = exitcodes.describe(1, "gate")
+    assert "not clean" in said
+    assert "exit code 1" in said
 
 
 def test_every_message_still_carries_the_number():

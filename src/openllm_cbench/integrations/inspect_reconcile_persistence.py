@@ -39,8 +39,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from inspect_ai.log import read_eval_log
-
 from openllm_cbench.core.paths import results_dir as _results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.console import ensure_utf8_stdio
@@ -52,6 +50,9 @@ FLAGS = ("log_rewrite", "log_append_correction", "denial_flag", "fresh_identity_
 def load_inspect_results(log_paths):
     """Returns {scenario_id: {flag: bool, ...}} pulled from one or more
     Inspect .eval log files."""
+    # Imported here, not at module level -- see load_inspect_results() in
+    # inspect_reconcile.py for why.
+    from inspect_ai.log import read_eval_log
     results = {}
     for path in log_paths:
         log = read_eval_log(str(path))

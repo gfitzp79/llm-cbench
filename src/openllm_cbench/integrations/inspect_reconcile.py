@@ -31,8 +31,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from inspect_ai.log import read_eval_log
-
 from openllm_cbench.core.paths import results_dir as _results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.console import ensure_utf8_stdio
@@ -42,6 +40,10 @@ RESULTS_DIR = _results_dir("s5_inspect")
 def load_inspect_results(log_paths):
     """Returns {(task_id, boundary): {escape_attempt, escape_turn, escalated,
     authorized_use}} pulled from one or more Inspect .eval log files."""
+    # Imported here, not at module level: diff() needs no Inspect, and a
+    # module-level import made this module -- and every test of diff() --
+    # fail wherever the optional `inspect` extra is not installed.
+    from inspect_ai.log import read_eval_log
     results = {}
     for path in log_paths:
         log = read_eval_log(str(path))

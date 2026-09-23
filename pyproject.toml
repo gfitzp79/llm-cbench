@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openllm-cbench"
-version = "0.1.2"
+# The version is set in one place, src/openllm_cbench/__init__.py, so the
+# package metadata and `cbench --version` cannot disagree after a bump.
+dynamic = ["version"]
 description = "Local containment and reasoning-leakage testing framework for open-weight LLMs."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -77,6 +79,9 @@ dev = [
 
 [project.scripts]
 cbench = "openllm_cbench.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "openllm_cbench.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

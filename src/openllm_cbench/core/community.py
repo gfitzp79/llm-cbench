@@ -397,26 +397,14 @@ def detect_endpoint_runtime(base_url=None, timeout=5):
 
 
 def detect_cbench_version():
-    """Installed package version if there is one, else the git commit this
-    is running from, else None. Results that can't be tied to a harness
-    version are much harder to compare later -- ARCHITECTURE.md's own
-    schema-mismatch warnings are exactly about this -- so it tries hard
-    before giving up."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        try:
-            return version("openllm-cbench")
-        except PackageNotFoundError:
-            pass
-    except Exception:
-        pass
-    try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=5,
-                             cwd=str(Path(__file__).resolve().parent))
-        return out.stdout.strip() or None
-    except Exception:
-        return None
+    """The version `cbench --version` prints: the running package's own
+    __version__. Not the installed metadata, which an editable install
+    freezes when it is installed, so a checkout bumped since then stamped
+    its results with an older release. Results that cannot be tied to a
+    harness version are much harder to compare later; ARCHITECTURE.md's
+    schema-mismatch warnings are about exactly this."""
+    from openllm_cbench import __version__
+    return __version__
 
 
 def build_submission_metadata(model, contributor=None, notes="", base_url=None,

@@ -268,11 +268,14 @@ truncates at that budget.
 **An advertised capability is not a delivered one.** The endpoint's reported
 capabilities are a claim about the model, and the claim is sometimes wrong in
 the direction that matters. A model that advertises a reasoning capability and
-returns an empty reasoning field on every row is the worst case in this
-framework, because the advertisement makes the run look valid: the leak rate
-comes back 0% and describes the instrument. The gate check therefore requires a
-*measured* non-empty trace at one of the two think states, not the
-advertisement, before it calls S2 runnable (`core/preflight.py`).
+returns an empty reasoning field on every row is the most misleading case in
+this framework, because the advertisement makes the channel leak look
+measurable: a leak rate from those rows would come back 0% and describe the
+instrument. The gate check therefore requires a *measured* non-empty trace at
+one of the two think states, not the advertisement, before it reports that S2
+can measure the channel leak (`core/preflight.py`). Without one, S2 still runs
+and is graded on probe failure alone, and the scorecard marks the channel leak
+not applicable (METHODOLOGY.md section 3.1a).
 
 **A capability verdict derived from a stopwatch is not a capability verdict.**
 A model too large for the available VRAM spills into system RAM and can take
@@ -423,25 +426,26 @@ after the compute is spent. Prefer the ones that run before the work.
 
 The capability pre-flight is the gate check made non-optional. An advisory
 check helps only the operator who remembers to run it. Without the pre-flight,
-a model that reports `completion` and nothing else goes through all three
-suites and produces a scorecard on which every suite is `INVALID`, advising a
-gate check that had the answer before the run began. The pre-flight runs the
-identical check automatically, skips only the suites it can *establish* are
-ungradeable, and runs the rest; when every selected suite is ungradeable, it
-refuses the run. `--force-uncheckable` runs them anyway; `--skip-preflight`
-omits the check.
+a model that reports `completion` and nothing else goes through S1 and S3,
+which both need a tool call, and produces a scorecard on which both are
+`INVALID`, advising a gate check that had the answer before the run began.
+The pre-flight runs the identical check automatically, skips only the suites
+it can *establish* are ungradeable, and runs the rest; when every selected
+suite is ungradeable, it refuses the run. `--force-uncheckable` runs them
+anyway; `--skip-preflight` omits the check.
 
 It shares its most important property with the pooling guard below: **an
 unverified condition is not a failed one.** A tool call that did not finish in
 time or got no response, a think=on channel check that did not complete, or a
 pre-flight that crashed all leave the run to proceed. An empty trace at think=off
 proves nothing on its own, because that is what thinking off means, so only the
-think=on check can establish that a trace is not delivered. Two conditions
-stop work. The first is an established absence, which skips the suite it
-applies to, and refuses the run when it applies to every selected suite. The
-second is a gate check that reached neither the model-info route nor a chat
-request, which refuses the run and is not a verdict about the model: every
-trial would make the same failing calls, so nothing would be measured.
+think=on check can establish that a trace is not delivered. Even then, S2
+runs and is graded on probe failure alone. Two conditions stop work. The first
+is an established absence of working tool calls, which skips S1 and S3, and
+refuses the run when no other suite is selected. The second is a gate check
+that reached neither the model-info route nor a chat request, which refuses
+the run and is not a verdict about the model: every trial would make the same
+failing calls, so nothing would be measured.
 `--skip-preflight` overrides both.
 
 The pooling-comparability guard is a real refusal, not a warning: when it
@@ -640,8 +644,9 @@ its full complement.
 | probes no model ever fails | consume a cluster and dilute the rate; **biases grades up** |
 | English-only verdict vocabulary | a non-English answer is unadjudicable, and says so |
 | frozen `content_verdict` | a scorer fix does not reach an existing corpus |
+| reasoning advertised, no trace returned | S2 is graded on probe failure alone; if the model reasons somewhere the endpoint does not return, a leak there goes unmeasured; **biases grades up** |
 
-The two rows marked **biases grades up** are the ones to state when citing a
+The rows marked **biases grades up** are the ones to state when citing a
 grade, because they push in the direction that flatters a model.
 
 **Turn budget not recorded per row.** The suite's own report applies the

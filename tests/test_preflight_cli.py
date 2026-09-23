@@ -70,10 +70,13 @@ def _never_runs(monkeypatch):
 
 # ----------------------------------------------------------- refusing
 
-def test_assess_refuses_a_model_with_no_usable_capability(endpoint, monkeypatch, capsys):
+def test_assess_refuses_when_no_selected_suite_can_run(endpoint, monkeypatch, capsys):
+    """S1 and S3 both need tool calls. With S2 left out, a model without
+    tools has nothing to run."""
     endpoint(show=NO_CAPABILITIES, tool_ok=False)
     _never_runs(monkeypatch)
-    assert _run(["assess", "--model", "exaone-deep:7.8b", "--trials", "3"], monkeypatch) == 2
+    assert _run(["assess", "--model", "exaone-deep:7.8b", "--suites", "s1,s3"],
+                monkeypatch) == 2
     err = capsys.readouterr().err
     assert "NOT STARTING" in err
     assert "no suite can produce a gradeable result" in err
@@ -86,36 +89,46 @@ def _records_suites(monkeypatch):
     return ran
 
 
-def test_assess_skips_s2_and_runs_the_suites_that_can_measure(endpoint, monkeypatch, capsys):
-    """llama3.1:8b: S1 and S3 are fine, S2 cannot fire. REVERSED 2026-09-23:
-    this used to refuse the whole run and name the narrowed command. S2
-    needs a reasoning channel that 14 of 31 catalogued models on the
-    machine this was written on lack, and S2 is ticked by default, so the
-    refusal stopped every score of every one of them. Reported as "every
-    model I've tried doesn't run now"."""
-    endpoint(show=TOOLS_ONLY)
+def test_assess_skips_the_suites_that_cannot_measure_and_runs_the_rest(
+        endpoint, monkeypatch, capsys):
+    """exaone-deep:7.8b: no tools, so S1 and S3 cannot run; S2 grades probe
+    failure on the visible answer. REVERSED 2026-09-23: a suite that could
+    not run refused the whole score, and S2 (ticked by default) could not
+    run on 14 of 31 catalogued models on the machine this was written on.
+    Reported as "every model I've tried doesn't run now"."""
+    endpoint(show=NO_CAPABILITIES, tool_ok=False)
     ran = _records_suites(monkeypatch)
-    assert _run(["assess", "--model", "llama3.1:8b", "--trials", "3"], monkeypatch) == 0
-    assert ran == [["s1", "s3"]]
+    assert _run(["assess", "--model", "exaone-deep:7.8b", "--trials", "3"], monkeypatch) == 0
+    assert ran == [["s2"]]
     err = capsys.readouterr().err
-    assert "Skipping S2 channel" in err
+    assert "Skipping S1 containment, S3 persistence" in err
     assert "NOT STARTING" not in err
 
 
-def test_score_skips_s2_too(endpoint, monkeypatch, capsys):
+def test_score_skips_too(endpoint, monkeypatch, capsys):
     """THE PATH THE TUI RUNS."""
+    endpoint(show=NO_CAPABILITIES, tool_ok=False)
+    ran = _records_suites(monkeypatch)
+    _run(["score", "--model", "exaone-deep:7.8b", "--depth", "quick"], monkeypatch)
+    assert ran == [["s2"]]
+    assert "Skipping S1 containment, S3 persistence" in capsys.readouterr().err
+
+
+def test_a_model_without_a_reasoning_channel_runs_all_three(endpoint, monkeypatch, capsys):
+    """llama3.1:8b: tools and no reasoning channel. S2 grades it on probe
+    failure, so nothing is skipped."""
     endpoint(show=TOOLS_ONLY)
     ran = _records_suites(monkeypatch)
-    _run(["score", "--model", "llama3.1:8b", "--depth", "quick"], monkeypatch)
-    assert ran == [["s1", "s3"]]
-    assert "Skipping S2 channel" in capsys.readouterr().err
+    assert _run(["score", "--model", "llama3.1:8b", "--depth", "quick"], monkeypatch) == 0
+    assert ran == [["s1", "s2", "s3"]]
+    assert "Skipping" not in capsys.readouterr().err
 
 
 def test_the_requested_suites_are_what_gets_judged(endpoint, monkeypatch, capsys):
-    """A user who already excluded S2 must not be refused because of it."""
-    endpoint(show=TOOLS_ONLY)
+    """A user who already excluded S1 and S3 must not be refused because of them."""
+    endpoint(show=NO_CAPABILITIES, tool_ok=False)
     monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: 0)
-    assert _run(["assess", "--model", "llama3.1:8b", "--suites", "s1,s3"], monkeypatch) == 0
+    assert _run(["assess", "--model", "exaone-deep:7.8b", "--suites", "s2"], monkeypatch) == 0
     assert "NOT STARTING" not in capsys.readouterr().err
 
 

@@ -1301,7 +1301,6 @@ class ScoreScreen(Screen):
     # diagnosis (that is in the gate report and the catalogue entry).
     _SUITE_OFF_REASON = {
         "s1": "S1 needs working tool calls, and this model's did not work when it was gated.",
-        "s2": "S2 needs a separate reasoning trace, and this model does not return one.",
         "s3": "S3 needs working tool calls, and this model's did not work when it was gated.",
     }
 
@@ -1309,20 +1308,23 @@ class ScoreScreen(Screen):
         """Ticks the suites that can measure this model and unticks the rest,
         from what `cbench gate` recorded in the catalogue, and says why.
 
-        All three were ticked for every model, so a model without a
-        reasoning channel (llama3.1:8b, and 13 more in the catalogue this
-        was found on) went to the pre-flight with S2 ticked and was refused
-        there, its reason scrolled out of view. Applied only when the model
-        changes, so a box the user ticks back stays ticked; the pre-flight
-        still skips a suite that cannot run."""
+        All three were ticked for every model, so a model the gate had
+        already found unable to run a suite went to the pre-flight with it
+        ticked and was refused there, its reason scrolled out of view.
+        Applied only when the model changes, so a box the user ticks back
+        stays ticked; the pre-flight still skips a suite that cannot run."""
         if model == getattr(self, "_suites_set_for", None):
             return
         self._suites_set_for = model
+        from openllm_cbench.core.preflight import TOOL_SUITES
         readiness = (entry or {}).get("suite_readiness") or {}
         off = []
         try:
             for suite in ("s1", "s2", "s3"):
-                verdict = (readiness.get(suite) or [""])[0]
+                # Only a tool suite can be unable to run. An S2 verdict of
+                # INVALID in the catalogue predates S2 grading probe failure
+                # on a model without a reasoning channel, so it is ignored.
+                verdict = (readiness.get(suite) or [""])[0] if suite in TOOL_SUITES else ""
                 can_run = verdict != "invalid"
                 self.query_one(f"#score-{suite}", Checkbox).value = can_run
                 if not can_run:

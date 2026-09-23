@@ -532,6 +532,11 @@ def aggregate_s2(model):
         "leak_effective": effective_n(list(_leak_clusters.values())),
         "thinking_rows": thinking_rows,
         "could_detect_leak": s2_could_detect_a_leak(thinking_rows),
+        # Rows that asked for reasoning (think on, or an effort level). None
+        # with no trace means the model has no reasoning channel; some with
+        # no trace means it advertised one and did not deliver it.
+        "reasoning_on_rows": sum(b["total"] for label, b in per_label.items()
+                                 if label != "off"),
     }
 
     return "\n".join(lines) + "\n", stats

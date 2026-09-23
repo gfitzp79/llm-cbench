@@ -30,6 +30,12 @@ until it has shown it can produce a positive (METHODOLOGY.md 3.1) -- was
 enforced at scoring time, hours after the cost was sunk, using facts that
 were available in seconds before it.
 
+For the second and third models the answer is now different from the one
+this module first gave. S2 grades two rates, and probe failure needs no
+reasoning trace, so both are scored on probe failure with the channel
+leak marked not applicable; only S1 and S3 can be predicted INVALID here
+(see _channel_verdict). The first model still loses S1 and S3.
+
 WHAT THIS MODULE IS. The one mapping from gate findings to per-suite
 verdicts. Deliberately not inline in `gate.py`, because `assess` needs
 the identical judgement before it spends an hour, and a second copy of a
@@ -99,31 +105,32 @@ def _tool_calling_verdict(result):
 
 
 def _channel_verdict(result):
-    """S2 needs a separate reasoning trace to have leaked FROM.
+    """S2 grades two rates, and only one of them needs a reasoning trace.
 
-    Two ways to fail, and the second is the one worth the extra code. A
-    model that never advertises `thinking` is at least honest about it.
-    A model that advertises `thinking` and returns an empty one looks
-    supported right up until the scorecard reports a 0% leak rate that is
-    a property of the instrument.
+    Probe failure (the visible answer doing what an attack prompt asked)
+    needs only an answer, so S2 can grade any model that answers. The
+    channel leak needs a separate reasoning trace to have leaked FROM. So
+    S2 is never INVALID here: the reason says which half applies, and
+    UNVERIFIED means only that whether a trace comes back is unknown.
 
-    NOTE, and it matters if S2's scoring changes. S2 grades two rates,
-    and only the leak rate needs a trace -- `scoring/capability.py`'s
-    `s2_could_detect_a_leak` governs that one alone, while the probe
-    failure rate stays measurable on a model that returns no trace at
-    all. The scorecard currently discards the whole suite when the leak
-    rate is ungradeable, so that is what this reports, because this
-    module's job is to predict what the run will actually produce. If
-    that scoring decision is revisited, this verdict must move with it --
-    `tests/test_preflight.py` asserts the two agree."""
+    It was INVALID for a model with no trace, matching a scorecard that
+    discarded the whole suite in that case. Both moved together (owner
+    decision, 2026-09-23): 14 of 31 catalogued models had no reasoning
+    channel and were graded without S2 at all. `tests/test_preflight.py`
+    asserts this and the scorecard still agree.
+
+    A model that advertises `thinking` and returns an empty trace is the
+    case worth the extra code: the capability says the leak half can be
+    measured and it cannot, so the reason says so rather than letting a 0%
+    leak rate describe the instrument."""
     advertised = result.get("has_thinking_capability")
     if advertised is None:
         return UNVERIFIED, ("the endpoint's model-info route could not be read, so whether "
-                            "this model returns a separate reasoning trace is unknown")
+                            "this model returns a separate reasoning trace is unknown; probe "
+                            "failure is measured either way")
     if not advertised:
-        return INVALID, ("the endpoint does not report a `thinking` capability, so there is no "
-                         "separate reasoning channel for a CHANNEL_LEAK to be found in; a 0% "
-                         "leak rate here would describe the instrument, not the model")
+        return READY, ("no reasoning channel, so S2 grades probe failure only; the channel "
+                       "leak does not apply")
 
     think_on = result.get("channel_think_on")
     checks = [think_on, result.get("channel_think_off")]
@@ -132,7 +139,8 @@ def _channel_verdict(result):
         return UNVERIFIED, ("neither channel check completed, so whether a reasoning trace "
                             "actually comes back could not be established on this machine")
     if any((c.get("thinking_len") or 0) > 0 for c in completed):
-        return READY, "a separate reasoning trace came back, so a leak could be detected"
+        return READY, ("a separate reasoning trace came back, so both probe failure and the "
+                       "channel leak can be measured")
     # Only the think=on check can show that a trace is NOT delivered: no
     # trace at think=off is what thinking off means. When think=on did not
     # complete (a timeout), an empty think=off result proved nothing, and
@@ -142,10 +150,15 @@ def _channel_verdict(result):
         return UNVERIFIED, ("the think=on channel check did not complete, and no trace at "
                             "think=off is expected, so whether a reasoning trace comes back "
                             "could not be established on this machine")
-    return INVALID, ("the endpoint reports a `thinking` capability but returned an EMPTY "
-                     "reasoning trace at every state checked; the capability is advertised "
-                     "and not delivered, which reads as support right up until the leak rate "
-                     "comes back 0% for want of anything to measure")
+    return READY, ("the endpoint reports a `thinking` capability but returned an EMPTY "
+                   "reasoning trace at every state checked, so the channel leak cannot be "
+                   "measured (advertised and not delivered) and S2 grades probe failure only")
+
+
+# The suites a pre-flight can find unable to run: both need a tool call
+# that round-trips. S2 is never INVALID here (see _channel_verdict), so a
+# stored S2 verdict of INVALID in an older catalogue entry is out of date.
+TOOL_SUITES = ("s1", "s3")
 
 
 def suite_readiness(result):

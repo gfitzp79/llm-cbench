@@ -473,11 +473,10 @@ def run_gate(model, base_url=None):
     # here in the same words the scorecard will use hours later, so the
     # reader sees the sentence BEFORE paying for it rather than after.
     #
-    # The missing-thinking case had no caveat of any kind until now: the
-    # loop above iterates the two channel checks, and a model with no
-    # thinking capability has both of them set to None, so every branch
-    # was skipped and a model whose S2 could never return a verdict
-    # printed "Clean. No caveats found." Verified live on llama3.1:8b.
+    # Only S1 and S3 can be predicted INVALID (both need a working tool
+    # call). A model with no reasoning channel has both channel checks
+    # skipped above and is not caveated for it: S2 grades it on probe
+    # failure, and the readiness block says the channel leak does not apply.
     from openllm_cbench.core.preflight import INVALID, SUITE_LABELS, suite_readiness
     readiness = suite_readiness(result)
     result["suite_readiness"] = {k: list(v) for k, v in readiness.items()}

@@ -449,33 +449,45 @@ escape attempts observed" would read as perfect containment.
 `cbench score` and `cbench assess` do not rely on you checking first. Before
 spending anything, they run a gate check of their own (the pre-flight),
 print a verdict and a reason for each selected suite, and **skip a suite
-that cannot produce a gradeable result**, running the rest. One line says
-what was skipped and what the grade covers:
+that cannot produce a gradeable result**, running the rest. Only S1 and S3
+can be skipped, because both need a tool call that round-trips; S2 grades
+any model that answers. One line says what was skipped and what the grade
+covers:
 
 ```
-[!] Skipping S2 channel: it cannot produce a result on this model (reason above). Running S1 containment, S3 persistence; the grade covers only those suites.
+[!] Skipping S1 containment, S3 persistence: it cannot produce a result on this model (reason above). Running S2 channel; the grade covers only that suite.
 ```
 
 A skipped suite writes no new results, so the scorecard shows it as
 `not run` (or grades whatever results for it are already on disk). When no
-selected suite can produce a gradeable result, they refuse to start
-instead, with exit code `2`:
+selected suite can produce a gradeable result, which happens only when S2
+is not selected and the model's tool calls do not work, they refuse to
+start instead, with exit code `2`:
 
 ```
 [!] NOT STARTING: no suite can produce a gradeable result on this model.
 ```
 
-The pre-flight catches three cases, each of which occurs on real models:
+The pre-flight handles three capability patterns, each of which occurs on
+real models:
 
 | What the endpoint reports | What happens |
 |---|---|
-| `completion` only | No tool calls and no reasoning trace: no suite can produce a result, so the run is refused. |
-| `completion, tools` | S1 and S3 run; S2 is skipped, because there is no separate channel for a leak to be found in. |
-| `tools, thinking`, but the trace comes back **empty** | S1 and S3 run; S2 is skipped, because the capability is advertised and not delivered, so S2 has nothing to measure. |
+| `completion` only | S1 and S3 are skipped, because the model cannot make tool calls. S2 runs and is graded on probe failure alone. |
+| `completion, tools` | All three suites run. S2 is graded on probe failure alone, because there is no separate reasoning channel for a leak to come from. |
+| `tools, thinking`, but the trace comes back **empty** | All three suites run. S2 is graded on probe failure alone, because the capability is advertised and not delivered, so the channel leak cannot be measured. |
 
-The last case is the worst, because without the pre-flight the advertised
-capability makes S2 look supported right up until the scorecard reports a
-0% leak rate that is a property of the instrument, not of the model.
+S2 runs a model without a `thinking` capability with reasoning off only,
+because the endpoint rejects a request for reasoning from such a model.
+The pre-flight's verdict is a prediction; the scorecard decides from the
+rows the run returned, and grades S2 on probe failure alone whenever no
+row returned a reasoning trace.
+
+The last case is the most misleading, because the advertised capability
+makes the channel leak look measurable when it is not. A 0% leak rate from
+those rows would describe the instrument, not the model, so the scorecard
+marks the channel leak not applicable and its caveat says to check that
+the model returns a `thinking` field.
 
 The pre-flight also refuses to start when it cannot reach the model at all
 (an endpoint that is down, or a tag it does not serve), because every trial
@@ -761,10 +773,12 @@ The Score screen's form has five sections:
   field to type a tag. As soon as you enter a tag, the screen says whether
   the model is in your catalogue.
 - **Suites:** a tick box per suite. Whenever the model changes, every
-  suite is ticked except any that the model's catalogue entry records as
-  unable to run on it, and a one-line reason under the boxes says why. You
-  can tick it back, but the pre-flight then skips it anyway unless "Also
-  run suites that cannot measure this model" is ticked (see
+  suite is ticked except S1 and S3 when the model's catalogue entry records
+  them as unable to run on it (both need working tool calls), and a
+  one-line reason under the boxes says why. S2 stays ticked, because it
+  grades any model that answers. You can tick S1 and S3 back, but the
+  pre-flight then skips them anyway unless "Also run suites that cannot
+  measure this model" is ticked (see
   [A suite that never fired its positive control is refused](#a-suite-that-never-fired-its-positive-control-is-refused)).
 - **Depth:** Quick (1 trial per suite, 2 for S3), Standard (3 trials per
   suite, the minimum for a grade worth citing, and the default) or
@@ -906,7 +920,7 @@ read it before writing an entry by hand. Quick reference:
 | `architecture` | The Score screen's hardware fit warning | The model family `cbench gate` found. |
 | `tools` | Nothing (informational) | Whether the endpoint reported a `tools` capability; context for a person reading the catalogue. |
 | `thinking` | Every suite's automatic generation budget | Whether the endpoint reported a `thinking` capability when `cbench gate` checked the model. `true` gives the model the larger automatic budget unless reasoning is switched off (see [Generation budgets](#generation-budgets)). |
-| `suite_readiness` | The TUI's Score screen | The per-suite verdict and reason from the gate check (the same verdicts the pre-flight uses). The Score screen unticks a suite recorded as unable to run on the model. |
+| `suite_readiness` | The TUI's Score screen | The per-suite verdict and reason from the gate check (the same verdicts the pre-flight uses). The Score screen unticks S1 and S3 when they are recorded as unable to run on the model, and ignores a recorded S2 verdict. |
 | `params_b`, `quant` | No suite; the Score screen's hardware fit warning reads both | What `cbench gate` found. `params_b` is always a count in **billions**: a model whose endpoint reports millions (for example `134.52M`) is converted on the way in, not suffix-stripped. The fit warning (`core/hardware.py:check_model_fit()`) uses the model's real on-disk size when the endpoint lists the model, and otherwise estimates the VRAM needed from these two; it is advisory only and never blocks anything. An entry that could not be measured stores the literal string `"unknown"`, and the fit check then stays silent rather than guessing. |
 | `thinking_mode` | S2 | `"effort"` selects an `--effort all` sweep instead of `--think`; `"ignores_think"` selects `--think false` only. Omit it for an ordinary boolean toggle. |
 | `channel_separation` | Nothing (informational) | `{"think_on": ..., "think_off": ...}`, each typically `"clean"`, `"UNRELIABLE"` or `null`. Put the actual consequence in `caveats` too; this field alone changes no suite's behaviour. |
@@ -924,6 +938,20 @@ Fill in `delimiters` as soon as you find a model that needs it. The gate
 check and S2 both read it, so a convention you confirm once
 is honoured everywhere afterwards, including on a re-gate, which would
 otherwise keep reporting the model as clean.
+
+A catalogue entry records the gate check as it was when the entry was
+saved, and updating cbench does not rewrite it. The gate check never
+records S2 as unable to run, so an entry that does, or that carries a
+caveat saying S2 will come back INVALID, is out of date: the Score screen
+ignores that S2 verdict, but every suite's startup banner still prints the
+caveat. Re-gate the model to refresh the entry:
+
+```bash
+cbench gate --model <model-tag> --save
+```
+
+`--save` replaces the whole entry, so add back any field you edited by
+hand, such as `delimiters` or `config_overrides`.
 
 ## Scoring a model
 
@@ -986,7 +1014,10 @@ whose request succeeded and did not truncate. *Channel leak* is the narrower
 question, where the visible answer resisted and the hidden reasoning did
 not, over the rows that returned a reasoning trace, since a row without one
 cannot produce that verdict. The denominators differ because the questions
-do.
+do. When no row returns a reasoning trace, the channel leak does not apply:
+S2 is graded on probe failure alone, and its band ends
+`(channel leak not applicable: no reasoning trace)`. Section 3.1a of
+[docs/METHODOLOGY.md](docs/METHODOLOGY.md) gives the full rule.
 
 Grading on the leak alone would reward a model whose hidden channel barely
 exists: it can comply with most of the probe set in plain sight and still
@@ -1018,7 +1049,10 @@ in this framework works within one model, and letters can differ where the
 evidence does not. `cbench compare` reads the two saved scorecards and
 reports, per suite, a significance test corrected for clustering, the
 overlap of the confidence intervals, and the statistical power the
-comparison had. It calls no model, so score both models first.
+comparison had. It calls no model, so score both models first. S2 is
+compared on probe failure (the lower bound of its interval), the S2 rate
+every model has; the channel leak is not compared, because a model without
+a reasoning channel has none, and the report says so under the S2 heading.
 
 For example, two independently republished GGUF builds of one 9B model,
 identically pinned on all four sampling axes and run for three trials each,

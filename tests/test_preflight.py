@@ -57,29 +57,31 @@ def test_a_trace_at_either_think_state_is_enough():
 # ---------------------------------------------- the three real failures
 
 def test_exaone_reports_no_capability_at_all():
-    """`completion` only. Every suite is dead, and the previous gate
-    mentioned only the missing tools."""
+    """`completion` only. S1 and S3 are dead, since both need a tool call.
+    S2 still grades probe failure: that needs only a visible answer."""
     r = gate_result(has_tools_capability=False, has_thinking_capability=False,
                     tool_call_ok=False, tool_call_detail="request failed: 400 Client Error",
                     channel_think_on=None, channel_think_off=None)
     readiness = pf.suite_readiness(r)
-    assert [v for v, _ in readiness.values()] == [INVALID, INVALID, INVALID]
-    assert pf.unrunnable(r) == ["s1", "s2", "s3"]
+    assert [v for v, _ in readiness.values()] == [INVALID, READY, INVALID]
+    assert pf.unrunnable(r) == ["s1", "s3"]
 
 
-def test_a_tools_only_model_is_not_clean_for_s2():
-    """THE REGRESSION THIS FILE EXISTS FOR. llama3.1:8b gate-checked
-    "Clean. No caveats found." while its S2 could not fire. The gate's
-    own report said "skipped (model does not report a thinking
-    capability)" four lines above the word Clean. A skipped check is not
-    a passed one."""
+def test_a_tools_only_model_is_graded_on_s2_probe_failure():
+    """llama3.1:8b: tools, no reasoning channel. S2 was INVALID here, which
+    left it out of every grade for a model without a reasoning channel (14
+    of 31 catalogued on the machine this was found on) and made those
+    grades read better than they had earned. Probe failure needs only the
+    visible answer, so S2 runs; the channel leak does not apply, and the
+    reason says so rather than the report reading as a full check (owner
+    decision, 2026-09-23)."""
     r = gate_result(has_thinking_capability=False,
                     channel_think_on=None, channel_think_off=None)
     readiness = pf.suite_readiness(r)
-    assert readiness["s1"][0] == READY
-    assert readiness["s3"][0] == READY
-    assert readiness["s2"][0] == INVALID
-    assert pf.unrunnable(r) == ["s2"]
+    assert [v for v, _ in readiness.values()] == [READY, READY, READY]
+    assert "probe failure only" in readiness["s2"][1]
+    assert "does not apply" in readiness["s2"][1]
+    assert pf.unrunnable(r) == []
 
 
 def test_advertised_thinking_that_comes_back_empty_is_invalid():
@@ -89,8 +91,9 @@ def test_advertised_thinking_that_comes_back_empty_is_invalid():
         channel_think_on={"ok": True, "content_len": 900, "thinking_len": 0},
         channel_think_off={"ok": True, "content_len": 900, "thinking_len": 0})
     verdict, reason = pf.suite_readiness(r)["s2"]
-    assert verdict == INVALID
+    assert verdict == READY, "probe failure is still measurable"
     assert "advertised and not delivered" in reason
+    assert "probe failure only" in reason
 
 
 # ------------------------------------------- what must NOT be a verdict
@@ -160,27 +163,26 @@ def test_a_gate_result_missing_keys_does_not_raise():
 
 # ---------------------------------------------------------- the report
 
-def test_the_report_says_the_dead_suite_will_be_skipped_when_something_survives():
-    r = gate_result(has_thinking_capability=False,
-                    channel_think_on=None, channel_think_off=None)
+def test_the_report_says_the_dead_suites_will_be_skipped_when_something_survives():
+    r = gate_result(has_tools_capability=False, tool_call_ok=False)
     text = "\n".join(pf.render_readiness(r))
     assert "WILL BE INVALID" in text
-    assert "will skip it and run S1 containment, S3 persistence" in text
+    assert "will skip them and run S2 channel" in text
 
 
 def test_the_report_says_so_when_nothing_survives():
+    """Only reachable with S2 left out: S2 grades any model that answers."""
     r = gate_result(has_tools_capability=False, has_thinking_capability=False,
                     tool_call_ok=False, channel_think_on=None, channel_think_off=None)
-    text = "\n".join(pf.render_readiness(r))
+    text = "\n".join(pf.render_readiness(r, suites=("s1", "s3")))
     assert "Nothing here would produce a gradeable result" in text
     assert "--suites" not in text, "there is no narrowed command to offer"
 
 
 def test_the_report_honours_a_suite_subset():
-    r = gate_result(has_thinking_capability=False,
-                    channel_think_on=None, channel_think_off=None)
-    text = "\n".join(pf.render_readiness(r, suites=("s1", "s3")))
-    assert "S2" not in text
+    r = gate_result(has_tools_capability=False, tool_call_ok=False)
+    text = "\n".join(pf.render_readiness(r, suites=("s2",)))
+    assert "S1" not in text and "S3" not in text
     assert "WILL BE INVALID" not in text
 
 
@@ -193,10 +195,14 @@ def test_preflight_agrees_with_the_scorer_about_s2():
     model or the pre-flight is lying about what the run will produce."""
     from openllm_cbench.scoring.capability import s2_could_detect_a_leak
 
+    # No trace: the pre-flight lets S2 run on probe failure alone, and the
+    # scorer grades it that way (leak not applicable) rather than calling
+    # the suite INVALID. tests/test_capability.py drives the scorer side.
     empty = gate_result(
         channel_think_on={"ok": True, "content_len": 900, "thinking_len": 0},
         channel_think_off={"ok": True, "content_len": 900, "thinking_len": 0})
-    assert pf.suite_readiness(empty)["s2"][0] == INVALID
+    verdict, reason = pf.suite_readiness(empty)["s2"]
+    assert verdict == READY and "probe failure only" in reason
     assert s2_could_detect_a_leak(0) is False
 
     trace = gate_result()
@@ -226,8 +232,19 @@ def test_the_gate_caveats_an_invalid_suite(monkeypatch):
 
     result = gate.run_gate("llama3.1:8b", "http://localhost:11434")
 
-    assert result["clean"] is False, "a tools-only model is not clean -- S2 cannot fire"
-    assert any("S2 channel will come back INVALID" in c for c in result["caveats"])
+    # A tools-only model can run every suite: S2 on probe failure alone.
+    assert not any("S2 channel will come back INVALID" in c for c in result["caveats"])
     assert result["suite_readiness"]["s1"][0] == READY
-    assert result["suite_readiness"]["s2"][0] == INVALID
-    assert "What this model can be scored on" in gate.render_gate_report(result)
+    assert result["suite_readiness"]["s2"][0] == READY
+    report = gate.render_gate_report(result)
+    assert "What this model can be scored on" in report
+    assert "probe failure only" in report
+
+    # A model with no tools cannot run S1 or S3, and the caveat list says so.
+    monkeypatch.setattr(gate, "fetch_show_info", lambda *a, **k: {
+        "capabilities": ["completion"], "details": {}, "modelfile": ""})
+    monkeypatch.setattr(gate, "check_tool_call",
+                        lambda *a, **k: (False, "HTTP 400: does not support tools"))
+    result = gate.run_gate("exaone-deep:7.8b", "http://localhost:11434")
+    assert result["clean"] is False
+    assert any("S1 containment will come back INVALID" in c for c in result["caveats"])

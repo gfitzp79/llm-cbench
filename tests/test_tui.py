@@ -1452,6 +1452,37 @@ def test_score_screen_rejects_a_non_numeric_budget():
     asyncio.run(scenario())
 
 
+def test_the_score_screen_unticks_only_a_tool_suite_the_gate_found_dead(tmp_path, monkeypatch):
+    """A catalogued model's suites are pre-set from what its gate recorded.
+    Only S1 and S3 can be unable to run; an S2 verdict of INVALID predates
+    S2 grading probe failure on a model without a reasoning channel, and
+    the owner's catalogue still holds 14 of them."""
+    import json
+    from textual.widgets import Checkbox
+    catalogue = tmp_path / "models.json"
+    catalogue.write_text(json.dumps({"models": {"no-tools:1b": {
+        "tools": False, "thinking": False, "config_overrides": {}, "caveats": [],
+        "suite_readiness": {"s1": ["invalid", "no tools"], "s2": ["invalid", "old rule"],
+                            "s3": ["invalid", "no tools"]}}}}), encoding="utf-8")
+    monkeypatch.setenv("OPENLLM_CBENCH_MODELS_FILE", str(catalogue))
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-score")
+            await pilot.pause()
+            app.screen.query_one("#score-model-input").value = "no-tools:1b"
+            await pilot.pause()
+            ticks = {s: app.screen.query_one(f"#score-{s}", Checkbox).value
+                     for s in ("s1", "s2", "s3")}
+            note = str(app.screen.query_one("#score-suite-note").content)
+            return ticks, note
+    ticks, note = asyncio.run(scenario())
+    assert ticks == {"s1": False, "s2": True, "s3": False}
+    assert "S1 needs working tool calls" in note and "S2" not in note
+
+
 def test_the_score_screen_counts_the_trials_the_cli_will_run():
     """Quick depth gives S3 more trials than the other suites. The preview's
     count and the progress bar's total read the same helper as the CLI, so

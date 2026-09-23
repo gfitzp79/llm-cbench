@@ -387,28 +387,31 @@ def _assess_preflight(args, suites):
               file=sys.stderr)
         return None
     if good:
-        # SKIPPED, not refused. The whole run used to stop here, and S2
-        # needs a separate reasoning channel that about half of a typical
-        # local library does not have: 14 of 31 catalogued models on the
-        # machine this was written on, llama3.1:8b among them, could not
-        # be scored at all while S2 was ticked, which it is by default.
-        # The suites that can measure the model still run; the scorecard
-        # shows the skipped one as not run and grades the rest.
+        # SKIPPED, not refused. The whole run used to stop here, which
+        # stopped every score of a model the gate had found unable to run
+        # one suite (then S2, on the 14 of 31 catalogued models with no
+        # reasoning channel). Only S1 and S3 can be unrunnable now, both
+        # for want of a working tool call; the suites that can measure the
+        # model still run, and the scorecard shows the skipped ones as not
+        # run.
         suites[:] = good
         # One line: the TUI's condensed log shows lines by their prefix, and
         # a continuation line would be dropped from it.
-        print("[!] Skipping %s: it cannot produce a result on this model (reason above). "
+        print("[!] Skipping %s: %s on this model (reason above). "
               "Running %s; the grade covers only %s."
-              % (named, ", ".join(SUITE_LABELS[s] for s in good),
+              % (named,
+                 "it cannot produce a result" if len(bad) == 1
+                 else "they cannot produce a result",
+                 ", ".join(SUITE_LABELS[s] for s in good),
                  "that suite" if len(good) == 1 else "those suites"), file=sys.stderr)
         return None
     print("[!] NOT STARTING: no suite can produce a gradeable result on this model.",
           file=sys.stderr)
     print("    Running them would spend the full time and score INVALID, which is a\n"
-          "    missing measurement rather than a finding. See the reasons above. This\n"
-          "    model is not assessable by this framework as it stands, most often\n"
-          "    because the endpoint reports neither a `tools` nor a `thinking`\n"
-          "    capability for it.", file=sys.stderr)
+          "    missing measurement rather than a finding. See the reasons above. S1 and\n"
+          "    S3 both need a tool call that works, and this model's did not. S2 grades\n"
+          "    any model that answers: add it with --suites to score this model on it.",
+          file=sys.stderr)
     print("\n    Override with --force-uncheckable to run anyway (the suites will still\n"
           "    score INVALID; the transcripts are the only thing you get).", file=sys.stderr)
     return 2

@@ -175,13 +175,24 @@ def compare_suite(suite, a, b):
 
     ah, an = a.get("hits"), a.get("n")
     bh, bn = b.get("hits"), b.get("n")
+    a_eff = a.get("effective_n") or an
+    b_eff = b.get("effective_n") or bn
+    # S2's graded rate is the worse of probe failure and channel leak, so
+    # two models could be graded on different measures, and a model with
+    # no reasoning channel has only probe failure. Probe failure is the
+    # rate every model has, so S2 is compared on it.
+    if suite == "s2" and a.get("fail_n") and b.get("fail_n"):
+        ah, an = a.get("fail_hits"), a.get("fail_n")
+        bh, bn = b.get("fail_hits"), b.get("fail_n")
+        a_eff = a.get("fail_effective_n") or an
+        b_eff = b.get("fail_effective_n") or bn
+        out["measure"] = ("probe failure (lower bound), the S2 rate every model has; the "
+                          "channel leak is not compared, since a model without a reasoning "
+                          "channel has none")
     if not an or not bn:
         out["verdict"] = NOT_COMPARABLE
         out["reason"] = "one side has no scored rows"
         return out
-
-    a_eff = a.get("effective_n") or an
-    b_eff = b.get("effective_n") or bn
     p1, p2 = ah / an, bh / bn
     deff = max(design_effect(an, a_eff), design_effect(bn, b_eff))
 
@@ -231,6 +242,15 @@ def compare_models(model_a, model_b, root=None):
     if missing:
         return {"error": "No saved scorecard for: " + ", ".join(missing)
                          + ". Run `cbench score --model <tag> --from-existing` first."}
+    # A card made under older rules can lack what the comparison reads (S2's
+    # probe-failure counts and effective n), and fell back quietly to other
+    # numbers without the clustering correction. Re-scoring calls no model.
+    from openllm_cbench.scoring.scorecard import is_stale
+    stale = [m for m, c in ((model_a, card_a), (model_b, card_b)) if is_stale(c)]
+    if stale:
+        return {"error": "The saved scorecard was produced under older scoring rules for: "
+                         + ", ".join(stale) + ". Re-score it from the saved results (calls no "
+                         "model): `cbench score --model <tag> --from-existing`."}
 
     suites = []
     for suite in ("s1", "s2", "s3"):
@@ -271,6 +291,8 @@ def render_comparison(result):
             L += [s["reason"], ""]
             continue
 
+        if s.get("measure"):
+            L += [f"Compared on {s['measure']}.", ""]
         L += [
             f"| | rate | n_eff | 95% CI |",
             f"|---|---|---|---|",

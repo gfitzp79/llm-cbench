@@ -40,9 +40,9 @@ pytest -q                           # no model or network needed
 
 The `--upgrade` line matters: a fresh venv is seeded with whatever
 setuptools your Python shipped, which can carry known advisories that
-nothing here would otherwise update. CI runs the suite on Linux, macOS
-and Windows at both ends of the supported Python range; a pass on your
-machine is one of those six.
+nothing here would otherwise update. CI runs the suite on Linux at both
+ends of the supported Python range on every push, and on Linux, macOS and
+Windows when run by hand; a pass on your machine is one of those six.
 
 ## Layout
 

@@ -17,11 +17,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Both ends of the supported Python range, on all three platforms.
-        # The project has been developed and run live on Windows; Linux and
-        # macOS are covered here because a static read of the code is not
-        # the same thing as knowing it runs.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Both ends of the supported Python range. Linux on every push; all
+        # three platforms only when run by hand (Actions -> tests -> Run
+        # workflow). While the repository is private, runner minutes are
+        # billed and macOS counts 10x: the full matrix cost ~130 billed
+        # minutes a run, 100 of them macOS, against a 2,000-minute month.
+        # Standard runners are free for a public repository -- once public,
+        # put macOS and Windows back on push: they caught real
+        # platform-only defects (a Linux-only run-lock miss, a Windows TUI
+        # race) that Linux alone would not have.
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch'
+              && '["ubuntu-latest", "macos-latest", "windows-latest"]'
+              || '["ubuntu-latest"]') }}
         python: ["3.10", "3.13"]
 
     steps:

@@ -299,16 +299,11 @@ def _cmd_assess(argv):
             lock.release()
 
 
-def _assess_preflight(args, suites, narrowed=None):
-    """Gate-checks the model and refuses suites that cannot produce a
-    gradeable result. Returns an exit code to stop on, or None to carry
-    on.
-
-    `narrowed` builds the command to suggest when only some suites are
-    dead -- a callable taking the surviving suite list. Parameterised
-    because both `assess` and `score` call this and their flags differ:
-    telling someone who ran `cbench score` to run `cbench assess` would
-    hand them a command that produces no grade.
+def _assess_preflight(args, suites):
+    """Gate-checks the model, drops from `suites` (in place) any suite that
+    cannot produce a gradeable result, and says so. Returns an exit code
+    to stop on, or None to carry on with what is left. It stops only when
+    nothing is left.
 
     THREE THINGS IT DELIBERATELY WILL NOT DO.
 
@@ -321,10 +316,9 @@ def _assess_preflight(args, suites, narrowed=None):
     the model, and a pre-flight that can block a run on its own
     malfunction is worse than no pre-flight. It warns and returns None.
 
-    It will not refuse without saying what to run instead. When some
-    suites survive, the message names the narrowed `--suites` flag,
-    because a user who wanted three suites and can have two is better
-    served by the command than by the diagnosis.
+    It will not refuse a model that some suite can measure. It used to,
+    naming the narrowed `--suites` command instead; in practice that
+    stopped every score of every model without a reasoning channel.
 
     ONE THING IT DOES STOP ON, which it once did not: the gate ran and
     NEITHER the model's info route NOR a real chat request got an answer
@@ -381,11 +375,10 @@ def _assess_preflight(args, suites, narrowed=None):
     good = [s for s in suites if s not in bad]
     named = ", ".join(SUITE_LABELS[s] for s in bad)
     print()
-    # The per-suite reasons above went to stdout and the refusal below
-    # goes to stderr. The TUI runs this with stderr=STDOUT down one pipe,
-    # where stdout is block-buffered and stderr is not -- without this
-    # flush the refusal arrives BEFORE the reasons it refers to, and
-    # "See the reasons above" points at nothing.
+    # The per-suite reasons above went to stdout and the notice below goes
+    # to stderr. The TUI runs this with stderr=STDOUT down one pipe, where
+    # stdout is block-buffered and stderr is not: without this flush the
+    # notice arrives BEFORE the reasons it refers to.
     sys.stdout.flush()
     if args.force_uncheckable:
         print("[!] %s cannot produce a gradeable result on this model, and "
@@ -393,20 +386,29 @@ def _assess_preflight(args, suites, narrowed=None):
               "score INVALID; the\n    transcripts are the only thing you get." % named,
               file=sys.stderr)
         return None
-    print("[!] NOT STARTING: %s cannot produce a gradeable result on this model." % named,
-          file=sys.stderr)
-    print("    Running it would spend the full time and score INVALID, which is a missing\n"
-          "    measurement rather than a finding. See the reasons above.", file=sys.stderr)
     if good:
-        suggest = narrowed(good) if narrowed else (
-            "cbench assess --model %s --suites %s --trials %d"
-            % (args.model, ",".join(good), args.trials))
-        print("\n    What you CAN run:\n      %s" % suggest, file=sys.stderr)
-        print("    Read any grade from that as covering only those suites.", file=sys.stderr)
-    else:
-        print("\n    No suite here would produce anything. This model is not assessable by\n"
-              "    this framework as it stands, most often because the endpoint reports\n"
-              "    neither a `tools` nor a `thinking` capability for it.", file=sys.stderr)
+        # SKIPPED, not refused. The whole run used to stop here, and S2
+        # needs a separate reasoning channel that about half of a typical
+        # local library does not have: 14 of 31 catalogued models on the
+        # machine this was written on, llama3.1:8b among them, could not
+        # be scored at all while S2 was ticked, which it is by default.
+        # The suites that can measure the model still run; the scorecard
+        # shows the skipped one as not run and grades the rest.
+        suites[:] = good
+        # One line: the TUI's condensed log shows lines by their prefix, and
+        # a continuation line would be dropped from it.
+        print("[!] Skipping %s: it cannot produce a result on this model (reason above). "
+              "Running %s; the grade covers only %s."
+              % (named, ", ".join(SUITE_LABELS[s] for s in good),
+                 "that suite" if len(good) == 1 else "those suites"), file=sys.stderr)
+        return None
+    print("[!] NOT STARTING: no suite can produce a gradeable result on this model.",
+          file=sys.stderr)
+    print("    Running them would spend the full time and score INVALID, which is a\n"
+          "    missing measurement rather than a finding. See the reasons above. This\n"
+          "    model is not assessable by this framework as it stands, most often\n"
+          "    because the endpoint reports neither a `tools` nor a `thinking`\n"
+          "    capability for it.", file=sys.stderr)
     print("\n    Override with --force-uncheckable to run anyway (the suites will still\n"
           "    score INVALID; the transcripts are the only thing you get).", file=sys.stderr)
     return 2
@@ -457,6 +459,9 @@ def _assess_body(args, suites, SUITE_INFO):
     # score as well.
     _root, _source, _pinned = resolution()
     print(f"Results -> {_root}  ({_source})")
+    from openllm_cbench.core.budget import run_summary
+    print(run_summary(args.model, getattr(args, "num_ctx", None),
+                      getattr(args, "num_predict", None), ask_endpoint=not args.dry_run))
     _warn = unconfigured_warning()
     if _warn:
         print(_warn, file=sys.stderr)
@@ -638,10 +643,7 @@ def _cmd_score(argv):
         # That is how a model reporting nothing but `completion` got
         # three suites and a scorecard of dashes.
         if not args.dry_run and not args.skip_preflight:
-            rc = _assess_preflight(
-                assess_args, suites,
-                narrowed=lambda good: "cbench score --model %s --suites %s --depth %s"
-                                       % (args.model, ",".join(good), args.depth))
+            rc = _assess_preflight(assess_args, suites)
             if rc is not None:
                 return rc
 

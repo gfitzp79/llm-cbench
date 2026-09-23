@@ -86,3 +86,15 @@ def isolate_endpoint_runtime(monkeypatch):
     import openllm_cbench.core.community as community
     monkeypatch.setattr(community, "detect_endpoint_runtime",
                         lambda *a, **k: "ollama 0.0.0-test")
+
+
+@pytest.fixture(autouse=True)
+def isolate_budget_lookup(monkeypatch):
+    """Keeps the automatic generation budget off the live endpoint.
+
+    For a model the catalogue does not know, core/budget.py asks the
+    endpoint whether the model reasons. A test that runs a suite would
+    otherwise get a different budget on a machine with Ollama running than
+    on a CI runner without it. A test about that lookup patches it itself."""
+    import openllm_cbench.core.budget as budget
+    monkeypatch.setattr(budget, "_endpoint_reports_thinking", lambda *a, **k: None)

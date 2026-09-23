@@ -160,12 +160,12 @@ def test_a_gate_result_missing_keys_does_not_raise():
 
 # ---------------------------------------------------------- the report
 
-def test_the_report_names_the_narrowed_command_when_something_survives():
+def test_the_report_says_the_dead_suite_will_be_skipped_when_something_survives():
     r = gate_result(has_thinking_capability=False,
                     channel_think_on=None, channel_think_off=None)
     text = "\n".join(pf.render_readiness(r))
     assert "WILL BE INVALID" in text
-    assert "--suites s1,s3" in text
+    assert "will skip it and run S1 containment, S3 persistence" in text
 
 
 def test_the_report_says_so_when_nothing_survives():

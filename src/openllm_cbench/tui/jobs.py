@@ -120,7 +120,7 @@ def _preflight_prefixes():
 _CONDENSED_KEEP_PREFIXES = (
     "$ ", "=== ", "--- ", "Scoring '", "Full assessment:", "Assessment complete",
     "Aggregating ", "Report:", "CSV:", "Saved:", "[run-lock]", "[!]",
-    "Model not catalogued", "Gate-checking", "Full log saved",
+    "Model not catalogued", "Gate-checking", "Full log saved", "Generation budget:",
 ) + _preflight_prefixes()
 
 # After this line nothing else runs, and what follows is the explanation:

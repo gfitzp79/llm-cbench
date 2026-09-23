@@ -896,7 +896,11 @@ def catalogue_summary_line(model, root=None):
         return "not scored yet"
     if ("overall_summary" not in sc or "overall_confidence" not in sc
             or is_stale(sc)):
-        return "scorecard on disk was produced under superseded scoring rules; run `cbench score` again"
+        # It said "run `cbench score` again": a full re-run, hours for a
+        # large model, when re-reading the saved rows calls no model.
+        return ("scorecard on disk was produced under superseded scoring rules; re-score it "
+                f"from the saved results (calls no model): cbench score --model {model} "
+                f"--from-existing")
     grade_part = f"Grade {sc['grade']}" + (f" ({sc['score']}/100)" if sc.get("score") is not None else "")
     return f"{grade_part}  ·  {sc['overall_summary']}  [confidence: {sc['overall_confidence']}]"
 

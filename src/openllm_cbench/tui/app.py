@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 # Module level: ten teardown guards below catch it, and were written
@@ -88,7 +89,7 @@ async def _populate_model_select(select: Select) -> dict:
         _fill([], "Could not list local models: type the tag below")
         return {}
     options = [(m["name"], m["name"]) for m in sorted(local, key=lambda x: x["name"])]
-    _fill(options, "Pick a local model (or type the tag below)" if options else
+    _fill(options, "Choose a local model, or type a tag below" if options else
           "No local models found: type the tag below")
     return {m["name"]: m for m in local}
 
@@ -102,6 +103,16 @@ def _saved_log_line(result) -> str:
         return ("[yellow]Could not save the full log: the results folder could not be "
                 "written. The output above is all there is.[/yellow]")
     return f"[dim]Full log saved to {path}[/dim]"
+
+
+def _refusal_reason(lines) -> str:
+    """The reason a refused command gave, from its own "[!] NOT STARTING:"
+    line, or "" when it printed none."""
+    for line in reversed(lines or []):
+        text = line.strip()
+        if text.startswith("[!] NOT STARTING"):
+            return text[len("[!] NOT STARTING"):].lstrip(": ").strip()
+    return ""
 
 
 def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
@@ -125,6 +136,12 @@ def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
     # and it did.
     ok = exitcodes.is_success(result.returncode)
     style = "bold green" if ok else "bold red"
+    # A refusal's reason is printed near the top of the output, and the log
+    # box shows the last few lines: "the reason is printed above" pointed at
+    # text that had scrolled out of view. Repeat it here, next to the verdict.
+    reason = _refusal_reason(result.lines) if result.returncode == exitcodes.REFUSED else ""
+    if reason:
+        log.write(f"[bold red]Why: {escape(reason)}[/bold red]")
     meaning = exitcodes.describe(result.returncode,
                                  exitcodes.subcommand_of(result.argv))
     log.write(f"[{style}]{meaning}[/{style}]")
@@ -314,11 +331,11 @@ class RunScreen(Screen):
                 id="suite-select", value=RUNNABLE_SUITES[0][1], allow_blank=False,
             )
             yield Select([], id="model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below). Loading...")
-            yield Input(placeholder="model tag, e.g. gemma3:12b", id="model-input")
+                         prompt="Choose a local model. Loading...")
+            yield Input(placeholder="or type a model tag, e.g. gemma3:12b", id="model-input")
             # OFF by default, matching the CLI's own store_true default.
             yield Checkbox(
-                "Dry run: print the payload and call no model. Leave OFF to actually run.",
+                "Preview only: show the request without calling the model",
                 id="dry-run-checkbox", value=False,
             )
             yield Input(
@@ -392,11 +409,10 @@ class GateScreen(Screen):
         with Vertical(id="gate-form"):
             yield Static("Gate-check a model: equivalent to running `cbench gate` yourself.")
             yield Select([], id="gate-model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below). Loading...")
-            yield Input(placeholder="model tag, e.g. gemma3:12b", id="gate-model-input")
+                         prompt="Choose a local model. Loading...")
+            yield Input(placeholder="or type a model tag, e.g. gemma3:12b", id="gate-model-input")
             yield Checkbox(
-                "Save the result to my model catalogue (models.json); unticked = show "
-                "the result only, nothing is written",
+                "Save the result to my catalogue (unticked: show it only, write nothing)",
                 id="gate-save-checkbox", value=False,
             )
             with Horizontal():
@@ -490,8 +506,8 @@ class ModelsScreen(Screen):
                 "run, not an average (see \"Scoring a model\" in README.md). "
                 "\"not scored\" = never run through `cbench score`. \"needs re-score\" = "
                 "scored under older scoring rules, so the grade is hidden: re-score it on "
-                "the Score screen with \"From existing\" ticked, which reads the saved CSVs "
-                "and calls no model. \"N/A\" = nothing "
+                "the Score screen with \"Re-score saved results only\" ticked, which reads "
+                "the saved CSVs and calls no model. \"N/A\" = nothing "
                 "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
                 "task sets, or pooled CSVs that disagree on sampling or generation "
                 "budgets, or mix CSVs that recorded sampling with ones that predate it). "
@@ -933,71 +949,80 @@ class ScoreScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield InvariantBar()
-        with Vertical(id="score-form"):
+        # Every label says what ticking it does, in the user's words, and
+        # names no flag: "the language doesn't read clean, not clear on what
+        # the user has to do" (owner, 2026-09-23). The preview line under
+        # the buttons still shows the exact command.
+        with VerticalScroll(id="score-form"):
             yield Static(
-                "Score a model: equivalent to running `cbench score` yourself. Runs "
-                "S1/S2/S3 at the chosen depth (or reads existing CSVs with \"From "
-                "existing\", making no model call), then saves an A-F grade (worst of the "
-                "three suites, not an average) plus the full per-suite detail underneath "
-                "it (see README.md \"Scoring a model\"). The Local models screen's Score column "
-                "and `cbench catalogue` both read whatever this produces.\n"
-                "Depth covers 1/3/5 trials. For any other trial count, run `cbench assess "
-                "--model <tag> --trials N` in a terminal: that runs the identical suites "
-                "and aggregation this does, just without producing a grade afterward."
+                "Runs the suites against one model and saves an A-F grade. The worst "
+                "suite sets the grade. Grades appear on the Local models screen and in "
+                "`cbench catalogue`.",
+                id="score-intro",
             )
+            yield Static("[b]Model[/b]", classes="score-heading")
             yield Select([], id="score-model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below). Loading...")
-            yield Input(placeholder="model tag, e.g. gemma3:12b", id="score-model-input")
+                         prompt="Choose a local model. Loading...")
+            yield Input(placeholder="or type a model tag, e.g. gemma3:12b",
+                        id="score-model-input")
             yield Static("", id="score-catalogue-status")
             yield Static("", id="score-hardware-status")
+            yield Static("[b]Suites[/b]", classes="score-heading")
             with Horizontal(id="score-suite-checks"):
                 yield Checkbox("S1 containment", id="score-s1", value=True)
                 yield Checkbox("S2 channel", id="score-s2", value=True)
                 yield Checkbox("S3 persistence", id="score-s3", value=True)
+            yield Static("", id="score-suite-note")
+            yield Static("[b]Depth[/b]", classes="score-heading")
             yield Select(
-                [("quick: 1 trial, 2 for S3 (exploratory only, below this framework's own "
-                  "3-trial citability minimum)", "quick"),
-                 ("standard: 3 trials (default; this framework's own pre-registered "
-                  "minimum for a rate worth citing)", "standard"),
-                 ("thorough: 5 trials (matches the extension-rule's own EXTEND target)",
-                  "thorough")],
+                [("Quick: 1 trial per suite (2 for S3). A first look, not a grade to cite",
+                  "quick"),
+                 ("Standard: 3 trials per suite. The minimum for a grade worth citing",
+                  "standard"),
+                 ("Thorough: 5 trials per suite", "thorough")],
                 id="score-depth-select", value="standard", allow_blank=False,
             )
-            yield Checkbox(
-                "From existing (score whatever CSVs are already on disk for this tag: "
-                "runs nothing, calls no model; depth above is ignored)",
-                id="score-from-existing", value=False,
+            yield Static("[b]Generation budget[/b] (optional)", classes="score-heading")
+            yield Static(
+                "[dim]Leave both blank: cbench sizes them to the model, with a larger "
+                "budget for a model that reasons. Enter a number only to override that.[/dim]",
+                id="score-budget-help",
             )
             with Horizontal(id="score-budget-row"):
-                # Blank means "leave it to the catalogue". An explicit value
-                # beats the per-model config_overrides, which beat the
-                # suite default -- the same precedence the CLI flags have.
-                yield Input(placeholder="Context window, tokens (--num-ctx); blank = "
-                                        "catalogue default", id="score-num-ctx")
-                yield Input(placeholder="Max tokens per reply (--num-predict); blank = "
-                                        "catalogue default",
+                # Blank means automatic (core/budget.py). An explicit value
+                # beats the catalogue's config_overrides, which beat the
+                # automatic value: the same precedence the CLI flags have.
+                yield Input(placeholder="Context window in tokens (blank: automatic)",
+                            id="score-num-ctx")
+                yield Input(placeholder="Reply limit in tokens (blank: automatic)",
                             id="score-num-predict")
-            # OFF by default, matching `cbench score`, whose --dry-run is
-            # store_true. It defaulted ON here, so the button labelled
-            # "Score" did not score unless you noticed and unticked it --
-            # a TUI/CLI divergence, not a safety default.
+            yield Static("[b]Options[/b]", classes="score-heading")
             yield Checkbox(
-                "Dry run: print the payloads and call no model. Leave OFF to actually score.",
+                "Gate-check the model first if it is not in your catalogue (recommended)",
+                id="score-gate-first", value=True,
+            )
+            yield Checkbox(
+                "Re-score saved results only (runs nothing and calls no model)",
+                id="score-from-existing", value=False,
+            )
+            # OFF by default, matching `cbench score`, whose --dry-run is
+            # store_true. It defaulted ON here once, so the button labelled
+            # "Score" did not score unless you noticed and unticked it.
+            yield Checkbox(
+                "Preview only: show the requests without calling the model",
                 id="score-dry-run", value=False,
             )
             yield Checkbox(
-                "Run suites the pre-flight says can't produce a result (`--force-uncheckable`). "
-                "Off by default: a suite whose validity guard cannot fire spends the full "
-                "time and grades INVALID. Tick this only to capture the raw transcripts.",
+                "Also run suites that cannot measure this model (they grade INVALID; "
+                "only useful for their transcripts)",
                 id="score-force-uncheckable", value=False,
             )
-            yield Checkbox(
-                "Gate-check first if not catalogued (runs `cbench gate --save` before "
-                "scoring, so a net-new model isn't silently UNGATED; recommended, "
-                "especially for a model this catalogue has never seen)",
-                id="score-gate-first", value=True,
-            )
-            with Horizontal():
+        # Outside the scrolling form, so the button, the sentence saying what
+        # it will do, and the run's output stay on screen however far the
+        # form is scrolled. The log had whatever height the form left over,
+        # a few lines, and a refusal's reason scrolled out of it.
+        with Vertical(id="score-run"):
+            with Horizontal(id="score-buttons"):
                 yield Button("Score", id="score-start", variant="primary")
                 yield Button("Back", id="score-back")
             yield Static("", id="score-preview")
@@ -1212,16 +1237,16 @@ class ScoreScreen(Screen):
         warning = ("[yellow]" + "  ".join(problems) + "[/yellow]\n") if problems else ""
 
         if "--from-existing" in args:
-            what = ("Will score CSVs ALREADY ON DISK. Runs no trials and calls no "
-                    "model; the depth setting is ignored.")
+            what = ("Will re-score the results already saved for this model. Runs no "
+                    "trials and calls no model.")
         elif "--dry-run" in args:
-            what = ("DRY RUN: prints the payloads and calls no model. No CSV, no "
-                    "grade. Untick 'Dry run' to actually score.")
+            what = ("PREVIEW ONLY: shows the requests and calls no model. Nothing is "
+                    "saved. Untick \"Preview only\" to score.")
         else:
-            what = f"Will run {total_trials} trial(s) against the model and write a grade."
+            what = f"Will run {total_trials} trial(s) against the model and save a grade."
             if "--force-uncheckable" in args:
-                what += (" Pre-flight refusals are OVERRIDDEN, so a suite that cannot "
-                         "produce a result will still spend its full time and grade INVALID.")
+                what += (" Suites that cannot measure this model will run anyway, take "
+                         "their full time, and grade INVALID.")
         argv = cbench_command("score", args)
         gate_argv = self._gate_first_argv(args)
         first = ""
@@ -1262,13 +1287,55 @@ class ScoreScreen(Screen):
         from openllm_cbench.core.registry import load_registry, lookup
         entry = lookup(model, load_registry())
         if entry is not None:
-            status.update("[green]✓ catalogued[/green]: config guidance on file for this tag.")
+            status.update("[green]✓ In your catalogue[/green]: gated before, so the "
+                          "settings it needs are known.")
         else:
             status.update(
-                "[bold yellow]⚠ not in your model catalogue[/bold yellow]: this run will be "
-                "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
+                "[bold yellow]⚠ Not in your catalogue[/bold yellow]: it will be gate-checked "
+                "first, unless you untick that option below."
             )
         hardware.update(self._hardware_fit_line(model, entry))
+        self._apply_suite_readiness(model, entry)
+
+    # Why a suite is unticked, in a sentence rather than the gate's full
+    # diagnosis (that is in the gate report and the catalogue entry).
+    _SUITE_OFF_REASON = {
+        "s1": "S1 needs working tool calls, and this model's did not work when it was gated.",
+        "s2": "S2 needs a separate reasoning trace, and this model does not return one.",
+        "s3": "S3 needs working tool calls, and this model's did not work when it was gated.",
+    }
+
+    def _apply_suite_readiness(self, model, entry) -> None:
+        """Ticks the suites that can measure this model and unticks the rest,
+        from what `cbench gate` recorded in the catalogue, and says why.
+
+        All three were ticked for every model, so a model without a
+        reasoning channel (llama3.1:8b, and 13 more in the catalogue this
+        was found on) went to the pre-flight with S2 ticked and was refused
+        there, its reason scrolled out of view. Applied only when the model
+        changes, so a box the user ticks back stays ticked; the pre-flight
+        still skips a suite that cannot run."""
+        if model == getattr(self, "_suites_set_for", None):
+            return
+        self._suites_set_for = model
+        readiness = (entry or {}).get("suite_readiness") or {}
+        off = []
+        try:
+            for suite in ("s1", "s2", "s3"):
+                verdict = (readiness.get(suite) or [""])[0]
+                can_run = verdict != "invalid"
+                self.query_one(f"#score-{suite}", Checkbox).value = can_run
+                if not can_run:
+                    off.append(suite)
+            note = self.query_one("#score-suite-note", Static)
+        except NoMatches:
+            return
+        if off:
+            note.update("[yellow]" + " ".join(self._SUITE_OFF_REASON[s] for s in off)
+                        + f" {'It is' if len(off) == 1 else 'They are'} unticked; the grade "
+                        f"covers the rest.[/yellow]")
+        else:
+            note.update("")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "score-back":
@@ -1321,15 +1388,15 @@ class ScoreScreen(Screen):
             missing = [s for s in suites if not find_csvs(suite_dirs[s][0], suite_dirs[s][1], tag)]
             if len(missing) == len(suites):
                 log.write(
-                    f"[bold red]\"From existing\" is checked, but no "
-                    f"{'/'.join(s.upper() for s in suites)} CSVs exist yet for '{model}': there is "
-                    f"nothing on disk to score. This would run nothing and produce grade N/A. Uncheck "
-                    f"\"From existing\" (and pick a depth) to actually run trials.[/bold red]"
+                    f"[bold red]\"Re-score saved results only\" is ticked, but no "
+                    f"{'/'.join(s.upper() for s in suites)} results are saved yet for '{model}': "
+                    f"there is nothing to re-score, and the grade would be N/A. Untick it "
+                    f"(and pick a depth) to run the suites.[/bold red]"
                 )
                 return
             elif missing:
                 log.write(
-                    f"[bold yellow]\"From existing\": no {'/'.join(s.upper() for s in missing)} CSVs "
+                    f"[bold yellow]Re-score saved results only: no {'/'.join(s.upper() for s in missing)} CSVs "
                     f"exist yet for '{model}', so {'those suites' if len(missing) > 1 else 'that suite'} will "
                     f"show 'not run' below; the grade will only reflect whichever suite(s) do have "
                     f"data.[/bold yellow]"
@@ -1368,7 +1435,7 @@ class ScoreScreen(Screen):
                            gate_first_argv=None) -> None:
         if gate_first_argv:
             log.write("[dim]Model not catalogued, so gate-checking first "
-                      "(uncheck \"Gate-check first\" to skip this):[/dim]")
+                      "(untick \"Gate-check the model first\" to skip this):[/dim]")
             log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
             gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
             log.write(_saved_log_line(gate_result))
@@ -2188,8 +2255,16 @@ class CBenchTUI(App):
        edge of the terminal, where they cannot be clicked at all. */
     #community-tree, #community-tree-empty { width: 40%; }
     #community-form-inner { width: 60%; }
+    #score-form { height: 1fr; padding: 0 1; }
+    .score-heading { margin: 1 0 0 0; }
     #score-suite-checks { height: auto; }
     #score-suite-checks Checkbox { margin: 0 2 0 0; }
+    #score-budget-row { height: auto; }
+    #score-budget-row Input { width: 1fr; }
+    #score-run { height: auto; padding: 0 1; }
+    #score-buttons { height: auto; }
+    #score-buttons Button { margin: 0 1 0 0; }
+    #score-log { height: 10; }
     #about-body { height: 1fr; padding: 1 2; }
     """
 

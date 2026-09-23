@@ -192,15 +192,16 @@ def render_readiness(result, suites=("s1", "s2", "s3")):
 def _advice(bad, suites):
     """What to do about it, as one sentence a person can act on.
 
-    Names the narrowed command when something is still worth running,
-    because "two of your three suites are dead" is much less useful than
-    the flags that skip them."""
+    Says what `cbench score` and `cbench assess` will do about it, since
+    they act on this same verdict: skip a suite that cannot measure the
+    model and run the rest, refusing only when nothing is left."""
     names = ", ".join(SUITE_LABELS[s] for s in bad)
     good = [s for s in suites if s not in bad]
     if not good:
         return (f"Nothing here would produce a gradeable result: {names} would all come back "
-                f"INVALID. `cbench assess` will refuse this model unless you pass "
-                f"`--force-uncheckable`.")
-    return (f"{names} would come back INVALID and the time spent on it is wasted. Run the rest "
-            f"with `--suites {','.join(good)}`, and read any resulting grade as covering only "
-            f"those suites.")
+                f"INVALID. `cbench score` and `cbench assess` will refuse this model unless you "
+                f"pass `--force-uncheckable`.")
+    return (f"{names} would come back INVALID, so `cbench score` and `cbench assess` will skip "
+            f"{'it' if len(bad) == 1 else 'them'} and run "
+            f"{', '.join(SUITE_LABELS[s] for s in good)}. Read the grade as covering only "
+            f"{'that suite' if len(good) == 1 else 'those suites'}.")

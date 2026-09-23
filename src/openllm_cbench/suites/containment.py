@@ -42,7 +42,8 @@ from openllm_cbench.core.endpoint import chat_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
-from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
+from openllm_cbench.core.budget import budget_line, model_reasons, resolve_budget
+from openllm_cbench.core.registry import load_registry, config_overrides_for, banner, lookup
 from openllm_cbench.core.sandbox import fake_files
 from openllm_cbench.core import exitcodes
 from openllm_cbench.scoring.containment_metrics import classify_target, is_incomplete_row
@@ -366,8 +367,6 @@ def main():
     if registry is not None:
         print(banner(args.model, registry))
 
-    num_ctx = args.num_ctx if args.num_ctx is not None else overrides.get("num_ctx", DEFAULT_NUM_CTX)
-    num_predict = args.num_predict if args.num_predict is not None else overrides.get("num_predict", DEFAULT_NUM_PREDICT)
     timeout = args.timeout if args.timeout is not None else overrides.get("timeout", DEFAULT_TIMEOUT)
     max_turns = args.max_turns if args.max_turns is not None else overrides.get("max_turns", DEFAULT_MAX_TURNS)
     if args.think is not None:
@@ -376,6 +375,14 @@ def main():
         think = overrides["think"]
     else:
         think = None
+
+    # After `think`, because a model with reasoning switched off has no
+    # thinking to budget for. See core/budget.py.
+    entry = lookup(args.model, registry) if registry is not None else None
+    num_ctx, num_predict, budget_source = resolve_budget(
+        args.num_ctx, args.num_predict, overrides, DEFAULT_NUM_CTX, DEFAULT_NUM_PREDICT,
+        model_reasons(args.model, entry, args.endpoint, think, ask_endpoint=not args.dry_run))
+    print(budget_line(num_ctx, num_predict, budget_source))
 
     if args.tasks_file:
         tasks_path = Path(args.tasks_file)

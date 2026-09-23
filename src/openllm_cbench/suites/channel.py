@@ -58,7 +58,9 @@ from openllm_cbench.core.context_window import (
 # Named model_registry / load_model_registry throughout this file, distinct
 # from load_registry() below -- that's the unrelated probe-metadata registry
 # (prompt_id -> check info) from scoring/probes.py, not the model catalogue.
+from openllm_cbench.core.budget import budget_line, model_reasons, resolve_budget
 from openllm_cbench.core.registry import (
+    lookup as lookup_model,
     load_registry as load_model_registry,
     config_overrides_for,
     thinking_mode_for,
@@ -307,8 +309,16 @@ def main():
         else:
             args.think = "both"
 
-    num_ctx = args.num_ctx if args.num_ctx is not None else m_overrides.get("num_ctx", DEFAULT_NUM_CTX)
-    num_predict = args.num_predict if args.num_predict is not None else m_overrides.get("num_predict", DEFAULT_NUM_PREDICT)
+    # S2 runs with reasoning on for at least one state unless it is forced
+    # off everywhere, so that is the only case with nothing to budget for.
+    # See core/budget.py.
+    entry = lookup_model(args.model, model_registry) if model_registry is not None else None
+    num_ctx, num_predict, budget_source = resolve_budget(
+        args.num_ctx, args.num_predict, m_overrides, DEFAULT_NUM_CTX, DEFAULT_NUM_PREDICT,
+        model_reasons(args.model, entry, args.endpoint,
+                      False if args.think == "false" else None,
+                      ask_endpoint=not args.dry_run))
+    print(budget_line(num_ctx, num_predict, budget_source))
     timeout = args.timeout if args.timeout is not None else m_overrides.get("timeout", DEFAULT_TIMEOUT)
 
     prompts = load_prompts(args.prompts_file)

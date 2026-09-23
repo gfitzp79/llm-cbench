@@ -76,30 +76,39 @@ def test_assess_refuses_a_model_with_no_usable_capability(endpoint, monkeypatch,
     assert _run(["assess", "--model", "exaone-deep:7.8b", "--trials", "3"], monkeypatch) == 2
     err = capsys.readouterr().err
     assert "NOT STARTING" in err
-    assert "No suite here would produce anything" in err
+    assert "no suite can produce a gradeable result" in err
 
 
-def test_assess_refuses_s2_and_names_the_narrowed_command(endpoint, monkeypatch, capsys):
-    """llama3.1:8b: S1 and S3 are fine, S2 cannot fire. A user who wanted
-    three suites and can have two is better served by the command than by
-    the diagnosis."""
+def _records_suites(monkeypatch):
+    ran = []
+    monkeypatch.setattr(cli, "_assess_body",
+                        lambda args, suites, info: ran.append(list(suites)) or 0)
+    return ran
+
+
+def test_assess_skips_s2_and_runs_the_suites_that_can_measure(endpoint, monkeypatch, capsys):
+    """llama3.1:8b: S1 and S3 are fine, S2 cannot fire. REVERSED 2026-09-23:
+    this used to refuse the whole run and name the narrowed command. S2
+    needs a reasoning channel that 14 of 31 catalogued models on the
+    machine this was written on lack, and S2 is ticked by default, so the
+    refusal stopped every score of every one of them. Reported as "every
+    model I've tried doesn't run now"."""
     endpoint(show=TOOLS_ONLY)
-    _never_runs(monkeypatch)
-    assert _run(["assess", "--model", "llama3.1:8b", "--trials", "3"], monkeypatch) == 2
+    ran = _records_suites(monkeypatch)
+    assert _run(["assess", "--model", "llama3.1:8b", "--trials", "3"], monkeypatch) == 0
+    assert ran == [["s1", "s3"]]
     err = capsys.readouterr().err
-    assert "--suites s1,s3" in err
-    assert "--trials 3" in err
+    assert "Skipping S2 channel" in err
+    assert "NOT STARTING" not in err
 
 
-def test_score_is_guarded_too_and_suggests_a_score_command(endpoint, monkeypatch, capsys):
-    """THE PATH THE TUI RUNS. Telling someone who ran `cbench score` to
-    run `cbench assess` would hand them a command that produces no
-    grade."""
+def test_score_skips_s2_too(endpoint, monkeypatch, capsys):
+    """THE PATH THE TUI RUNS."""
     endpoint(show=TOOLS_ONLY)
-    _never_runs(monkeypatch)
-    assert _run(["score", "--model", "llama3.1:8b", "--depth", "quick"], monkeypatch) == 2
-    err = capsys.readouterr().err
-    assert "cbench score --model llama3.1:8b --suites s1,s3 --depth quick" in err
+    ran = _records_suites(monkeypatch)
+    _run(["score", "--model", "llama3.1:8b", "--depth", "quick"], monkeypatch)
+    assert ran == [["s1", "s3"]]
+    assert "Skipping S2 channel" in capsys.readouterr().err
 
 
 def test_the_requested_suites_are_what_gets_judged(endpoint, monkeypatch, capsys):

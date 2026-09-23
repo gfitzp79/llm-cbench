@@ -47,9 +47,17 @@ async def _click(pilot, selector):
     neighbour. Two identical readings 50 ms apart means the layout settled.
     """
     previous = None
+    scrolled = False
     for _ in range(100):
         try:
-            region = pilot.app.screen.query_one(selector).region
+            widget = pilot.app.screen.query_one(selector)
+            # A user scrolls a long form to reach a box further down; a
+            # click at a widget's position while it is scrolled out of
+            # view lands on nothing.
+            if not scrolled:
+                widget.scroll_visible(animate=False)
+                scrolled = True
+            region = widget.region
         except Exception:
             region = None  # not mounted yet
         if region is not None and region.area and region == previous:
@@ -295,7 +303,7 @@ def test_models_screen_explains_the_score_column_persistently():
             assert "not scored" in legend
             # Every scorecard reads this after a scoring-rules change, and
             # the legend explained every label except it.
-            assert "needs re-score" in legend and "From existing" in legend
+            assert "needs re-score" in legend and "Re-score saved results only" in legend
             assert "INVALID" in legend
             assert "grade" in legend.lower()
             assert "caveat" in legend
@@ -493,8 +501,8 @@ def test_score_screen_shows_uncatalogued_warning_before_running():
             await pilot.press(*list("definitely-not-a-real-model:1b"))
             await pilot.pause()
             status = str(app.screen.query_one("#score-catalogue-status").content)
-            assert "not in your model catalogue" in status
-            assert "UNGATED" in status
+            assert "Not in your catalogue" in status
+            assert "gate-checked first" in status
     asyncio.run(scenario())
 
 
@@ -509,8 +517,8 @@ def test_score_screen_shows_catalogued_status_for_a_known_model():
             await pilot.press(*list("gemma3:12b"))  # ships in data/models/verified.json
             await pilot.pause()
             status = str(app.screen.query_one("#score-catalogue-status").content)
-            assert "catalogued" in status.lower()
-            assert "not in your model catalogue" not in status
+            assert "In your catalogue" in status
+            assert "Not in your catalogue" not in status
     asyncio.run(scenario())
 
 
@@ -587,7 +595,7 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
             # The preview describes the run BEFORE the button is pressed --
             # that is the point of it, so assert it here rather than after.
             pre_press = str(app.screen.query_one("#score-preview").content)
-            assert "DRY RUN" in pre_press
+            assert "PREVIEW ONLY" in pre_press
             assert "calls no model" in pre_press
 
             await _click(pilot, "#score-start")
@@ -670,7 +678,7 @@ def test_score_screen_from_existing_blocks_when_nothing_on_disk_to_score():
             await _click(pilot, "#score-start")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
-            assert any("nothing on disk to score" in line.lower() for line in log_lines)
+            assert any("nothing to re-score" in line.lower() for line in log_lines)
             # It must not have LAUNCHED. Previously asserted as an empty
             # preview, which stopped meaning that once the preview began
             # describing the pending run live -- an empty preview now only
@@ -768,7 +776,7 @@ def test_score_screen_warns_about_an_uncatalogued_model_too_big_for_the_gpu(monk
                 await asyncio.sleep(0.05)
             cat = str(app.screen.query_one("#score-catalogue-status").content)
             hw = str(app.screen.query_one("#score-hardware-status").content)
-            assert "not in your model catalogue" in cat, "precondition: uncatalogued"
+            assert "Not in your catalogue" in cat, "precondition: uncatalogued"
             assert "spill into system RAM" in hw, f"no warning for an oversized model: {hw!r}"
     asyncio.run(scenario())
 

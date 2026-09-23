@@ -48,6 +48,21 @@ def fixture_registry(tmp_path):
                 "config_overrides": {},
                 "caveats": [],
             },
+            "catalogue-reasoning-model:1b": {
+                "thinking": True,
+                "config_overrides": {},
+                "caveats": [],
+            },
+            "catalogue-plain-model:1b": {
+                "thinking": False,
+                "config_overrides": {},
+                "caveats": [],
+            },
+            "catalogue-reasoning-off-model:1b": {
+                "thinking": True,
+                "config_overrides": {"think": False},
+                "caveats": [],
+            },
         }
     }
     path = tmp_path / "models.json"
@@ -123,3 +138,48 @@ def test_persistence_applies_catalogued_overrides(fixture_registry):
     )
     assert '"num_ctx": 9999' in out
     assert '"num_predict": 4321' in out
+
+
+# --- automatic generation budget (core/budget.py) ------------------------
+
+SUITE_ARGS = {
+    "openllm_cbench.suites.containment": ["--task", "fx_lookup", "--boundary", "stated"],
+    "openllm_cbench.suites.channel": ["--think", "true"],
+    "openllm_cbench.suites.persistence": [],
+}
+
+
+@pytest.mark.parametrize("module", sorted(SUITE_ARGS))
+def test_a_reasoning_model_gets_the_reasoning_budget_in_every_suite(fixture_registry, module):
+    """At 2,048 reply tokens qwen3:4b wrote no S3 log in four rows of four;
+    at 8,192 every row finished. Nothing set that for a reasoning model:
+    the catalogue's per-model config_overrides were designed for it and
+    left empty, so the fix was a flag the user had to know about."""
+    out = _run_dry(module, ["--model", "catalogue-reasoning-model:1b", *SUITE_ARGS[module]],
+                   fixture_registry)
+    assert '"num_predict": 8192' in out
+    assert '"num_ctx": 16384' in out
+    assert "automatic, sized for a reasoning model" in out
+
+
+@pytest.mark.parametrize("module", sorted(SUITE_ARGS))
+def test_a_model_that_does_not_reason_keeps_the_suite_default(fixture_registry, module):
+    out = _run_dry(module, ["--model", "catalogue-plain-model:1b", *SUITE_ARGS[module]],
+                   fixture_registry)
+    assert '"num_predict": 2048' in out
+    assert "automatic, this suite's default" in out
+
+
+def test_reasoning_switched_off_needs_no_reasoning_budget(fixture_registry):
+    out = _run_dry("openllm_cbench.suites.persistence",
+                   ["--model", "catalogue-reasoning-off-model:1b"], fixture_registry)
+    assert '"num_predict": 2048' in out
+
+
+def test_a_flag_still_beats_the_automatic_budget(fixture_registry):
+    out = _run_dry("openllm_cbench.suites.persistence",
+                   ["--model", "catalogue-reasoning-model:1b", "--num-predict", "3000"],
+                   fixture_registry)
+    assert '"num_predict": 3000' in out
+    assert '"num_ctx": 16384' in out
+    assert "context automatic, sized for a reasoning model; reply set on the command line" in out

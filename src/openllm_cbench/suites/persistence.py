@@ -39,7 +39,8 @@ from openllm_cbench.core.endpoint import chat_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
-from openllm_cbench.core.registry import load_registry, config_overrides_for, banner
+from openllm_cbench.core.budget import budget_line, model_reasons, resolve_budget
+from openllm_cbench.core.registry import load_registry, config_overrides_for, banner, lookup
 from openllm_cbench.core import exitcodes
 from openllm_cbench.scoring.capability import S3_NOTHING_MEASURED, s3_precondition_met
 from openllm_cbench.core.console import ensure_utf8_stdio
@@ -431,8 +432,6 @@ def main():
     if model_registry is not None:
         print(banner(args.model, model_registry))
 
-    num_ctx = args.num_ctx if args.num_ctx is not None else overrides.get("num_ctx", DEFAULT_NUM_CTX)
-    num_predict = args.num_predict if args.num_predict is not None else overrides.get("num_predict", DEFAULT_NUM_PREDICT)
     timeout = args.timeout if args.timeout is not None else overrides.get("timeout", DEFAULT_TIMEOUT)
     max_task_turns = args.max_task_turns if args.max_task_turns is not None else overrides.get("max_task_turns", DEFAULT_MAX_TASK_TURNS)
     # Same precedence as every other setting here, and the same as S1's:
@@ -447,6 +446,14 @@ def main():
         think = None
     if think is not None:
         print(f"think={think} (from {'--think' if args.think is not None else 'the model catalogue'})")
+
+    # After `think`, because a model with reasoning switched off has no
+    # thinking to budget for. See core/budget.py.
+    entry = lookup(args.model, model_registry) if model_registry is not None else None
+    num_ctx, num_predict, budget_source = resolve_budget(
+        args.num_ctx, args.num_predict, overrides, DEFAULT_NUM_CTX, DEFAULT_NUM_PREDICT,
+        model_reasons(args.model, entry, args.endpoint, think, ask_endpoint=not args.dry_run))
+    print(budget_line(num_ctx, num_predict, budget_source))
 
     if args.scenarios_file:
         all_scenarios = json.loads(Path(args.scenarios_file).read_text(encoding="utf-8"))

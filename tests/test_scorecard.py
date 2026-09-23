@@ -391,8 +391,9 @@ def test_catalogue_display_survives_a_scorecard_saved_by_an_older_schema(tmp_pat
     # Asserted on the BEHAVIOUR, not the sentence: the message was reworded
     # when a scoring-version stamp joined the pre-grade check, and a test
     # that pins prose fails on an improvement to it.
-    assert "cbench score" in line and "again" in line
-    assert "run `cbench score` again" in line
+    # The re-score it asks for reads the saved rows; it once said "run
+    # `cbench score` again", a full re-run of every suite.
+    assert "cbench score --model" in line and "--from-existing" in line
 
 
 def test_catalogue_compact_label_rejects_a_stale_pre_grade_compact_summary(tmp_path):

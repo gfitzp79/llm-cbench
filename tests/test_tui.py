@@ -32,6 +32,24 @@ from openllm_cbench.tui.app import (  # noqa: E402
 )
 
 
+async def _click(pilot, selector):
+    """Click a widget once it has been laid out.
+
+    A click issued before layout lands at (0, 0), which is the header's
+    command-palette icon: the palette opens and the test's next query runs
+    against it. Seen on the slow Windows / Python 3.10 CI runner, a
+    different test each time, straight after navigating to a new screen.
+    """
+    for _ in range(100):
+        try:
+            if pilot.app.screen.query_one(selector).region.area:
+                break
+        except Exception:
+            pass  # not mounted yet
+        await pilot.pause(0.05)
+    await pilot.click(selector)
+
+
 @pytest.fixture(autouse=True)
 def isolated_results_dir(tmp_path, monkeypatch):
     """A test that presses an action button (dry-run or --from-existing,
@@ -174,7 +192,7 @@ def test_dashboard_composes_and_navigates_to_run_screen():
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
             assert isinstance(app.screen, DashboardScreen)
-            await pilot.click("#goto-run")
+            await _click(pilot, "#goto-run")
             await pilot.pause()
             assert isinstance(app.screen, RunScreen)
     asyncio.run(scenario())
@@ -185,12 +203,12 @@ def test_dashboard_navigates_to_gate_and_reports_screens():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-gate")
+            await _click(pilot, "#goto-gate")
             await pilot.pause()
             assert isinstance(app.screen, GateScreen)
             app.pop_screen()
             await pilot.pause()
-            await pilot.click("#goto-reports")
+            await _click(pilot, "#goto-reports")
             await pilot.pause()
             assert isinstance(app.screen, ReportsScreen)
     asyncio.run(scenario())
@@ -201,12 +219,12 @@ def test_run_screen_requires_a_model_before_running():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-run")
+            await _click(pilot, "#goto-run")
             await pilot.pause()
             # No model typed -- pressing Run must not attempt to launch a
             # subprocess (checked by asserting the log shows the local
             # validation message, not a "$ ..." command line).
-            await pilot.click("#run-button")
+            await _click(pilot, "#run-button")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#run-log").lines]
             assert any("model tag is required" in line.lower() for line in log_lines)
@@ -220,7 +238,7 @@ def test_invariant_bar_present_on_every_pushed_screen():
             await pilot.pause()
             text = app.screen.query_one("#invariant-text").content
             assert "ATTEMPT" in str(text)
-            await pilot.click("#goto-run")
+            await _click(pilot, "#goto-run")
             await pilot.pause()
             text = app.screen.query_one("#invariant-text").content
             assert "ATTEMPT" in str(text)
@@ -246,7 +264,7 @@ def test_dashboard_navigates_to_models_screen():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
             assert isinstance(app.screen, ModelsScreen)
     asyncio.run(scenario())
@@ -262,7 +280,7 @@ def test_models_screen_explains_the_score_column_persistently():
         app = CBenchTUI()
         async with app.run_test(size=(160, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
             legend = str(app.screen.query_one("#models-score-legend").content)
             assert "not scored" in legend
@@ -291,9 +309,9 @@ def test_models_screen_gate_all_uses_the_real_discover_subcommand(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(160, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#models-gate-all")
+            await _click(pilot, "#models-gate-all")
             for _ in range(5):
                 await pilot.pause()
     asyncio.run(scenario())
@@ -309,9 +327,9 @@ def test_models_screen_navigates_to_pull_screen():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#goto-pull")
+            await _click(pilot, "#goto-pull")
             await pilot.pause()
             assert isinstance(app.screen, PullScreen)
     asyncio.run(scenario())
@@ -322,11 +340,11 @@ def test_pull_screen_requires_a_model_before_pulling():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#goto-pull")
+            await _click(pilot, "#goto-pull")
             await pilot.pause()
-            await pilot.click("#pull-button")
+            await _click(pilot, "#pull-button")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#pull-log").lines]
             assert any("model tag is required" in line.lower() for line in log_lines)
@@ -338,11 +356,11 @@ def test_pull_screen_requires_a_model_before_searching():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#goto-pull")
+            await _click(pilot, "#goto-pull")
             await pilot.pause()
-            await pilot.click("#search-button")
+            await _click(pilot, "#search-button")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#pull-log").lines]
             assert any("model tag is required" in line.lower() for line in log_lines)
@@ -354,13 +372,13 @@ def test_pull_screen_search_button_builds_the_correct_search_command():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#goto-pull")
+            await _click(pilot, "#goto-pull")
             await pilot.pause()
-            await pilot.click("#pull-model-input")
+            await _click(pilot, "#pull-model-input")
             await pilot.press(*list("ornith-1.5:9b"))
-            await pilot.click("#search-button")
+            await _click(pilot, "#search-button")
             await pilot.pause()
             # .text (not str(Strip), which reprs each Rich segment
             # separately) -- a wrapped value like "ornith-1.5:9b" can
@@ -380,7 +398,7 @@ def test_run_screen_has_a_model_select_alongside_the_free_text_input():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-run")
+            await _click(pilot, "#goto-run")
             await pilot.pause()
             from textual.widgets import Select, Input
             assert app.screen.query_one("#model-select", Select) is not None
@@ -393,7 +411,7 @@ def test_gate_screen_has_a_model_select_alongside_the_free_text_input():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-gate")
+            await _click(pilot, "#goto-gate")
             await pilot.pause()
             from textual.widgets import Select, Input
             assert app.screen.query_one("#gate-model-select", Select) is not None
@@ -407,10 +425,10 @@ def test_dashboard_navigates_to_about_screen():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-about")
+            await _click(pilot, "#goto-about")
             await pilot.pause()
             assert isinstance(app.screen, AboutScreen)
-            await pilot.click("#about-back")
+            await _click(pilot, "#about-back")
             await pilot.pause()
             assert isinstance(app.screen, DashboardScreen)
     asyncio.run(scenario())
@@ -424,7 +442,7 @@ def test_about_screen_mentions_both_ai_tool_families_with_no_vendor_lock_in():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-about")
+            await _click(pilot, "#goto-about")
             await pilot.pause()
             text = str(app.screen.query_one("#about-body Static").content)
             assert "Claude Code" in text or "Claude" in text
@@ -441,7 +459,7 @@ def test_dashboard_navigates_to_score_screen():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
             assert isinstance(app.screen, ScoreScreen)
     asyncio.run(scenario())
@@ -457,9 +475,9 @@ def test_score_screen_shows_uncatalogued_warning_before_running():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("definitely-not-a-real-model:1b"))
             await pilot.pause()
             status = str(app.screen.query_one("#score-catalogue-status").content)
@@ -473,9 +491,9 @@ def test_score_screen_shows_catalogued_status_for_a_known_model():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("gemma3:12b"))  # ships in data/models/verified.json
             await pilot.pause()
             status = str(app.screen.query_one("#score-catalogue-status").content)
@@ -489,7 +507,7 @@ def test_score_screen_gate_first_defaults_on_and_can_be_unchecked():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
             from textual.widgets import Checkbox
             assert app.screen.query_one("#score-gate-first", Checkbox).value is True
@@ -501,9 +519,9 @@ def test_score_screen_requires_a_model_before_starting():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
             assert any("model tag is required" in line.lower() for line in log_lines)
@@ -515,13 +533,13 @@ def test_score_screen_requires_at_least_one_suite():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
             for cb_id in ("#score-s1", "#score-s2", "#score-s3"):
-                await pilot.click(cb_id)  # uncheck all three (default is checked)
-            await pilot.click("#score-start")
+                await _click(pilot, cb_id)  # uncheck all three (default is checked)
+            await _click(pilot, "#score-start")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
             assert any("select at least one suite" in line.lower() for line in log_lines)
@@ -542,17 +560,17 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-s2")  # uncheck S2, leaving S1+S3
+            await _click(pilot, "#score-s2")  # uncheck S2, leaving S1+S3
             # "x:1b" isn't catalogued, and gate-first (default on) needs a
             # live endpoint regardless of --dry-run -- uncheck it so this
             # test stays hermetic, same as every other "no live endpoint
             # needed" test in this file.
-            await pilot.click("#score-gate-first")
-            await pilot.click("#score-dry-run")  # off by default; tick it
+            await _click(pilot, "#score-gate-first")
+            await _click(pilot, "#score-dry-run")  # off by default; tick it
             await pilot.pause()
             # The preview describes the run BEFORE the button is pressed --
             # that is the point of it, so assert it here rather than after.
@@ -560,7 +578,7 @@ def test_score_screen_dry_run_builds_the_correct_score_command():
             assert "DRY RUN" in pre_press
             assert "calls no model" in pre_press
 
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             assert "score" in preview
@@ -598,16 +616,16 @@ def test_score_screen_from_existing_ignores_depth_and_dry_run(isolated_results_d
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-from-existing")
+            await _click(pilot, "#score-from-existing")
             # Same reason as the dry-run test above: gate-first needs a
             # live endpoint, --from-existing doesn't -- don't let the
             # former sneak a real network dependency into this test.
-            await pilot.click("#score-gate-first")
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-gate-first")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             assert "--from-existing" in preview
@@ -631,13 +649,13 @@ def test_score_screen_from_existing_blocks_when_nothing_on_disk_to_score():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("brand-new:1b"))
-            await pilot.click("#score-from-existing")
-            await pilot.click("#score-gate-first")
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-from-existing")
+            await _click(pilot, "#score-gate-first")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#score-log").lines]
             assert any("nothing on disk to score" in line.lower() for line in log_lines)
@@ -661,13 +679,13 @@ def test_score_screen_from_existing_warns_about_only_the_missing_suites(isolated
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-from-existing")
-            await pilot.click("#score-gate-first")
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-from-existing")
+            await _click(pilot, "#score-gate-first")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             assert "--from-existing" in preview  # proceeded, wasn't blocked
@@ -701,7 +719,7 @@ def test_score_screen_survives_being_left_while_the_hardware_probe_runs(monkeypa
         # surfaces out of run_test()'s own __aexit__.
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
         await asyncio.sleep(0.6)   # outlive the probe, after teardown
     asyncio.run(scenario())
@@ -729,7 +747,7 @@ def test_score_screen_warns_about_an_uncatalogued_model_too_big_for_the_gpu(monk
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             for _ in range(8):
                 await pilot.pause()
             app.screen.query_one("#score-model-input").value = "huge:30b"
@@ -754,9 +772,9 @@ def test_score_screen_shows_hardware_fit_warning_when_model_wont_fit(monkeypatch
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("gemma3:12b"))  # ships in verified.json: 12.2B, Q4_K_M
             for _ in range(5):
                 await pilot.pause()
@@ -776,9 +794,9 @@ def test_score_screen_shows_no_hardware_warning_when_model_fits(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("gemma3:12b"))
             for _ in range(5):
                 await pilot.pause()
@@ -793,7 +811,7 @@ def test_dashboard_navigates_to_community_validate_screen():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             assert isinstance(app.screen, CommunityScreen)
     asyncio.run(scenario())
@@ -804,9 +822,9 @@ def test_community_validate_screen_requires_a_path_before_starting():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
-            await pilot.click("#community-start")
+            await _click(pilot, "#community-start")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
             assert any("path is required" in line.lower() for line in log_lines)
@@ -818,11 +836,11 @@ def test_community_validate_screen_builds_the_correct_command():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             path_input = app.screen.query_one("#community-path-input")
             path_input.value = "community-results/gemma3-12b/alice_20260912"
-            await pilot.click("#community-start")
+            await _click(pilot, "#community-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "community-validate" in preview
@@ -843,7 +861,7 @@ def test_community_screen_buttons_are_clickable_with_no_community_results_dir():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             assert app.screen.query_one("#community-tree-empty") is not None
             for btn_id in ("#community-package", "#community-start", "#community-submit"):
@@ -857,10 +875,10 @@ def test_community_screen_packages_by_model_tag():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             app.screen.query_one("#community-model-input").value = "x:1b"
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "community-package" in preview
@@ -873,9 +891,9 @@ def test_community_screen_package_requires_a_model_tag():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
             assert any("model tag is required" in line.lower() for line in log_lines)
@@ -892,18 +910,18 @@ def test_community_screen_terms_checkbox_gates_accept_terms():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             assert app.screen.query_one("#community-terms", Checkbox).value is False
 
             app.screen.query_one("#community-model-input").value = "x:1b"
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             assert "--accept-terms" not in str(app.screen.query_one("#community-preview").content)
             log_lines = [x.text for x in app.screen.query_one("#community-log").lines]
             assert any("terms not accepted" in l.lower() for l in log_lines)
 
-            await pilot.click("#community-terms")
+            await _click(pilot, "#community-terms")
             await pilot.pause()
             assert app.screen.query_one("#community-terms", Checkbox).value is True
             # Textual debounces a Button: Button._on_click ignores a click
@@ -915,7 +933,7 @@ def test_community_screen_terms_checkbox_gates_accept_terms():
             # was not. A human double-tapping inside 200ms is debounced by
             # design, so this is test fragility, not a product defect.
             await asyncio.sleep(0.25)
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             assert "--accept-terms" in str(app.screen.query_one("#community-preview").content)
     asyncio.run(scenario())
@@ -929,12 +947,12 @@ def test_community_screen_submit_previews_without_confirm():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             from textual.widgets import Checkbox
             assert app.screen.query_one("#community-confirm", Checkbox).value is False
             app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
-            await pilot.click("#community-submit")
+            await _click(pilot, "#community-submit")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "community-submit" in preview
@@ -947,11 +965,11 @@ def test_community_screen_submit_passes_confirm_only_when_checked():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
-            await pilot.click("#community-confirm")
-            await pilot.click("#community-submit")
+            await _click(pilot, "#community-confirm")
+            await _click(pilot, "#community-submit")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "--confirm" in preview
@@ -1005,10 +1023,10 @@ def test_gate_all_passes_the_limit_from_the_form(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(160, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
             app.screen.query_one("#models-limit-input").value = "3"
-            await pilot.click("#models-gate-all")
+            await _click(pilot, "#models-gate-all")
             for _ in range(5):
                 await pilot.pause()
 
@@ -1035,9 +1053,9 @@ def test_gate_all_without_a_limit_stays_unbounded(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(160, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             await pilot.pause()
-            await pilot.click("#models-gate-all")
+            await _click(pilot, "#models-gate-all")
             for _ in range(5):
                 await pilot.pause()
 
@@ -1053,11 +1071,11 @@ def test_package_forwards_reviewer_notes():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             app.screen.query_one("#community-model-input").value = "x:1b"
             app.screen.query_one("#community-notes-input").value = "spilled to system RAM"
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "--notes" in preview
@@ -1070,10 +1088,10 @@ def test_package_omits_notes_when_left_blank():
         app = CBenchTUI()
         async with app.run_test(size=(140, 50)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-community")
+            await _click(pilot, "#goto-community")
             await pilot.pause()
             app.screen.query_one("#community-model-input").value = "x:1b"
-            await pilot.click("#community-package")
+            await _click(pilot, "#community-package")
             await pilot.pause()
             preview = str(app.screen.query_one("#community-preview").content)
             assert "--notes" not in preview
@@ -1102,7 +1120,7 @@ def test_models_table_has_an_added_column_and_sorts_by_value(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             for _ in range(25):
                 await pilot.pause()
             scr = app.screen
@@ -1147,10 +1165,10 @@ def test_delete_does_nothing_until_the_box_is_ticked(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             for _ in range(25):
                 await pilot.pause()
-            await pilot.click("#models-delete")
+            await _click(pilot, "#models-delete")
             for _ in range(6):
                 await pilot.pause()
             assert "argv" not in captured, "an unconfirmed delete must not run anything"
@@ -1174,7 +1192,7 @@ def test_a_confirmed_delete_calls_the_real_subcommand_and_disarms(monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-models")
+            await _click(pilot, "#goto-models")
             for _ in range(25):
                 await pilot.pause()
             scr = app.screen
@@ -1182,7 +1200,7 @@ def test_a_confirmed_delete_calls_the_real_subcommand_and_disarms(monkeypatch):
                 return
             tag = str(scr.query_one("#models-table", DataTable).get_row_at(0)[0])
             scr.query_one("#models-confirm-delete", Checkbox).value = True
-            await pilot.click("#models-delete")
+            await _click(pilot, "#models-delete")
             for _ in range(8):
                 await pilot.pause()
             argv = captured.get("argv", [])
@@ -1222,7 +1240,7 @@ def test_reports_screen_defaults_to_scorecards_only(tmp_path, monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-reports")
+            await _click(pilot, "#goto-reports")
             for _ in range(30):
                 await pilot.pause()
             scr = app.screen
@@ -1245,7 +1263,7 @@ def test_reports_filter_switches_without_rescanning(tmp_path, monkeypatch):
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-reports")
+            await _click(pilot, "#goto-reports")
             for _ in range(30):
                 await pilot.pause()
             scr = app.screen
@@ -1283,7 +1301,7 @@ def test_reports_date_column_is_wide_enough_to_show_a_date(tmp_path, monkeypatch
         app = CBenchTUI()
         async with app.run_test(size=(190, 55)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-reports")
+            await _click(pilot, "#goto-reports")
             for _ in range(30):
                 await pilot.pause()
             t = app.screen.query_one("#reports-table", DataTable)
@@ -1303,14 +1321,14 @@ def test_score_screen_force_uncheckable_defaults_off():
         app = CBenchTUI()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
             assert app.screen.query_one("#score-force-uncheckable", Checkbox).value is False
 
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-gate-first")  # keep this hermetic
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-gate-first")  # keep this hermetic
+            await _click(pilot, "#score-start")
             await pilot.pause()
             assert "--force-uncheckable" not in str(app.screen.query_one("#score-preview").content)
     asyncio.run(scenario())
@@ -1324,14 +1342,14 @@ def test_score_screen_can_send_force_uncheckable():
         app = CBenchTUI()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-gate-first")
-            await pilot.click("#score-force-uncheckable")
+            await _click(pilot, "#score-gate-first")
+            await _click(pilot, "#score-force-uncheckable")
             await pilot.pause()
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             assert "--force-uncheckable" in str(app.screen.query_one("#score-preview").content)
     asyncio.run(scenario())
@@ -1344,12 +1362,12 @@ def test_score_screen_omits_budget_flags_when_blank():
         app = CBenchTUI()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-gate-first")  # keep hermetic
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-gate-first")  # keep hermetic
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             assert "--num-ctx" not in preview and "--num-predict" not in preview
@@ -1369,15 +1387,15 @@ def test_score_screen_forwards_generation_budgets():
         app = CBenchTUI()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-gate-first")
+            await _click(pilot, "#score-gate-first")
             app.screen.query_one("#score-num-ctx", Input).value = "2048"
             app.screen.query_one("#score-num-predict", Input).value = "256"
             await pilot.pause()
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             assert "--num-ctx 2048" in preview
@@ -1394,14 +1412,14 @@ def test_score_screen_rejects_a_non_numeric_budget():
         app = CBenchTUI()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            await pilot.click("#goto-score")
+            await _click(pilot, "#goto-score")
             await pilot.pause()
-            await pilot.click("#score-model-input")
+            await _click(pilot, "#score-model-input")
             await pilot.press(*list("x:1b"))
-            await pilot.click("#score-gate-first")
+            await _click(pilot, "#score-gate-first")
             app.screen.query_one("#score-num-ctx", Input).value = "lots"
             await pilot.pause()
-            await pilot.click("#score-start")
+            await _click(pilot, "#score-start")
             await pilot.pause()
             preview = str(app.screen.query_one("#score-preview").content)
             # The flag must not reach the command line with the bad value.

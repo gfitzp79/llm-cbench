@@ -25,8 +25,9 @@ traces back to one phase running longer here than the harness would have
 allowed is a config difference, not a real behavioral one -- read it as
 such before citing it.
 
-Optional dependency -- not required for the core suites. Install with:
-    pip install "openllm-cbench[inspect]"
+Optional dependency -- not required for the core suites. Install, from a
+clone (the task below is run by file path, so it needs one):
+    pip install -e ".[inspect]"
     # or directly: pip install inspect-ai openai
 
 Usage (path is relative to the project root; `inspect eval` takes a task

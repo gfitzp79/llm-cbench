@@ -145,6 +145,7 @@ with **no model and no network required** — it is the executable version
 of this section, not just a description of it. Run it yourself:
 
 ```bash
+git clone https://github.com/gfitzp79/llm-cbench && cd llm-cbench
 pip install -e ".[dev]"
 pytest tests/test_safety_invariant.py -v
 ```

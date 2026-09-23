@@ -62,6 +62,20 @@ def test_tui_help_exits_immediately_without_launching_the_app():
     assert "usage: cbench tui" in result.stdout
 
 
+def test_tui_without_textual_names_an_install_that_works(monkeypatch, capsys):
+    """The hint used to be `pip install "openllm-cbench[tui]"`, which fails
+    while the package is not on PyPI, and a bare `pip` can install into a
+    different environment from the one cbench runs in. The hint must name
+    the package and this interpreter."""
+    from openllm_cbench import cli
+    # A None entry in sys.modules makes the import raise ImportError.
+    monkeypatch.setitem(sys.modules, "openllm_cbench.tui.app", None)
+    assert cli._cmd_tui([]) == 1
+    err = capsys.readouterr().err
+    assert f'"{sys.executable}" -m pip install textual' in err
+    assert "openllm-cbench[" not in err
+
+
 def test_unknown_subcommand_exits_immediately_with_nonzero():
     result = _run(["not-a-real-subcommand"])
     assert result.returncode == 2

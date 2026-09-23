@@ -12,8 +12,9 @@ The only host either tool can ever actually reach is a loopback canary this
 module starts itself. Any other host is intercepted and answered with a
 synthetic failure -- nothing here makes a real outbound connection.
 
-Optional dependency -- not required for the core suites. Install with:
-    pip install "openllm-cbench[inspect]"
+Optional dependency -- not required for the core suites. Install, from a
+clone (the task below is run by file path, so it needs one):
+    pip install -e ".[inspect]"
     # or directly: pip install inspect-ai openai
 
 Usage (path is relative to the project root; `inspect eval` takes a task

@@ -42,11 +42,40 @@ Plus: trial aggregation and the pre-registered extension-rule decision
 (`cbench score`, `cbench catalogue` — see "Scoring a model" below), a
 guardrail-detection scorer (`cbench guardrail`), a model gate-check
 (`cbench gate`), and optional cross-validation against
-[Inspect](https://inspect.aisi.org.uk/) (`integrations/`, install with
-`pip install "openllm-cbench[inspect]"`).
+[Inspect](https://inspect.aisi.org.uk/) (`integrations/`, the `inspect`
+extra -- see Install).
 
 Full architecture, control inventory, and the measurement pitfalls this
 tool is built to avoid: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Install
+
+Requires Python 3.10+ and a model served locally behind an
+Ollama-compatible chat endpoint (default `http://localhost:11434`,
+override with `--endpoint` or `$OPENLLM_CBENCH_ENDPOINT`). Not on PyPI
+yet, so install from GitHub.
+
+To use it, with the terminal UI:
+
+```bash
+pip install "openllm-cbench[tui] @ git+https://github.com/gfitzp79/llm-cbench"
+cbench doctor
+```
+
+Leave out `[tui]` for the CLI alone, whose only dependency is `requests`.
+If your system Python refuses `pip install` ("externally-managed-environment",
+e.g. recent Ubuntu), use a virtual environment, or `pipx install` with the
+same argument.
+
+To read or change the code, run the tests, or use the Inspect
+cross-validation (its task files are run by path, so it needs a clone):
+
+```bash
+git clone https://github.com/gfitzp79/llm-cbench
+cd llm-cbench
+pip install -e ".[dev,tui]"      # or ".[dev,tui,inspect]" for Inspect
+pytest -q                        # no model or network needed
+```
 
 ## Where results are kept
 
@@ -98,20 +127,6 @@ guidance those gate checks discovered. It is kept as its own setting
 rather than derived from the results location, since one catalogue can
 serve several results corpora and moving your results should not re-gate
 every model.
-
-## Install
-
-```bash
-pip install -e .
-# or, with the Inspect cross-validation extra:
-pip install -e ".[inspect]"
-# or, with the optional terminal UI:
-pip install -e ".[tui]"
-```
-
-Requires Python >=3.10 and a locally-served model behind an
-Ollama-compatible chat endpoint (default `http://localhost:11434`,
-override with `--endpoint` or `$OPENLLM_CBENCH_ENDPOINT`).
 
 ## What goes in `--model <model-tag>`
 
@@ -390,7 +405,7 @@ will run before committing to it.
 ### Terminal UI
 
 ```bash
-cbench tui   # requires: pip install "openllm-cbench[tui]"
+cbench tui   # needs the tui extra -- see Install
 ```
 
 The dashboard opens with a short progress panel: how many models are

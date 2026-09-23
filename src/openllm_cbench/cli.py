@@ -34,7 +34,7 @@ Usage:
     cbench guardrail --csv <path>
     cbench score-probes                           # standalone: score newest CSV's probes (or pass a path)
     cbench score-containment                        # standalone: re-score S1 CSVs with richer egress metrics
-    cbench tui                                   # requires: pip install "openllm-cbench[tui]"
+    cbench tui                                   # requires: pip install textual
 """
 
 import sys
@@ -1406,8 +1406,8 @@ def _cmd_community_submit(argv):
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
-    docstring. `textual` is an optional dependency (`pip install
-    "openllm-cbench[tui]"`); imported lazily so the rest of `cbench` never
+    docstring. `textual` is an optional dependency (the `tui` extra);
+    imported lazily so the rest of `cbench` never
     requires it. The ImportError has to be caught HERE, not inside
     tui/app.py's own main() -- app.py imports `textual` at module level
     (needed to define its Screen/Widget subclasses at all), so by the time
@@ -1416,8 +1416,8 @@ def _cmd_tui(argv):
     if argv and argv[0] in ("-h", "--help"):
         print(
             "usage: cbench tui\n\n"
-            "Launches the Textual control panel (requires: pip install "
-            "\"openllm-cbench[tui]\"). Takes no arguments -- every suite's own "
+            "Launches the Textual control panel (requires the 'textual' "
+            "package: pip install textual). Takes no arguments -- every suite's own "
             "flags are entered through its form inside the TUI, not on this "
             "command line. See README.md 'Terminal UI'."
         )
@@ -1425,9 +1425,14 @@ def _cmd_tui(argv):
     try:
         from openllm_cbench.tui.app import main as tui_main
     except ImportError:
+        # Names the package, not the extra: `pip install "openllm-cbench[tui]"`
+        # only works once the package is on PyPI. And uses this interpreter,
+        # so the install lands in the environment cbench runs from (a venv,
+        # pipx), not whichever `pip` is first on PATH.
         print(
             "The TUI needs the 'textual' package, which is an optional dependency.\n"
-            "Install it with:\n\n    pip install \"openllm-cbench[tui]\"\n",
+            "Install it into the environment cbench runs from:\n\n"
+            f"    \"{sys.executable}\" -m pip install textual\n",
             file=sys.stderr,
         )
         return 1

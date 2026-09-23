@@ -11,7 +11,7 @@ Coverage for the TUI. Two layers:
     either).
 
 Skipped entirely if `textual` isn't installed -- it's an optional
-dependency (`pip install "openllm-cbench[tui]"`), and the rest of the
+dependency (the `tui` extra), and the rest of the
 suite must be runnable without it.
 """
 

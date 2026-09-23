@@ -1,17 +1,11 @@
 """
-`cbench` -- single entry point for every suite and utility in this
+`cbench`: the single entry point for every suite and utility in this
 package.
 
 Subcommands for the suites and scoring tools are thin passthroughs: this
 module does not redeclare their arguments, it just hands the remaining
 argv to that module's own `main()`. Run `cbench <subcommand> --help` for
 that subcommand's real flags (declared once, in the module itself).
-
-SAFETY INVARIANT: every suite in this framework measures ATTEMPT, never
-success. The containment suite's canary listener binds 127.0.0.1 only and
-refuses to start otherwise (see core/canary.py); no suite ever makes a
-real outbound request to anywhere but the configured chat endpoint and
-that loopback canary. See ARCHITECTURE.md.
 
 Usage:
     cbench --version
@@ -664,7 +658,7 @@ def _cmd_score(argv):
     json_path, md_path = save_scorecard(card)
     print(f"Saved: {json_path}")
     print(f"       {md_path}")
-    print("\nThis model's catalogue entries (`cbench discover`, the TUI Models browser) will "
+    print("\nThis model's catalogue entries (`cbench discover`, the TUI's Local models screen) will "
           "show this scorecard's summary line from now on.")
     # It exited 0 beside a card reading "an upper bound, not a grade". A
     # selected suite that came back INVALID, or a trial that failed, is
@@ -1041,7 +1035,8 @@ def _cmd_discover(argv):
     p.add_argument("--endpoint", default=None, help="Endpoint base URL to list models from.")
     p.add_argument("--registry-file", default=None,
                     help="Overlay file to check against and (with --gate-all) write to "
-                         "(default: $OPENLLM_CBENCH_MODELS_FILE or ./models.json).")
+                         "(default: $OPENLLM_CBENCH_MODELS_FILE, then the location pinned with "
+                         "`cbench config --set-models-file`, then ./models.json).")
     p.add_argument("--gate-all", action="store_true",
                     help="Gate-check and save every uncatalogued model found, one at a time "
                          "(same as running `cbench gate --model <tag> --save` per model). "
@@ -1112,10 +1107,14 @@ def _cmd_discover(argv):
         results.append((tag, status, None))
 
     clean_n = sum(1 for _, s, _ in results if s == "clean")
+    failed_n = sum(1 for _, s, _ in results if s == "error")
     print(f"Done: {clean_n}/{len(results)} clean, "
           f"{sum(1 for _, s, _ in results if s == 'caveats found')} with caveats, "
-          f"{sum(1 for _, s, _ in results if s == 'error')} failed to run.")
-    return 0
+          f"{failed_n} failed to run.")
+    # A check that failed to run, or never reached its model, is "ran, and
+    # something in it failed". Caveats are findings, saved and reported
+    # above, so they do not change the exit code.
+    return 1 if failed_n else 0
 
 
 def _cmd_compare(argv):
@@ -1167,7 +1166,7 @@ def _cmd_compare(argv):
 def _cmd_catalogue(argv):
     """Read-only listing of every model pulled into the local endpoint,
     alongside catalogue and scorecard status -- the CLI equivalent of the
-    TUI's Models browser screen (tui/app.py:ModelsScreen), so this view
+    TUI's Local models screen (tui/app.py:ModelsScreen), so this view
     isn't TUI-only. Unlike `cbench discover`, which exists specifically to
     find catalogue GAPS, this lists everything regardless of catalogue
     status. Makes no model call and changes nothing -- reads the endpoint's
@@ -1190,7 +1189,8 @@ def _cmd_catalogue(argv):
     p.add_argument("--endpoint", default=None, help="Endpoint base URL to list models from.")
     p.add_argument("--registry-file", default=None,
                     help="Overlay file to check catalogue status against (default: "
-                         "$OPENLLM_CBENCH_MODELS_FILE or ./models.json).")
+                         "$OPENLLM_CBENCH_MODELS_FILE, then the location pinned with "
+                         "`cbench config --set-models-file`, then ./models.json).")
     args = p.parse_args(argv)
 
     base_url = resolve_base_url(args.endpoint)
@@ -1437,7 +1437,8 @@ def _cmd_community_submit(argv):
                     help=f"Upstream repo to submit to (default {UPSTREAM_REPO}).")
     p.add_argument("--confirm", action="store_true",
                     help="Actually fork, push and open the PR. Without this, prints the "
-                         "plan and exits without touching the network.")
+                         "plan and pushes nothing (it still runs `gh auth status`, which asks "
+                         "GitHub whether you are logged in).")
     args = p.parse_args(argv)
 
     problems = validate_submission(args.path)
@@ -1570,11 +1571,19 @@ def _dispatch_passthrough(module_path, argv):
         sys.argv = old_argv
 
 
+def _usage():
+    """The usage text, then the safety invariant from its one definition.
+    The docstring once carried its own paraphrase, which drifted from the
+    text every other --help and `cbench doctor` print."""
+    from openllm_cbench.core.invariant import SAFETY_INVARIANT
+    return f"{__doc__.rstrip()}\n\n{SAFETY_INVARIANT}\n"
+
+
 def main():
     ensure_utf8_stdio()
     argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
-        print(__doc__)
+        print(_usage())
         return 0
     if argv[0] in ("-V", "--version"):
         # The first thing a bug report needs. It used to answer "Unknown
@@ -1591,7 +1600,7 @@ def main():
         return _dispatch_passthrough(_PASSTHROUGH[subcommand], rest)
 
     print(f"Unknown subcommand '{subcommand}'.\n", file=sys.stderr)
-    print(__doc__, file=sys.stderr)
+    print(_usage(), file=sys.stderr)
     return 2
 
 

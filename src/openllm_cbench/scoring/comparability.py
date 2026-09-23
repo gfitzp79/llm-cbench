@@ -16,7 +16,7 @@ correctness fixes, including a canary-matching fix that changed what
 asked. Only the task-set guard noticed anything. Two suites pooled the
 lot and reported a confident rate.
 
-WHAT IT CHECKS, AND WHY BOTH CHECKS ARE EXACT. Every condition here is an
+WHAT IT CHECKS, AND WHY EVERY CHECK IS EXACT. Every condition here is an
 equality test on a value the CSV records, never a threshold or a
 heuristic. That is deliberate. A detector that guesses produces false
 positives, and a validity guard that cries wolf is worse than no guard,
@@ -36,6 +36,13 @@ cannot do either.
   2. DIFFERENT PINNED SAMPLING. All CSVs carry the columns but disagree
      on temperature, top-p or top-k. These runs asked the model different
      questions.
+
+  3. DIFFERENT GENERATION BUDGETS. CSVs that recorded num_ctx and
+     num_predict disagree on them. A budget changes how many rows
+     truncate, and a truncated row leaves the denominator, so two budgets
+     pooled are two instruments averaged. CSVs that predate the budget
+     columns are left out of this comparison rather than treated as a
+     mismatch: their budget is unknown, not different.
 
 WHAT IT DELIBERATELY DOES NOT CHECK. A corpus that is uniformly OLD does
 not fire. Those runs are unpinned but they are unpinned in the same way

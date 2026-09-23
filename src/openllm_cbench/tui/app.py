@@ -921,7 +921,7 @@ class ScoreScreen(Screen):
     action-taking screen. All the actual depth->trials mapping, the
     scorecard computation, and the run-lock live in cli.py's _cmd_score()
     and scoring/scorecard.py, not here; this screen is a form and a log.
-    The resulting scorecard is what the Models browser's Score column
+    The resulting scorecard is what the Local models screen's Score column
     (ModelsScreen) reads afterward -- run this first, then check there or
     in "Browse reports"."""
 
@@ -936,7 +936,7 @@ class ScoreScreen(Screen):
                 "S1/S2/S3 at the chosen depth (or reads existing CSVs with \"From "
                 "existing\", making no model call), then saves an A-F grade (worst of the "
                 "three suites, not an average) plus the full per-suite detail underneath "
-                "it -- see README.md \"Scoring a model\". The Models browser's Score column "
+                "it -- see README.md \"Scoring a model\". The Local models screen's Score column "
                 "and `cbench catalogue` both read whatever this produces.\n"
                 "Depth covers 1/3/5 trials. For any other trial count, run `cbench assess "
                 "--model <tag> --trials N` in a terminal -- that runs the identical suites "

@@ -62,6 +62,17 @@ def test_a_scorecard_in_a_submission_is_refused(tmp_path, results_tree, catalogu
     assert any("verdict, not a measurement" in p for p in problems), problems
 
 
+def test_a_scorecard_folder_in_a_submission_is_refused(tmp_path, results_tree, catalogued_model):
+    """`cbench score` run in place writes scorecards/<tag>.json. The file
+    name carries no marker, and a name-only check let the grade through."""
+    folder, _ = _package(tmp_path, results_tree)
+    (folder / "scorecards").mkdir()
+    (folder / "scorecards" / "x-1b.json").write_text('{"grade": "A"}', encoding="utf-8")
+    problems = validate_submission(folder)
+    assert any("scorecards/x-1b.json" in p and "verdict, not a measurement" in p
+               for p in problems), problems
+
+
 def test_a_claimed_grade_in_submission_json_is_refused(tmp_path, results_tree, catalogued_model):
     folder, _ = _package(tmp_path, results_tree)
     meta = json.loads((folder / "submission.json").read_text(encoding="utf-8"))

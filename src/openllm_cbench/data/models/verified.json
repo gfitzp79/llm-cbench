@@ -1,20 +1,20 @@
 {
-  "_comment": "A small set of worked examples, not an exhaustive roster. Each entry records what a `cbench gate` check found and what config (if any) was needed to get valid data out of this suite's harness against that tag. Add your own entries as you gate-check new models -- exact tag match only, a fork and its base are different entries.",
+  "_comment": "A small set of worked examples, not an exhaustive roster. Each entry records what a `cbench gate` check found for that tag, and any configuration a run needed to produce valid data. Add your own entries as you gate-check new models. Tags must match exactly: a fork and its base are separate entries.",
 
-  "_where_your_own_entries_go": "This file is the packaged, READ-ONLY seed shipped with the framework -- don't edit it for your own models unless you're contributing a worked example back to the project. Your own gate-checked models belong in a separate LOCAL overlay file, './models.json' by default in your current working directory (override with --registry-file or $OPENLLM_CBENCH_MODELS_FILE). An overlay entry for a tag that also exists here replaces this seed entry outright, not a merge. `cbench gate --model <tag> --save` writes there automatically; see README.md 'Populating it' for the manual-edit path too.",
+  "_where_your_own_entries_go": "This file is the packaged, read-only seed. Do not edit it for your own models unless you are contributing a worked example back to the project. Your own gate-checked models belong in a separate local overlay file, found in this order: --registry-file, $OPENLLM_CBENCH_MODELS_FILE, the location pinned with `cbench config --set-models-file`, then ./models.json in the current directory. An overlay entry for a tag that also exists here replaces this seed entry outright; the two are not merged. `cbench gate --model <tag> --save` writes the overlay for you; see README.md, 'Populating it', for editing it by hand.",
 
   "_schema": {
-    "<exact-model-tag>": "Object keyed by the exact string you pass to --model -- must match byte-for-byte, including any registry prefix (e.g. 'hf.co/org/repo:Q4_K_M'). A fork and its base model are two separate entries even if everything else about them matches.",
-    "architecture": "string, informational only -- nothing reads this. From `ollama show <tag>` -> Architecture, or your endpoint's equivalent.",
-    "params_b": "number -- parameter count in BILLIONS, always. No suite reads it, but the TUI's advisory VRAM fit warning does (core/hardware.py:check_model_fit, alongside `quant`). `cbench gate --save` derives it from the endpoint's reported parameter_size: a 'B' value is suffix-stripped, an 'M' value (small models are reported in millions, e.g. '134.52M') is divided by 1000 so this field's unit never changes. A value that couldn't be parsed is stored as the literal string 'unknown' rather than a guessed number -- anything reading this must check it got a number, not just a truthy value.",
+    "<exact-model-tag>": "Object keyed by the exact string you pass to --model. It must match byte for byte, including any registry prefix (e.g. 'hf.co/org/repo:Q4_K_M'). A fork and its base model are two separate entries even if everything else about them matches.",
+    "architecture": "String, informational only: nothing reads it. From `ollama show <tag>` (Architecture), or your endpoint's equivalent.",
+    "params_b": "Number: the parameter count in billions, always. No suite reads it, but the TUI's advisory VRAM fit warning does (core/hardware.py:check_model_fit, together with `quant`). `cbench gate --save` derives it from the endpoint's reported parameter_size: a 'B' value has its suffix removed, and an 'M' value (small models are reported in millions, e.g. '134.52M') is divided by 1000, so the unit never changes. A value that cannot be parsed is stored as the string 'unknown' rather than a guessed number, so anything reading this field must check that it got a number, not merely a truthy value.",
     "quant": "string, e.g. 'Q4_K_M'. No suite reads it; the TUI's advisory VRAM fit warning pairs it with `params_b` to pick a bytes-per-parameter estimate (core/hardware.py:BYTES_PER_PARAM), falling back to the Q4_K_M figure for an unrecognized string.",
-    "tools": "bool, informational only -- did the endpoint report a tools capability for this tag at gate time? A suite will fail loudly against the model itself if this is false and a tool-using suite is attempted; this field just documents that ahead of time.",
-    "thinking": "bool, informational only -- did the endpoint report a thinking capability?",
-    "thinking_mode": "OPTIONAL string, ACTED ON by the channel suite. One of: 'effort' (this model exposes graded reasoning depth instead of a boolean toggle -- the channel suite auto-selects an --effort all sweep instead of --think), 'ignores_think' (this model disregards the API's think parameter entirely and always reasons inline -- the channel suite auto-selects --think false only, skipping a pointless --think true sweep). Omit this key entirely for an ordinary boolean think toggle -- that's the default and needs no entry.",
-    "channel_separation": "OPTIONAL object {think_on, think_off} or null, informational only -- nothing reads this field itself, but if either state says anything other than 'clean' put the actual consequence in `caveats` too, since that's the field suites and cbench gate actually print. Typical values: 'clean', 'UNRELIABLE' (reasoning leaks into the visible answer at that think state), or a short explanatory string.",
-    "delimiters": "OPTIONAL array of strings, ACTED ON by the channel suite AND cbench gate. This model's own reasoning delimiters, for a model whose convention isn't one of the four built-in families (<think>, [BEGIN FINAL RESPONSE], <|channel|>, <reasoning>). Write each one the way you read it, open and close joined by an ellipsis, e.g. [\"<odd>...</odd>\"] -- open and close are matched separately, because a model emits the opening marker and then runs out of budget far more often than it emits the exact joined string. A hit is recorded as 'catalogued' in the CSV's merge_evidence column rather than attributed to a built-in family. The nested spelling {\"reasoning\": {\"delimiters\": [...]}} is accepted too; both mean the same thing. Not written by `gate --save` automatically -- add it by hand once you've confirmed the convention, the same way config_overrides is hand-added.",
-    "config_overrides": "object, ACTED ON by every suite -- the only field with real behavioral effect. Recognized keys: num_ctx, num_predict, timeout, max_turns (containment suite only), max_task_turns (persistence suite only), think (containment and persistence suites). Applied whenever the corresponding --flag is NOT passed on the command line -- an explicit CLI flag always wins over this. A gate check alone can't derive good values for the budgets (e.g. how much num_predict headroom a model needs); those you hand-add once a real run tells you. The one key `cbench gate --save` writes itself is think=false, when it finds the model only calls tools with its reasoning channel off.",
-    "caveats": "array of strings, surfaced verbatim in cbench gate's report AND in every suite's startup banner when this tag is used. Free text, for a human to read before trusting a run -- 'think=off is unreliable for this model', 'this model ignores --think entirely', etc."
+    "tools": "Bool, informational only: whether the endpoint reported a tools capability for this tag at gate time. S1 and S3 need real tool calls, so a model without this capability cannot produce valid data for them.",
+    "thinking": "Bool, informational only: whether the endpoint reported a thinking capability.",
+    "thinking_mode": "Optional string, acted on by the S2 channel suite. 'effort': the model exposes graded reasoning depth instead of a boolean toggle, so the suite runs an --effort all sweep instead of --think. 'ignores_think': the model disregards the API's think parameter and always reasons inline, so the suite runs --think false only and skips a pointless --think true sweep. Omit the key for an ordinary boolean think toggle; that is the default.",
+    "channel_separation": "Optional object {think_on, think_off}, or null. Informational only: nothing reads this field itself, so if either state says anything other than 'clean', put the consequence in `caveats` too, which is the field the suites and `cbench gate` print. Typical values: 'clean', 'UNRELIABLE' (reasoning leaks into the visible answer at that think state), or a short explanatory string.",
+    "delimiters": "Optional array of strings, acted on by the S2 channel suite and `cbench gate`. This model's own reasoning delimiters, for a model whose convention is not one of the four built-in families (<think>, [BEGIN FINAL RESPONSE], <|channel|>, <reasoning>). Write each the way you read it, with the opening and closing markers joined by an ellipsis, e.g. [\"<odd>...</odd>\"]. The two markers are matched separately, because a model emits the opening marker and then runs out of budget far more often than it emits the whole joined string. A hit is recorded as 'catalogued' in the CSV's merge_evidence column rather than attributed to a built-in family. The nested form {\"reasoning\": {\"delimiters\": [...]}} is also accepted and means the same. `cbench gate --save` does not write this field: add it by hand once you have confirmed the convention.",
+    "config_overrides": "Object, acted on by every suite: the only field with a direct effect on a run. Recognised keys: num_ctx, num_predict, timeout, max_turns (S1 only), max_task_turns (S3 only) and think (S1 and S3). Each applies when the corresponding flag is not given on the command line; an explicit flag always wins. A gate check cannot derive good values for the budgets (for example, how much num_predict headroom a model needs), so add those by hand once a real run tells you. The one key `cbench gate --save` writes itself is think: false, when it finds the model only calls tools with its reasoning channel off.",
+    "caveats": "Array of strings, printed verbatim in `cbench gate`'s report and in every suite's startup banner when this tag is used. Free text for a person to read before trusting a run, for example 'think=off is unreliable for this model' or 'this model ignores --think entirely'."
   },
 
   "models": {
@@ -35,10 +35,10 @@
       "tools": true,
       "thinking": true,
       "thinking_mode": "effort",
-      "channel_separation": {"think_on": "clean", "think_off": "n/a -- use --effort instead of --think"},
+      "channel_separation": {"think_on": "clean", "think_off": "n/a (use --effort instead of --think)"},
       "config_overrides": {},
       "caveats": [
-        "Exposes graded reasoning depth (low/medium/high), not a boolean toggle -- the channel suite reads thinking_mode from this catalogue automatically and defaults to an --effort sweep for this tag."
+        "Exposes graded reasoning depth (low, medium, high) rather than a boolean toggle. The S2 suite reads thinking_mode from this catalogue and runs an --effort sweep for this tag by default."
       ]
     },
     "granite4.2:8b": {
@@ -50,8 +50,8 @@
       "channel_separation": {"think_on": "clean", "think_off": "UNRELIABLE"},
       "config_overrides": {"num_ctx": 16384, "num_predict": 8192},
       "caveats": [
-        "think=off routes reasoning text into the visible answer with an inline marker instead of a separate field -- every CLEAN/CHANNEL_LEAK verdict at think=off is unreliable for this model. think=on data is unaffected and citable.",
-        "The containment suite's default num_predict/num_ctx (2048/8192) can truncate this model mid-turn on longer agentic tasks -- raise num_ctx above num_predict by a real margin, not just num_predict alone, or a mid-turn truncation can masquerade as stochastic derailment."
+        "At think=off, reasoning text goes into the visible answer behind an inline marker instead of a separate field, so every CLEAN or CHANNEL_LEAK verdict at think=off is unreliable for this model. think=on data is unaffected and citable.",
+        "At S1's default budgets (num_predict 2048, num_ctx 8192) this model can be cut off mid-turn on longer agentic tasks. Raise num_ctx above num_predict by a real margin, not num_predict alone; otherwise a mid-turn truncation can look like stochastic derailment."
       ]
     },
     "lfm2.5:8b": {
@@ -64,8 +64,8 @@
       "channel_separation": null,
       "config_overrides": {"num_predict": 3000},
       "caveats": [
-        "This model ignores the API's `think` parameter entirely -- it always reasons inline before any tool call, confirmed via a raw chat-endpoint check. The channel suite reads thinking_mode from this catalogue automatically and will not bother sweeping --think for this tag. The only lever that helps is the raised num_predict above, so the reasoning pass doesn't exhaust the budget before a tool call.",
-        "Even at a raised num_predict, some tasks may produce tool activity with no final answer, and at least one task pattern may produce zero tool calls regardless of budget -- read the transcripts, don't assume a uniform fix."
+        "This model ignores the API's `think` parameter and always reasons inline before any tool call (confirmed with a raw chat-endpoint check). The S2 suite reads thinking_mode from this catalogue and does not sweep --think for this tag. The only lever that helps is the raised num_predict above, so that the reasoning pass does not exhaust the budget before a tool call.",
+        "Even at a raised num_predict, some tasks may produce tool activity with no final answer, and at least one task pattern may produce no tool calls whatever the budget. Read the transcripts rather than assume one fix covers every task."
       ]
     },
     "qwen3.5:9b": {
@@ -77,7 +77,7 @@
       "channel_separation": {"think_on": "clean", "think_off": "clean"},
       "config_overrides": {},
       "caveats": [
-        "If you gate-check a community fork of this model, explicitly diff its Modelfile's sampling parameters (not just architecture/quant/capabilities) against the base -- an unmatched Modelfile-level parameter (e.g. a repetition/presence penalty set on one arm and not the other) silently confounds any base-vs-fork comparison and won't show up in a capability check. Every suite in this framework pins presence_penalty to 0 explicitly for exactly this reason; check for other parameters a Modelfile might set."
+        "If you gate-check a community fork of this model, diff its Modelfile sampling parameters against the base explicitly, not just architecture, quant and capabilities. A Modelfile parameter set on one arm and not the other (a repetition or presence penalty, for example) confounds any base-versus-fork comparison without showing up in a capability check. Every suite pins presence_penalty to 0 for this reason; check for any other parameter a Modelfile might set."
       ]
     },
 
@@ -110,7 +110,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "Endpoint does not report a tools capability -- the containment and persistence suites need real tool calling and will not produce valid data. gemma3 (distinct from gemma4, already in this catalogue) does not expose tool calling via this endpoint."
+        "The endpoint does not report a tools capability, and S1 and S3 need real tool calling, so they will not produce valid data. gemma3 (distinct from gemma4, which is also in this catalogue) does not expose tool calling through this endpoint."
       ]
     },
     "mistral-nemo:12b": {
@@ -132,7 +132,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "Endpoint does not report a tools capability -- the containment and persistence suites need real tool calling and will not produce valid data."
+        "The endpoint does not report a tools capability, and S1 and S3 need real tool calling, so they will not produce valid data."
       ]
     },
     "qwen2.5-coder:14b": {
@@ -144,7 +144,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "Endpoint DOES report a tools capability, but the tool-call round-trip itself failed (no tool_calls block came back for a trivial single-tool prompt) -- a different, sneakier failure mode than 'no tools capability at all'. `has_tools_capability=true` is not sufficient evidence a model will actually produce a usable tool call; always check the tool-call-check line too, not just the capability list."
+        "The endpoint reports a tools capability, but the tool-call round trip failed: no tool_calls block came back for a trivial single-tool prompt. That is a subtler failure than having no tools capability at all. has_tools_capability=true is not sufficient evidence that a model will produce a usable tool call; always check the gate's tool-call line as well as the capability list."
       ]
     },
     "deepseek-r1:14b": {
@@ -156,8 +156,8 @@
       "channel_separation": {"think_on": "clean", "think_off": "clean"},
       "config_overrides": {},
       "caveats": [
-        "Same tools-capability-reported-but-round-trip-fails pattern as qwen2.5-coder:14b above -- do not treat this model as tool-calling-capable for the containment/persistence suites despite the capability list saying so.",
-        "This model's Modelfile stop token contains a non-ASCII special-token character (U+FF5C, '｜', part of its <｜User｜>-style markers) -- this is what originally surfaced a real UnicodeEncodeError crash in this framework's own console output on Windows (fixed in core/console.py; see that module's docstring). A useful reminder that 'the model's own special tokens' is a real source of non-ASCII text, not just multilingual generated content."
+        "The same pattern as qwen2.5-coder:14b: the endpoint reports a tools capability but the round trip fails. Do not treat this model as tool-calling-capable for S1 or S3 despite its capability list.",
+        "This model's Modelfile stop token contains a non-ASCII special-token character (U+FF5C, '｜', part of its <｜User｜>-style markers). A model's own special tokens are a real source of non-ASCII text, not only multilingual output; core/console.py configures UTF-8 output so that printing them cannot crash a Windows console."
       ]
     },
     "granite4.1:8b": {
@@ -169,7 +169,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "No reasoning channel by design (same architecture family as granite4.2:8b above, but this generation doesn't expose 'thinking' at all) -- the channel suite has nothing to sweep for this tag; containment/persistence are unaffected."
+        "No reasoning channel by design. It shares its architecture family with granite4.2:8b, but this generation does not expose 'thinking' at all, so S2 has nothing to sweep for this tag. S1 and S3 are unaffected."
       ]
     },
     "huihui_ai/granite4.1-abliterated:8b": {
@@ -181,7 +181,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "Community safety-ablated fork of granite4.1:8b (also in this catalogue) -- matches the base on architecture/params/quant/capabilities at gate time; diff Modelfile sampling parameters explicitly before treating any base-vs-fork comparison as clean (see qwen3.5:9b's caveat above for why)."
+        "Community safety-ablated fork of granite4.1:8b (also in this catalogue). It matched the base on architecture, parameters, quant and capabilities at gate time. Diff the Modelfile sampling parameters explicitly before treating any base-versus-fork comparison as clean (see the qwen3.5:9b caveat for why)."
       ]
     },
     "huihui_ai/gpt-oss-abliterated:20b": {
@@ -194,8 +194,8 @@
       "channel_separation": {"think_on": "clean", "think_off": "clean"},
       "config_overrides": {},
       "caveats": [
-        "Community safety-ablated fork of gpt-oss:20b (also in this catalogue, quant MXFP4 there vs F16 reported here) -- `ollama show` reports a different quant label between this fork and its base. Not independently re-verified at the tensor level in this catalogue entry whether that's a real precision difference or a labelling artifact of which weight subset `ollama show` picked to report -- treat the quant mismatch as a flag to check before citing any base-vs-fork comparison, not as a settled fact either way.",
-        "Exposes graded reasoning effort (low/medium/high), not a boolean think toggle, same as its base -- this catalogue's thinking_mode field already routes the channel suite to an --effort sweep automatically for this tag."
+        "Community safety-ablated fork of gpt-oss:20b (also in this catalogue). `ollama show` reports a different quant label for this fork (F16) than for its base (MXFP4). This entry has not checked at the tensor level whether that is a real precision difference or a labelling artefact of which weight subset `ollama show` reports, so treat the mismatch as something to check before citing any base-versus-fork comparison, not as settled either way.",
+        "Exposes graded reasoning effort (low, medium, high) rather than a boolean think toggle, like its base. This catalogue's thinking_mode field routes the S2 suite to an --effort sweep for this tag."
       ]
     },
     "huihui_ai/gemma-4-abliterated:12b": {
@@ -207,7 +207,7 @@
       "channel_separation": {"think_on": "clean", "think_off": "clean"},
       "config_overrides": {},
       "caveats": [
-        "Community safety-ablated fork of gemma4:12b (also in this catalogue) -- matches the base on architecture/quant/capabilities at gate time; diff Modelfile sampling parameters explicitly before treating any base-vs-fork comparison as clean."
+        "Community safety-ablated fork of gemma4:12b (also in this catalogue). It matched the base on architecture, quant and capabilities at gate time. Diff the Modelfile sampling parameters explicitly before treating any base-versus-fork comparison as clean."
       ]
     },
     "hf.co/empero-ai/Qwen3.8-9B-GGUF:Q4_K_M": {
@@ -219,7 +219,7 @@
       "channel_separation": {"think_on": "clean", "think_off": "clean"},
       "config_overrides": {},
       "caveats": [
-        "Third-party distillation naming pattern ('empero') -- core/provenance.py's provenance_note() already labels this automatically in every generated report as unaffiliated with the base model's original vendor; do not present its behaviour as a property of the Qwen model family without that qualifier."
+        "Third-party distillation naming pattern ('empero'). core/provenance.py's provenance_note() labels this in every generated report as unaffiliated with the base model's original vendor; do not present its behaviour as a property of the Qwen model family without that qualifier."
       ]
     },
     "foundation-sec-8b-reasoning:latest": {
@@ -231,8 +231,8 @@
       "channel_separation": {"think_on": "UNRELIABLE (merge suspected)", "think_off": "UNRELIABLE (merge suspected)"},
       "config_overrides": {},
       "caveats": [
-        "No tools capability -- the containment and persistence suites need real tool calling and will not produce valid data against this model at all.",
-        "Reasoning text leaks into the visible answer instead of a separate field, at BOTH think states -- confirmed via cbench gate's merge guard firing on both. Every channel-suite verdict against this model would be unreliable regardless of --think setting. Net: this model cannot currently be validly assessed by any of this framework's three suites -- useful as a worked example of what a full gate-check failure looks like, not as a subject to actually run."
+        "No tools capability. S1 and S3 need real tool calling and will not produce valid data against this model.",
+        "Reasoning text leaks into the visible answer instead of a separate field at both think states (the gate's merge guard fired on both), so every S2 verdict against this model would be unreliable whatever the --think setting. In short, none of the three suites can currently assess this model validly. It is kept as a worked example of what a complete gate-check failure looks like, not as a model to run."
       ]
     },
     "ServiceNow-AI/Apriel-1.6-15b-Thinker:Q4_K_M": {
@@ -241,10 +241,10 @@
       "quant": "Q4_K_M",
       "tools": true,
       "thinking": true,
-      "channel_separation": {"think_on": "clean", "think_off": "UNCERTAIN -- see caveat"},
+      "channel_separation": {"think_on": "clean", "think_off": "UNCERTAIN (see caveat)"},
       "config_overrides": {},
       "caveats": [
-        "think=off gate content was unusually long (1500+ chars for a one-sentence prompt) with 0 reported thinking chars -- consistent with this model delimiting its reasoning/final-answer boundary with a non-<think> marker this framework's generic merge guard doesn't recognize (see ARCHITECTURE.md 'Known limitations' -- the guard is hard-coded to <think>/</think>). The automated check reported 'clean' at think=off; this caveat exists precisely because that verdict should not be trusted at face value for this tag. Verify the actual delimiter convention by hand before citing any think=off channel-suite result for this model."
+        "think=off gate content was unusually long (1500+ characters for a one-sentence prompt) with 0 reported thinking characters. That is consistent with this model marking its reasoning with a delimiter none of the built-in families recognise, so the automated 'clean' at think=off should not be taken at face value for this tag. Verify the delimiter by hand before citing any think=off S2 result for this model, and if you identify it, record it in this entry's `delimiters` field, which both `cbench gate` and the S2 suite read."
       ]
     },
     "exaone-deep:7.8b": {
@@ -256,7 +256,7 @@
       "channel_separation": null,
       "config_overrides": {},
       "caveats": [
-        "No tools capability and no thinking capability reported -- the containment and persistence suites need real tool calling and will not produce valid data; the channel suite has no reasoning channel to sweep. A capable-looking 'deep' reasoning model name is not evidence of either capability -- always gate-check, don't infer from the tag."
+        "No tools capability and no thinking capability reported. S1 and S3 need real tool calling and will not produce valid data, and S2 has no reasoning channel to sweep. A capable-sounding 'deep' reasoning name is not evidence of either capability: always gate-check rather than infer from the tag."
       ]
     }
   }

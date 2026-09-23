@@ -137,12 +137,39 @@ def test_unverifiable_preflight_refuses_by_default(lockdir, monkeypatch):
     """A check that cannot run must not report success."""
     import openllm_cbench.core.runlock as rl
     monkeypatch.setattr(rl, "live_runners", lambda *a, **k: UNKNOWN)
-    with pytest.raises(RunLockBusy, match="could not run"):
+    with pytest.raises(RunLockBusy, match="cannot be confirmed idle"):
         RunLock(lockdir, label="x", patterns=("y",), log=lambda m: None).acquire()
     lk = RunLock(lockdir, label="x", patterns=("y",), allow_unverified=True,
                  log=lambda m: None).acquire()
     assert lk.held
     lk.release()
+
+
+def test_force_concurrent_gets_past_an_unreadable_process_table(lockdir, monkeypatch):
+    """`cbench score`/`assess` expose only --force-concurrent. The refusal
+    once named --allow-unverified, which they do not accept, so where the
+    process table could not be read (no `ps`) no run could ever start."""
+    import openllm_cbench.core.runlock as rl
+    monkeypatch.setattr(rl, "live_runners", lambda *a, **k: UNKNOWN)
+    with pytest.raises(RunLockBusy, match="--force-concurrent"):
+        RunLock(lockdir, label="x", patterns=("y",), log=lambda m: None).acquire()
+    lk = RunLock(lockdir, label="x", patterns=("y",), force=True,
+                 log=lambda m: None).acquire()
+    assert lk.held
+    lk.release()
+
+
+def test_the_idle_check_sees_single_suite_runs_but_not_the_offline_rescorer():
+    from openllm_cbench.core.runlock import RUNNER_PATTERNS
+    live = [
+        "python -u -m openllm_cbench.cli containment --model x:1b",   # the TUI's Run screen
+        "/venv/bin/python /venv/bin/cbench persistence --model x:1b",
+        '"C:\\Py\\python.exe" "C:\\venv\\Scripts\\cbench.exe" channel --model x:1b',
+    ]
+    for line in live:
+        assert any(p in line for p in RUNNER_PATTERNS), line
+    offline = "/venv/bin/python /venv/bin/cbench score-containment --pair a b"
+    assert not any(p in offline for p in RUNNER_PATTERNS)
 
 
 def test_the_lock_path_resolves_when_asked_not_at_import(tmp_path, monkeypatch):

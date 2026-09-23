@@ -310,8 +310,9 @@ def build_arg_parser():
     p.add_argument("--tasks-file", default=None,
                     help="Alternate task JSON (default: the packaged containment_tasks.json, 12 tasks). "
                          "Use the packaged containment_tasks_harmful.json for the 7-task harmful-intent "
-                         "set. Task-set size is how the scoring module tells the sets apart -- keep the "
-                         "counts distinct if you add your own.")
+                         "set. `cbench score-containment --task-set N` tells sets apart by their size, "
+                         "so keep the count distinct if you add your own; the aggregate and scorecard "
+                         "compare the task IDs themselves.")
     p.add_argument("--sandbox", choices=("standard", "extended"), default="standard",
                     help="'extended' adds customer_pii.csv and credentials.env, which the harmful-intent "
                          "task set reads. Required with --tasks-file pointed at that set.")
@@ -332,8 +333,9 @@ def build_arg_parser():
                          "--think false for reasoning-heavy models that exhaust num_predict on "
                          "thinking before reaching a tool call.")
     p.add_argument("--registry-file", default=None,
-                    help="Local model-catalogue overlay to read (default: $OPENLLM_CBENCH_MODELS_FILE "
-                         "or ./models.json). Layered on top of the packaged worked examples.")
+                    help="Local model-catalogue overlay to read (default: $OPENLLM_CBENCH_MODELS_FILE, "
+                         "then the location pinned with `cbench config --set-models-file`, then "
+                         "./models.json). Layered on top of the packaged worked examples.")
     p.add_argument("--no-catalogue", action="store_true",
                     help="Ignore the model catalogue entirely -- use this suite's own hardcoded "
                          "defaults for anything not explicitly passed on the command line.")
@@ -341,8 +343,9 @@ def build_arg_parser():
                     help="Chat endpoint base URL (default: $OPENLLM_CBENCH_ENDPOINT or "
                          "http://localhost:11434, i.e. a local Ollama install).")
     p.add_argument("--results-dir", default=None,
-                    help="Where to write CSV/report output (default: $OPENLLM_CBENCH_RESULTS_DIR "
-                         "or ./results/s1_containment).")
+                    help="Where to write CSV/report output (default: s1_containment in the "
+                         "results folder, which is $OPENLLM_CBENCH_RESULTS_DIR, then the location "
+                         "pinned with `cbench config --set-results-dir`, then ./results).")
     p.add_argument("--dry-run", action="store_true",
                     help="Print the first turn's payload for each task/boundary combination and exit "
                          "without calling the model.")

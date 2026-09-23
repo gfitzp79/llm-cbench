@@ -87,6 +87,11 @@ def _tool_calling_verdict(result):
         return UNVERIFIED, ("the tool call check did not finish in time on this machine, which "
                             "is a performance finding rather than a capability one -- the "
                             "endpoint does report `tools`")
+    if result.get("tool_call_no_response"):
+        # Same doctrine: no response at all is about the connection.
+        return UNVERIFIED, ("the tool call check got no response from the endpoint, which is "
+                            "a connection finding rather than a capability one -- the "
+                            "endpoint does report `tools`")
     if not result.get("tool_call_ok"):
         return INVALID, ("a real tool call did not round-trip: "
                          f"{result.get('tool_call_detail', 'no detail')}")
@@ -120,13 +125,23 @@ def _channel_verdict(result):
                          "separate reasoning channel for a CHANNEL_LEAK to be found in -- a 0% "
                          "leak rate here would describe the instrument, not the model")
 
-    checks = [result.get("channel_think_on"), result.get("channel_think_off")]
+    think_on = result.get("channel_think_on")
+    checks = [think_on, result.get("channel_think_off")]
     completed = [c for c in checks if c and c.get("ok")]
     if not completed:
         return UNVERIFIED, ("neither channel check completed, so whether a reasoning trace "
                             "actually comes back could not be established on this machine")
     if any((c.get("thinking_len") or 0) > 0 for c in completed):
         return READY, "a separate reasoning trace came back, so a leak could be detected"
+    # Only the think=on check can show that a trace is NOT delivered: no
+    # trace at think=off is what thinking off means. When think=on did not
+    # complete (a timeout), an empty think=off result proved nothing, and
+    # reading it as "advertised and not delivered" refused S2 over a
+    # stopwatch -- the one thing this module says it never does.
+    if not (think_on and think_on.get("ok")):
+        return UNVERIFIED, ("the think=on channel check did not complete, and no trace at "
+                            "think=off is expected, so whether a reasoning trace comes back "
+                            "could not be established on this machine")
     return INVALID, ("the endpoint reports a `thinking` capability but returned an EMPTY "
                      "reasoning trace at every state checked -- the capability is advertised "
                      "and not delivered, which reads as support right up until the leak rate "

@@ -272,11 +272,13 @@ def main():
                     help="Chat endpoint base URL (default: $OPENLLM_CBENCH_ENDPOINT or "
                          "http://localhost:11434).")
     p.add_argument("--results-dir", default=None,
-                    help="Where to write CSV/report output (default: $OPENLLM_CBENCH_RESULTS_DIR "
-                         "or ./results/s2_channel).")
+                    help="Where to write CSV/report output (default: s2_channel in the results "
+                         "folder, which is $OPENLLM_CBENCH_RESULTS_DIR, then the location pinned "
+                         "with `cbench config --set-results-dir`, then ./results).")
     p.add_argument("--registry-file", default=None,
-                    help="Local model-catalogue overlay to read (default: $OPENLLM_CBENCH_MODELS_FILE "
-                         "or ./models.json).")
+                    help="Local model-catalogue overlay to read (default: $OPENLLM_CBENCH_MODELS_FILE, "
+                         "then the location pinned with `cbench config --set-models-file`, then "
+                         "./models.json).")
     p.add_argument("--no-catalogue", action="store_true",
                     help="Ignore the model catalogue entirely.")
     p.add_argument("--dry-run", action="store_true",

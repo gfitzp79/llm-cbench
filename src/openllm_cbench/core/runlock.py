@@ -58,9 +58,19 @@ RUNNER_PATTERNS = (
     # second one was told the machine was idle. Spelled for each launcher:
     # `python -m`, the POSIX console script, and the Windows cbench.exe
     # shim, whose python child's command line quotes the exe path.
-    "openllm_cbench.cli score", "openllm_cbench.cli assess",
-    "cbench score", "cbench assess",
-    'cbench.exe" score', 'cbench.exe" assess', "cbench.exe score", "cbench.exe assess",
+    # The trailing space keeps `cbench score-containment`, an offline
+    # re-scorer, from matching `cbench score`.
+    "openllm_cbench.cli score ", "openllm_cbench.cli assess ",
+    "cbench score ", "cbench assess ",
+    'cbench.exe" score ', 'cbench.exe" assess ', "cbench.exe score ", "cbench.exe assess ",
+    # A single suite started through the CLI (`cbench containment`, or the
+    # TUI's Run screen) runs in-process too, so its command line names the
+    # subcommand, not the suite module.
+    "openllm_cbench.cli containment", "openllm_cbench.cli channel",
+    "openllm_cbench.cli persistence",
+    "cbench containment", "cbench channel", "cbench persistence",
+    'cbench.exe" containment', 'cbench.exe" channel', 'cbench.exe" persistence',
+    "cbench.exe containment", "cbench.exe channel", "cbench.exe persistence",
 )
 
 # Per user, not per directory. The lock guards this machine's GPU, and a
@@ -289,15 +299,20 @@ class RunLock:
     def _preflight(self):
         runners = live_runners(self.patterns)
         if runners == UNKNOWN:
-            if self.allow_unverified:
+            # force covers this too. `cbench score`/`assess` expose only
+            # --force-concurrent, and this message once named a flag they do
+            # not accept -- so where the process table cannot be read at all
+            # (a slim container with no `ps`), no run could ever start.
+            if self.allow_unverified or self.force:
                 self._log("WARNING: runner preflight could not run. Proceeding "
-                          "under allow_unverified. The machine was NOT verified "
+                          "anyway, as asked. The machine was NOT verified "
                           "idle; any timing measured here is suspect.")
                 return
             raise RunLockBusy(
-                "the runner preflight could not run, so the machine cannot be "
-                "confirmed idle. A check that cannot run must not report "
-                "success. Pass --allow-unverified only after confirming by hand."
+                "the runner preflight could not read the process table, so the "
+                "machine cannot be confirmed idle. A check that cannot run must "
+                "not report success. Confirm by hand that nothing else is running, "
+                "then re-run with --force-concurrent."
             )
         if runners:
             detail = "\n".join("    PID %d  %s" % (p, c) for p, c in runners)

@@ -119,6 +119,39 @@ def test_a_channel_check_that_errored_is_unverified():
     assert pf.suite_readiness(r)["s2"][0] == UNVERIFIED
 
 
+def test_a_timed_out_think_on_check_is_not_rescued_into_invalid_by_think_off():
+    """think=off returning no trace is what thinking off means. With the
+    think=on check timed out, that proved nothing -- and it used to be read
+    as "advertised and not delivered", refusing S2 over a stopwatch."""
+    r = gate_result(channel_think_on={"ok": False, "error": "read timeout"},
+                    channel_think_off={"ok": True, "content_len": 500, "thinking_len": 0})
+    assert pf.suite_readiness(r)["s2"][0] == UNVERIFIED
+    assert pf.unrunnable(r) == []
+
+
+def test_a_tool_call_with_no_response_is_unverified_not_invalid():
+    """A refused or dropped connection says nothing about the model. An
+    HTTP error the endpoint actually sent still can, and stays INVALID."""
+    r = gate_result(tool_call_ok=False, tool_call_no_response=True,
+                    tool_call_detail="NO RESPONSE from the endpoint -- ...")
+    assert pf.suite_readiness(r)["s1"][0] == UNVERIFIED
+    assert pf.unrunnable(r) == []
+    r = gate_result(tool_call_ok=False, tool_call_detail="HTTP 400: does not support tools")
+    assert pf.suite_readiness(r)["s1"][0] == INVALID
+
+
+def test_the_gate_marks_a_dropped_connection_as_no_response(monkeypatch):
+    import requests
+    from openllm_cbench.core import gate
+
+    def refuse(*a, **k):
+        raise requests.exceptions.ConnectionError("connection reset by peer")
+    monkeypatch.setattr(gate.requests, "post", refuse)
+    ok, detail = gate.check_tool_call("any:1b", "http://127.0.0.1:9/api/chat", timeout=5)
+    assert not ok
+    assert detail.startswith(gate.NO_RESPONSE_PREFIX)
+
+
 def test_a_gate_result_missing_keys_does_not_raise():
     """A verdict guessed from absent data is worse than 'I could not
     tell'."""

@@ -32,11 +32,7 @@ files into inspect_reconcile.py alongside the containment suite's own CSV
 output from the same model/boundary combination.
 """
 
-import http.server
 import json
-import threading
-import time
-from pathlib import Path
 
 import requests
 from ..core import canary as _canary
@@ -67,26 +63,15 @@ _canary_port = None
 _internal_url = None
 
 
-class _CanaryHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status": "ok"}')
-
-    do_POST = do_GET
-
-    def log_message(self, *a):
-        pass  # silence default stderr access-log spam
-
-
 def _ensure_canary():
+    # The shared listener, not a copy of it: core.canary.start_canary()
+    # asserts the loopback bind before serving and refuses otherwise. A
+    # local copy here bound the same address without that assertion -- the
+    # one property the safety claim rests on, left unchecked in one place.
     global _canary_port, _internal_url
     if _canary_port is not None:
         return
-    server = http.server.HTTPServer(("127.0.0.1", 0), _CanaryHandler)
-    _canary_port = server.server_address[1]
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    _server, _canary_port = _canary.start_canary()
     _internal_url = f"http://127.0.0.1:{_canary_port}/internal-api"
     print(f"[containment_inspect] canary listener on 127.0.0.1:{_canary_port}")
 

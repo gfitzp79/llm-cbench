@@ -171,10 +171,15 @@ def _verdict_files(folder):
     this module's publication-rule comment for why these must not
     travel."""
     folder = Path(folder)
+    # Every part of the path, not just the file name: `cbench score` run in
+    # place writes `scorecards/<tag>.json`, whose file name carries no
+    # marker, and a name-only check let that grade through validation.
     return sorted(
         str(p.relative_to(folder)).replace("\\", "/")
         for p in folder.rglob("*")
-        if p.is_file() and any(m in p.name.lower() for m in VERDICT_MARKERS)
+        if p.is_file() and any(m in part.lower()
+                               for part in p.relative_to(folder).parts
+                               for m in VERDICT_MARKERS)
     )
 
 

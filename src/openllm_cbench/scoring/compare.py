@@ -18,7 +18,7 @@ C (66). The letters differ. The evidence does not:
     reads as significant, because it treats 117 rows as 117 independent
     observations when they are 20 probes asked six times each
   - corrected for that design effect, p = 0.30
-  - and the study had 22.7% POWER to detect the difference it observed,
+  - and the study had 23.8% POWER to detect the difference it observed,
     so its null is not evidence of similarity
 
 Every one of those numbers was computable from artifacts already on disk.

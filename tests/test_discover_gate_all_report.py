@@ -64,3 +64,24 @@ def test_gate_all_prints_full_report_when_caveats_found(tmp_path, capsys):
     # tool-call-check line -- its presence proves the full report was
     # actually printed, not just the terse status.
     assert "tool call malformed -- missing required argument" in out
+
+
+def test_gate_all_exits_one_when_a_check_never_reached_its_model(tmp_path, capsys):
+    """It exited 0 whatever happened, beside documentation saying 1 means
+    something in the run failed. Caveats stay findings (exit 0, above); a
+    check that never reached its model is a failure, and saves nothing."""
+    unreached = {"model": "gone:1b", "clean": False, "show_info_ok": False,
+                 "warm_up_ok": False, "show_info_error": "connection refused",
+                 "caveats": []}
+    saved = []
+    with patch("openllm_cbench.core.discover.list_local_models", return_value=[_model("gone:1b")]), \
+         patch("openllm_cbench.core.registry.load_registry", return_value={"models": {}}), \
+         patch("openllm_cbench.core.gate.run_gate", return_value=unreached), \
+         patch("openllm_cbench.core.gate.to_registry_entry", return_value={}), \
+         patch("openllm_cbench.core.registry.save_entry",
+               side_effect=lambda *a, **k: saved.append(a) or str(tmp_path / "m.json")):
+        rc = cli._cmd_discover(["--gate-all"])
+
+    assert rc == 1
+    assert not saved
+    assert "1 failed to run" in capsys.readouterr().out

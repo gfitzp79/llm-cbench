@@ -44,6 +44,14 @@ TOOLS_NEED_THINKING_OFF = "ONLY with the reasoning channel off"
 # report no problem on a model it could not read at all.
 SHOW_INFO_FAILED_HEADING = "**The endpoint's model-info route did not return usable info**"
 
+# How check_tool_call() marks the two failures that are about the
+# connection rather than the model. run_gate() reads them back to set
+# tool_call_timed_out / tool_call_no_response, and the pre-flight treats
+# both as UNVERIFIED -- a stopwatch or a dropped socket cannot overrule a
+# capability the endpoint reports. Constants for the same reason as above.
+TIMEOUT_PREFIX = "TIMEOUT"
+NO_RESPONSE_PREFIX = "NO RESPONSE"
+
 
 def fetch_show_info(model, endpoint=None, timeout=30):
     """One call to the endpoint's model-info route. Returns the parsed
@@ -199,10 +207,17 @@ def check_tool_call(model, endpoint=None, timeout=60):
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.Timeout:
-            return False, (f"TIMEOUT after {timeout}s -- this says nothing about whether the "
-                            f"model supports tool calling, only that it didn't answer in time "
-                            f"on this machine (typically a model too large for the available "
-                            f"VRAM)"), False
+            return False, (f"{TIMEOUT_PREFIX} after {timeout}s -- this says nothing about "
+                            f"whether the model supports tool calling, only that it didn't "
+                            f"answer in time on this machine (typically a model too large for "
+                            f"the available VRAM)"), False
+        except requests.exceptions.ConnectionError as e:
+            # No response at all -- refused, reset, dropped. Like a timeout,
+            # evidence about the connection, not the model. An HTTP error
+            # below is different: the endpoint answered, and a 400 for a
+            # model without tool support IS a capability finding.
+            return False, (f"{NO_RESPONSE_PREFIX} from the endpoint -- "
+                           f"{describe_request_failure(e, endpoint or chat_url())}"), False
         except Exception as e:
             # A model with no reasoning channel returns HTTP 400 on any
             # think request, so the retry failing this way says nothing
@@ -367,7 +382,8 @@ def run_gate(model, base_url=None):
         timeout=scaled_timeout(60, warm_seconds, tokens_per_sec, num_predict=512))
     result["tool_call_ok"] = tool_ok
     result["tool_call_detail"] = tool_detail
-    result["tool_call_timed_out"] = tool_detail.startswith("TIMEOUT")
+    result["tool_call_timed_out"] = tool_detail.startswith(TIMEOUT_PREFIX)
+    result["tool_call_no_response"] = tool_detail.startswith(NO_RESPONSE_PREFIX)
     # THE DISCOVERY HAS TO BE ACTIONABLE, NOT JUST REPORTED.
     #
     # When only `think=false` round-tripped, saying so in the report is
@@ -420,6 +436,11 @@ def run_gate(model, base_url=None):
             f"Tool call check did not finish in time -- {tool_detail}. The endpoint DOES "
             f"report a tools capability for this model, so treat this as a performance "
             f"finding, not a capability one."
+        )
+    elif result.get("tool_call_no_response"):
+        caveats.append(
+            f"Tool call check got no response -- {tool_detail}. That is a connection "
+            f"finding, not a capability one; re-run the gate once the endpoint is steady."
         )
     elif not tool_ok:
         caveats.append(f"Tool call check failed: {tool_detail}")

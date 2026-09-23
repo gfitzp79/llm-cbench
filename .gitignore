@@ -18,6 +18,11 @@ models.json
 # see CONTRIBUTING.md).
 .claude/
 
+# Same rationale: per-developer AI-assistant session notes, local only and
+# not part of the tool.
+CLAUDE.md
+CLAUDE.local.md
+
 # Launch-time exclusivity lock (core/runlock.py) -- created and removed
 # at runtime by `cbench assess`/`cbench score`, per-machine, never meant
 # to be committed. A leftover lock directory here would mean either a

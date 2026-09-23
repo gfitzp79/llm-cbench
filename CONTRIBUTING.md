@@ -140,6 +140,12 @@ src/openllm_cbench/
                          max_prompt_tokens / peak_context_tokens per row,
                          and the half-window rule that separates a
                          provably untruncated run from one at risk
+    locations.py            `cbench doctor`'s "where things are": Ollama's
+                         install, logs and model storage (read from the
+                         server's own startup log, then confirmed against
+                         the models it lists), network exposure, and this
+                         tool's own files -- found and checked, never
+                         assumed from a platform default
     exitcodes.py            what an exit code means in words (0 done, 1 ran
                          and something failed, 2 refused to start), and
                          after_run(), which fails a suite run whose

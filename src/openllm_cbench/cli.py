@@ -75,6 +75,16 @@ def _cmd_doctor(argv):
         print("  Every suite needs a running chat endpoint at this address (or pass --endpoint / "
               "set OPENLLM_CBENCH_ENDPOINT).")
 
+    # Found and then checked, never assumed from a default -- see
+    # core/locations.py for the two defaults that were wrong on a real machine.
+    from openllm_cbench.core import locations
+    print("\nOllama:")
+    for line in locations.ollama_report(base_url):
+        print(line)
+    print("\ncbench:")
+    for line in locations.cbench_report():
+        print(line)
+
     print("\nSafety invariant:")
     try:
         server, port = start_canary()
@@ -90,10 +100,10 @@ def _cmd_doctor(argv):
     n = len(registry.get("models", {}))
     print(f"\nVerified-model registry: {n} model(s) gate-checked and on file.")
     print("  Run `cbench gate --model <tag>` on any model before a real run, "
-          "or check `data/models/verified.json` for existing entries.")
+          "or check `src/openllm_cbench/data/models/verified.json` for existing entries.")
 
-    print("\nDone. This command does not call a model and makes no outbound request "
-          "beyond the endpoint reachability check above.")
+    print("\nDone. This command calls no model and writes nothing. Its only requests go to the "
+          "endpoint above (reachability, version, model list); everything local is read-only.")
     return 0
 
 

@@ -95,7 +95,14 @@ silently missing from the aggregate and the grade is computed over
 whatever subset shared a directory with it.
 
 `cbench config` on its own prints where results are going and which
-setting decided that. `cbench config --find-results` searches the usual
+setting decided that. `cbench doctor` lists every location at once --
+Ollama's install, logs and model storage, and cbench's config file,
+results, catalogue, TUI logs and run lock -- with the setting behind each.
+Ollama's model folder is read from the running server's own startup log
+and confirmed by matching its manifests to the models the server lists,
+because the platform default can exist, be empty, and be wrong: the
+folder chosen in the Ollama app's settings is not an environment variable
+anything else can see. `cbench config --find-results` searches the usual
 places for trees that already exist, which is worth running once if you
 have used the tool from more than one directory. It reads only and moves
 nothing.
@@ -156,8 +163,11 @@ error, not a confusing result buried in a suite's output later.
 ## Quick start
 
 ```bash
-# Sanity-check your environment: endpoint reachable, canary binds
-# loopback, hardware headroom, catalogue status. Calls no model.
+# Sanity-check your environment: endpoint reachable; where Ollama is
+# installed, logs, and keeps its models (each checked against the running
+# server, and a warning if it listens beyond this machine); where cbench
+# keeps its own files; canary binds loopback; hardware headroom. Calls
+# no model and writes nothing.
 cbench doctor
 
 # Gate-check a model before trusting any real run against it: tool-call

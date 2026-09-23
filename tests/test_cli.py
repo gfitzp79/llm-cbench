@@ -76,6 +76,30 @@ def test_tui_without_textual_names_an_install_that_works(monkeypatch, capsys):
     assert "openllm-cbench[" not in err
 
 
+def test_version_prints_the_package_version():
+    from openllm_cbench import __version__
+    for flag in ("--version", "-V"):
+        result = _run([flag])
+        assert result.returncode == 0
+        assert result.stdout.strip() == f"cbench {__version__}"
+
+
+def test_a_gate_that_never_reached_the_model_refuses_and_saves_nothing(tmp_path):
+    """It exited 1, like a check that ran and found caveats, and --save
+    catalogued `"tools": false` for a model nobody had reached."""
+    import os
+    registry = tmp_path / "models.json"
+    result = subprocess.run(
+        [sys.executable, "-m", "openllm_cbench.cli", "gate", "--model", "nowhere:1b",
+         "--endpoint", "http://127.0.0.1:9", "--save", "--registry-file", str(registry)],
+        capture_output=True, text=True, timeout=120,
+        env={**os.environ, "PYTHONPATH": str(SRC)},
+    )
+    assert result.returncode == 2, result.stderr
+    assert "nothing was saved" in result.stderr
+    assert not registry.exists()
+
+
 def test_unknown_subcommand_exits_immediately_with_nonzero():
     result = _run(["not-a-real-subcommand"])
     assert result.returncode == 2

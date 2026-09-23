@@ -14,14 +14,18 @@ real outbound request to anywhere but the configured chat endpoint and
 that loopback canary. See ARCHITECTURE.md.
 
 Usage:
+    cbench --version
     cbench doctor
+    cbench config --set-results-dir <path>        # pin where results go, for every directory
     cbench gate --model <model-tag>
     cbench discover                               # what's pulled locally but not catalogued yet
     cbench discover --gate-all                     # ...and gate-check + save all of them
     cbench search --model <model-tag>             # check it exists in Ollama's registry first
     cbench pull --model <model-tag>               # download a model into the local endpoint
+    cbench remove --model <model-tag>             # delete a model from the local endpoint
     cbench assess --model <model-tag> --trials 3   # full S1+S2+S3 assessment, auto-aggregated
     cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
+    cbench compare --model <tag-a> --model <tag-b>      # is the difference between two models real?
     cbench catalogue                              # every local model + catalogue/score status
     cbench community-package --model <model-tag> --accept-terms   # bundle your CSVs
     cbench community-submit <folder>              # open it as a PR (needs `gh`; --confirm to send)
@@ -32,7 +36,6 @@ Usage:
     cbench aggregate --suite s1 --model <model-tag>
     cbench extension-rule --pair <base-tag> <variant-tag>   # pre-registered stopping rule
     cbench guardrail --csv <path>
-    cbench score-probes                           # standalone: score newest CSV's probes (or pass a path)
     cbench score-containment                        # standalone: re-score S1 CSVs with richer egress metrics
     cbench tui                                   # requires: pip install textual
 """
@@ -97,7 +100,9 @@ def _cmd_doctor(argv):
 def _cmd_gate(argv):
     import argparse
 
-    from openllm_cbench.core.gate import run_gate, render_gate_report, to_registry_entry
+    from openllm_cbench.core.gate import (
+        model_answered, render_gate_report, run_gate, to_registry_entry,
+    )
     from openllm_cbench.core.endpoint import resolve_base_url
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.core.registry import save_entry
@@ -110,8 +115,10 @@ def _cmd_gate(argv):
     p.add_argument("--save", action="store_true",
                     help="Write this result into the local model catalogue overlay (default ./models.json) "
                          "so every suite picks it up automatically on future runs against this tag. "
-                         "config_overrides is left empty -- add any num_predict/num_ctx/etc a real run "
-                         "turns out to need by hand-editing the saved entry.")
+                         "config_overrides is left empty except for `think`, set to false when this "
+                         "check finds the model only calls tools with its reasoning channel off -- add "
+                         "any num_predict/num_ctx/etc a real run turns out to need by hand-editing "
+                         "the saved entry. Nothing is saved if the check never reached the model.")
     p.add_argument("--registry-file", default=None,
                     help="Overlay file to write to with --save (default: $OPENLLM_CBENCH_MODELS_FILE "
                          "or ./models.json).")
@@ -122,6 +129,13 @@ def _cmd_gate(argv):
     result = run_gate(args.model, base_url)
     print()
     print(render_gate_report(result))
+
+    # Nothing about the model was reached, so this is a refusal, not a
+    # finding -- and there is no result to save. See model_answered().
+    if not model_answered(result):
+        print("\n[!] The check never reached this model, so nothing about it was measured"
+              + (" and nothing was saved." if args.save else "."), file=sys.stderr)
+        return 2
 
     if args.save:
         entry = to_registry_entry(result)
@@ -736,8 +750,19 @@ def _cmd_config(argv):
         return 0
 
     if args.set_results_dir:
-        resolved = set_results_dir(args.set_results_dir)
-        resolved.mkdir(parents=True, exist_ok=True)
+        # Create it BEFORE saving it. Saving first persisted a path that
+        # could not be created -- a mistyped drive letter -- and every later
+        # run, and every TUI action (each writes its log there), then
+        # crashed on it until the config file was edited by hand.
+        from pathlib import Path
+        target = Path(args.set_results_dir).expanduser().resolve()
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"[!] Could not create {target} ({e.strerror or e}). Nothing was saved; "
+                  "the results location is unchanged.", file=sys.stderr)
+            return 2
+        resolved = set_results_dir(target)
         print(f"Results location set to {resolved}")
         print(f"Stored in {config_path()}")
         print("\nThis applies from any directory, for both `cbench` and `cbench tui`.")
@@ -946,7 +971,9 @@ def _cmd_discover(argv):
 
     from openllm_cbench.core.discover import list_local_models, find_uncatalogued, format_size
     from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
-    from openllm_cbench.core.gate import run_gate, render_gate_report, to_registry_entry
+    from openllm_cbench.core.gate import (
+        model_answered, render_gate_report, run_gate, to_registry_entry,
+    )
     from openllm_cbench.core.invariant import epilog as safety_epilog
     from openllm_cbench.core.registry import load_registry, save_entry
 
@@ -1013,6 +1040,10 @@ def _cmd_discover(argv):
         except Exception as e:
             print(f"  [!] gate check failed to run: {e}\n")
             results.append((tag, "error", str(e)))
+            continue
+        if not model_answered(result):
+            print(f"  [!] never reached this model -- nothing saved.\n{render_gate_report(result)}")
+            results.append((tag, "error", "never reached"))
             continue
         entry = to_registry_entry(result)
         path = save_entry(tag, entry, args.registry_file)
@@ -1448,7 +1479,10 @@ _PASSTHROUGH = {
     "aggregate": "openllm_cbench.scoring.aggregate",
     "guardrail": "openllm_cbench.scoring.guardrail",
     "extension-rule": "openllm_cbench.scoring.extension_rule",
-    "score-probes": "openllm_cbench.scoring.probes",
+    # No `score-probes`: its standalone mode reads a results layout
+    # (results/<rotation>/security*/) that nothing in this package writes,
+    # so as a subcommand it could only fail. scoring/probes.py stays -- the
+    # channel suite imports its scoring functions.
     "score-containment": "openllm_cbench.scoring.containment_metrics",
 }
 
@@ -1488,6 +1522,12 @@ def main():
     argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
+        return 0
+    if argv[0] in ("-V", "--version"):
+        # The first thing a bug report needs. It used to answer "Unknown
+        # subcommand", which reads as a typo on the user's part.
+        from openllm_cbench import __version__
+        print(f"cbench {__version__}")
         return 0
 
     subcommand, rest = argv[0], argv[1:]

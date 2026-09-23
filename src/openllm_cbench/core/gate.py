@@ -505,6 +505,18 @@ def _numeric_params_b(param_size):
         return param_size
 
 
+def model_answered(result):
+    """True when the gate learned anything about the model: its info route
+    answered, or it answered a chat request.
+
+    False -- an unreachable endpoint, an unknown tag, a file the server
+    cannot load -- means no capability was checked. There is then nothing
+    to catalogue: saving wrote `"tools": false` for a model nobody had
+    reached, and it read as catalogued from then on. Either route counts,
+    so an endpoint without Ollama's /api/show is not refused for that."""
+    return bool(result.get("show_info_ok") or result.get("warm_up_ok"))
+
+
 def to_registry_entry(result):
     """Converts a run_gate() result into the shape core/registry.py's
     catalogue expects (same schema as data/models/verified.json). Only

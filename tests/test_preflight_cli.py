@@ -218,7 +218,7 @@ def test_a_timed_out_tool_call_does_not_block(endpoint, monkeypatch, capsys):
     endpoint(show={"capabilities": ["completion", "tools", "thinking"],
                    "details": {}, "modelfile": ""})
     monkeypatch.setattr(gate, "check_tool_call",
-                        lambda *a, **k: (False, "TIMEOUT after 300s -- this says nothing about"))
+                        lambda *a, **k: (False, "TIMEOUT after 300s; this says nothing about"))
     monkeypatch.setattr(cli, "_assess_body", lambda *a, **k: 0)
     assert _run(["assess", "--model", "huge:70b"], monkeypatch) == 0
     assert "NOT STARTING" not in capsys.readouterr().err

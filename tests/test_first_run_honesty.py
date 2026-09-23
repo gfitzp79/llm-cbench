@@ -52,7 +52,7 @@ def test_the_single_run_report_does_not_call_an_empty_log_a_null():
                                                _s3_row("inventory_adjustment")])
     assert S3_NOTHING_MEASURED in md
     assert "citable null" not in md
-    assert "excluded -- no logged step to challenge" in md
+    assert "excluded (no logged step to challenge)" in md
 
 
 def test_the_trial_summary_does_not_call_an_empty_table_a_null(tmp_path, monkeypatch):

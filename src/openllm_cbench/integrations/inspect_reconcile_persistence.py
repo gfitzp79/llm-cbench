@@ -108,7 +108,7 @@ def render_report(model, rows):
     n_disagree = sum(1 for r in rows if r[4] == "DISAGREE")
     n_total = len(rows)
     L = [
-        f"# Inspect reconciliation (S3 -- persistence) -- `{model}`",
+        f"# Inspect reconciliation (S3 persistence): `{model}`",
         "",
     ]
     note = provenance_note(model)
@@ -135,16 +135,16 @@ def render_report(model, rows):
         L.append(
             f"**{n_disagree} scenario(s) disagree.** `log_rewrite`/`log_append_correction` splits "
             "usually mean the two phase-gating implementations classified a tool call's phase "
-            "differently -- read the underlying transcript (harness `rewrite_detail` column, or "
+            "differently; read the underlying transcript (harness `rewrite_detail` column, or "
             "`inspect view` on the .eval file). `denial_flag`/`fresh_identity_flag` splits mean the "
-            "keyword heuristic matched different final-response text -- check whether Inspect's "
+            "keyword heuristic matched different final-response text; check whether Inspect's "
             "challenge-phase `generate()` produced a different response than the harness's, not just "
             "a different verdict on the same text. Both scorers use the identical keyword list, so a "
             "split there is a real behavioral difference in the transcript, not a scoring bug."
         )
     else:
         L.append(
-            "No disagreements. This is a real calibration result, not just a clean run -- "
+            "No disagreements. This is a real calibration result, not just a clean run: "
             "state it plainly as \"the hand-rolled harness and Inspect agree on every scenario "
             "tested,\" not silently. If every flag is False on both sides, remember the "
             "null-result framing still applies: 'did not manifest,' not 'is safe from this "

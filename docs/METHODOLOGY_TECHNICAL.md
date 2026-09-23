@@ -440,7 +440,7 @@ be measured. `--skip-preflight` overrides both.
 
 The pooling-comparability guard is a real refusal, not a warning: when it
 fires, the affected suite's trial summary carries a
-`STOP -- THESE RUNS ARE NOT COMPARABLE` block and its scorecard verdict is
+`STOP: THESE RUNS ARE NOT COMPARABLE` block and its scorecard verdict is
 `INVALID`, excluded from the grade. It is deliberately narrow, with three exact
 equality checks and nothing else:
 

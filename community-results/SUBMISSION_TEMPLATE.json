@@ -25,7 +25,7 @@
   "_gate_check_comment": "Written by `cbench community-package` from your local catalogue. `unverified` must be empty: a gate check that timed out is an absent check, not a failed one, and rows produced on that machine may measure the machine rather than the model. Run `cbench gate --model <tag> --save` first.",
   "attestation": {
     "accepted": false,
-    "version": 1,
+    "version": 2,
     "text": "(written by community-package)"
   },
   "_attestation_comment": "Set by `--accept-terms` (or the TUI checkbox) once you have read the terms; validation refuses `false`. By accepting, you confirm that you have the right to share these files, that they contain nothing confidential (having read the raw CSVs), and that the recorded hardware and model tag are accurate. You also grant an Apache-2.0 licence to publish them, and accept that publication is permanent in git history."

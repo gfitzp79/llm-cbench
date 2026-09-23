@@ -109,7 +109,7 @@ def ollama_log_dir():
     elif sys.platform == "darwin":
         folder = Path.home() / ".ollama" / "logs"
     else:
-        return None, "no log file on Linux -- a service logs to `journalctl -u ollama`"
+        return None, "no log file on Linux; a service logs to `journalctl -u ollama`"
     if folder and folder.is_dir():
         return folder, ""
     return None, f"not found (expected {folder})" if folder else "not found"
@@ -274,7 +274,7 @@ def ollama_report(base_url):
                  "install location (a server in a container looks like this too)")
     version = server_version(base_url)
     lines.append(f"  version:       {version} (reported by the endpoint)" if version else
-                 "  version:       unknown -- the endpoint did not answer /api/version")
+                 "  version:       unknown (the endpoint did not answer /api/version)")
 
     folder, note = ollama_log_dir()
     if folder:
@@ -289,12 +289,12 @@ def ollama_report(base_url):
     config = read_server_config(folder)
     tags = server_tags(base_url)
     if tags is None:
-        lines.append("  model storage: unknown -- the endpoint did not list its models, so no "
-                     "folder can be checked against them")
+        lines.append("  model storage: unknown (the endpoint did not list its models, so no "
+                     "folder can be checked against them)")
     else:
         found = find_models_dir(tags, config)
         if found is None:
-            lines.append(f"  model storage: [!] not found -- none of the usual places holds the "
+            lines.append(f"  model storage: [!] not found; none of the usual places holds the "
                          f"{len(tags)} model(s) the server lists. It may be set in the Ollama "
                          f"app's settings or the server's own environment.")
         else:
@@ -308,7 +308,7 @@ def ollama_report(base_url):
 
     host_setting = config.get("OLLAMA_HOST", "")
     if listens_beyond_loopback(host_setting):
-        lines.append(f"  network:       [!] the server listens on {host_setting} -- other machines "
+        lines.append(f"  network:       [!] the server listens on {host_setting}; other machines "
                      f"on your network can use it, and Ollama has no authentication. Unless you "
                      f"meant that, turn off \"Expose Ollama to the network\" in the Ollama app, "
                      f"or set OLLAMA_HOST=127.0.0.1.")

@@ -142,7 +142,7 @@ def render_report(model, rows):
     n_disagree = sum(1 for r in rows if r[4] == "DISAGREE")
     n_total = len(rows)
     L = [
-        f"# Inspect reconciliation -- `{model}`",
+        f"# Inspect reconciliation: `{model}`",
         "",
     ]
     note = provenance_note(model)
@@ -163,15 +163,15 @@ def render_report(model, rows):
         L.append(
             f"**{n_disagree} disagreement(s).** Each one means either the harness's host-allowlist "
             "logic or Inspect's default tool-loop/message-limit behavior classified the same "
-            "transcript differently -- read the underlying transcript (harness `tool_log` column, "
+            "transcript differently; read the underlying transcript (harness `tool_log` column, "
             "or `inspect view` on the .eval file) for each disagreement before trusting either "
             "number. A structural mismatch (e.g. Inspect's `generate()` hit a message limit before "
             "the harness's `--max-turns` would have) is a config difference, not a real behavioral "
-            "disagreement -- note which kind each one is."
+            "disagreement; note which kind each one is."
         )
     else:
         L.append(
-            "No disagreements. This is a real calibration result, not just a clean run -- "
+            "No disagreements. This is a real calibration result, not just a clean run: "
             "state it plainly as \"the hand-rolled harness and Inspect agree on every "
             "task/boundary combination tested,\" not silently."
         )

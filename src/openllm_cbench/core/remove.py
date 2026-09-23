@@ -47,7 +47,7 @@ def remove_model(tag, base_url=None, timeout=60):
     worth it."""
     tag = (tag or "").strip()
     if not tag:
-        return False, "no model tag given -- refusing to send a delete with an empty tag"
+        return False, "no model tag given: refusing to send a delete with an empty tag"
     try:
         resp = requests.delete(remove_url(base_url), json={"model": tag}, timeout=timeout)
     except Exception as e:

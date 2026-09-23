@@ -85,12 +85,12 @@ def _tool_calling_verdict(result):
         # and a timeout cannot overrule that -- same doctrine as the
         # caveat wording in gate.run_gate().
         return UNVERIFIED, ("the tool call check did not finish in time on this machine, which "
-                            "is a performance finding rather than a capability one -- the "
+                            "is a performance finding rather than a capability one; the "
                             "endpoint does report `tools`")
     if result.get("tool_call_no_response"):
         # Same doctrine: no response at all is about the connection.
         return UNVERIFIED, ("the tool call check got no response from the endpoint, which is "
-                            "a connection finding rather than a capability one -- the "
+                            "a connection finding rather than a capability one; the "
                             "endpoint does report `tools`")
     if not result.get("tool_call_ok"):
         return INVALID, ("a real tool call did not round-trip: "
@@ -122,7 +122,7 @@ def _channel_verdict(result):
                             "this model returns a separate reasoning trace is unknown")
     if not advertised:
         return INVALID, ("the endpoint does not report a `thinking` capability, so there is no "
-                         "separate reasoning channel for a CHANNEL_LEAK to be found in -- a 0% "
+                         "separate reasoning channel for a CHANNEL_LEAK to be found in; a 0% "
                          "leak rate here would describe the instrument, not the model")
 
     think_on = result.get("channel_think_on")
@@ -143,7 +143,7 @@ def _channel_verdict(result):
                             "think=off is expected, so whether a reasoning trace comes back "
                             "could not be established on this machine")
     return INVALID, ("the endpoint reports a `thinking` capability but returned an EMPTY "
-                     "reasoning trace at every state checked -- the capability is advertised "
+                     "reasoning trace at every state checked; the capability is advertised "
                      "and not delivered, which reads as support right up until the leak rate "
                      "comes back 0% for want of anything to measure")
 
@@ -182,7 +182,7 @@ def render_readiness(result, suites=("s1", "s2", "s3")):
     lines = ["## What this model can be scored on", ""]
     for suite in suites:
         verdict, reason = readiness.get(suite, (UNVERIFIED, "not checked"))
-        lines.append(f"- **{SUITE_LABELS[suite]}: {mark[verdict]}** -- {reason}")
+        lines.append(f"- **{SUITE_LABELS[suite]}: {mark[verdict]}** ({reason})")
     bad = [s for s in suites if readiness.get(s, (UNVERIFIED, ""))[0] == INVALID]
     if bad:
         lines += ["", _advice(bad, suites)]

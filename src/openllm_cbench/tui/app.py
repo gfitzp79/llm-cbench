@@ -85,11 +85,11 @@ async def _populate_model_select(select: Select) -> dict:
     try:
         local = await asyncio.to_thread(list_local_models)
     except Exception:
-        _fill([], "Could not list local models — type the tag below")
+        _fill([], "Could not list local models: type the tag below")
         return {}
     options = [(m["name"], m["name"]) for m in sorted(local, key=lambda x: x["name"])]
     _fill(options, "Pick a local model (or type the tag below)" if options else
-          "No local models found — type the tag below")
+          "No local models found: type the tag below")
     return {m["name"]: m for m in local}
 
 
@@ -99,7 +99,7 @@ def _saved_log_line(result) -> str:
     the results folder cannot be written."""
     path = save_job_log(result)
     if path is None:
-        return ("[yellow]Could not save the full log -- the results folder could not be "
+        return ("[yellow]Could not save the full log: the results folder could not be "
                 "written. The output above is all there is.[/yellow]")
     return f"[dim]Full log saved to {path}[/dim]"
 
@@ -205,8 +205,8 @@ class DashboardScreen(Screen):
         else:
             widget.update(
                 f"[bold yellow]Results:[/bold yellow] [bold]{path}[/bold] "
-                f"[yellow]-- not pinned, so this follows whichever directory the TUI "
-                f"was launched from. Settings fixes it.[/yellow]")
+                f"[yellow](not pinned, so this follows whichever directory the TUI "
+                f"was launched from). Settings fixes it.[/yellow]")
 
     @work(exclusive=True, group="progress")
     async def _load_progress(self) -> None:
@@ -261,7 +261,7 @@ class DashboardScreen(Screen):
         )
         action = progress.get("next_action")
         if action:
-            nxt.update(f"[bold]Next:[/bold] {action[0]} [dim]-- {action[1]}[/dim]")
+            nxt.update(f"[bold]Next:[/bold] {action[0]}. [dim]{action[1]}[/dim]")
         else:
             nxt.update("")
 
@@ -306,7 +306,7 @@ class RunScreen(Screen):
         yield Header()
         yield InvariantBar()
         with Vertical(id="run-form"):
-            yield Static("Run a suite -- equivalent to running `cbench <suite>` yourself. "
+            yield Static("Run a suite: equivalent to running `cbench <suite>` yourself. "
                          "One run of one suite: writes a CSV and a report, no grade. For a "
                          "grade, use Score a model.")
             yield Select(
@@ -314,18 +314,18 @@ class RunScreen(Screen):
                 id="suite-select", value=RUNNABLE_SUITES[0][1], allow_blank=False,
             )
             yield Select([], id="model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below) — loading...")
+                         prompt="Pick a local model (or type the tag below). Loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="model-input")
             # OFF by default, matching the CLI's own store_true default.
             yield Checkbox(
-                "Dry run -- print the payload and call no model. Leave OFF to actually run.",
+                "Dry run: print the payload and call no model. Leave OFF to actually run.",
                 id="dry-run-checkbox", value=False,
             )
             yield Input(
                 # The old example (--boundary/--sandbox) exists only on
                 # containment, so it errored on the other two suites.
                 placeholder="extra flags for this suite (optional), e.g. --think false "
-                            "-- see `cbench <suite> --help`",
+                            "(see `cbench <suite> --help`)",
                 id="extra-args-input",
             )
             with Horizontal():
@@ -390,12 +390,12 @@ class GateScreen(Screen):
         yield Header()
         yield InvariantBar()
         with Vertical(id="gate-form"):
-            yield Static("Gate-check a model -- equivalent to running `cbench gate` yourself.")
+            yield Static("Gate-check a model: equivalent to running `cbench gate` yourself.")
             yield Select([], id="gate-model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below) — loading...")
+                         prompt="Pick a local model (or type the tag below). Loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="gate-model-input")
             yield Checkbox(
-                "Save the result to my model catalogue (models.json) -- unticked = show "
+                "Save the result to my model catalogue (models.json); unticked = show "
                 "the result only, nothing is written",
                 id="gate-save-checkbox", value=False,
             )
@@ -479,21 +479,21 @@ class ModelsScreen(Screen):
         with Vertical(id="models-body"):
             yield Static(
                 "Models pulled into your local endpoint. \"Catalogued\" means the "
-                "model catalogue already has config guidance for this exact tag -- "
+                "model catalogue already has config guidance for this exact tag; "
                 "an uncatalogued model still runs fine, just \"ungated\".\n"
                 "Speed column: a bold tok/s figure is MEASURED on this machine during that "
                 "model's gate check. A word (fast/good/moderate/slow) is an estimate from "
-                "the parameters actually read per token -- for a mixture-of-experts model "
+                "the parameters actually read per token: for a mixture-of-experts model "
                 "that's the active experts, not the full weight count, which is why a "
                 "30B-A3B MoE outruns a dense 30B of the same size on disk.\n"
                 "Score column: an A-F grade (0-100), the worst of the three suites "
-                "run -- not an average, see \"Scoring a model\" in README.md. "
+                "run, not an average (see \"Scoring a model\" in README.md). "
                 "\"not scored\" = never run through `cbench score`. \"N/A\" = nothing "
                 "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
-                "task sets, or pooled CSVs that disagree on sampling / mix CSVs that "
-                "recorded it with ones that predate it) -- that suite is excluded from "
-                "the grade, don't trust it yet regardless. Trailing \"*\" = an "
-                "otherwise-ok suite still has an unresolved caveat -- read the full "
+                "task sets, or pooled CSVs that disagree on sampling or generation "
+                "budgets, or mix CSVs that recorded sampling with ones that predate it). "
+                "That suite is excluded from the grade; do not trust it yet. Trailing \"*\" = an "
+                "otherwise-ok suite still has an unresolved caveat: read the full "
                 "scorecard (results/scorecards/<tag>.md) before citing the grade alone.",
                 id="models-score-legend",
             )
@@ -514,7 +514,7 @@ class ModelsScreen(Screen):
                 # delete sitting around from five minutes ago is how the
                 # wrong model gets removed.
                 yield Checkbox(
-                    "Confirm delete -- permanently removes the selected model's "
+                    "Confirm delete: permanently removes the selected model's "
                     "weights from your endpoint (results are kept)",
                     id="models-confirm-delete", value=False,
                 )
@@ -654,13 +654,13 @@ class ModelsScreen(Screen):
         log = self.query_one("#models-log", RichLog)
         tag = self._selected_tag()
         if not tag:
-            log.write("[bold red]Select a model row first -- nothing is selected, so "
+            log.write("[bold red]Select a model row first: nothing is selected, so "
                       "there is nothing to delete.[/bold red]")
             return
         if not self.query_one("#models-confirm-delete", Checkbox).value:
             log.write(
                 f"[bold yellow]NOT deleting '{tag}'.[/bold yellow] Deleting removes the "
-                f"model's weights from your endpoint and cannot be undone from here -- "
+                f"model's weights from your endpoint and cannot be undone from here: "
                 f"getting it back means pulling it again. Tick the confirm box if that "
                 f"is what you want.")
             return
@@ -668,7 +668,7 @@ class ModelsScreen(Screen):
         argv = cbench_command("remove", ["--model", tag, "--yes"])
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
         log.write(f"[bold red]Deleting '{tag}' from the endpoint.[/bold red] "
-                  f"[dim]Its CSVs, reports and scorecard stay in results/ -- the "
+                  f"[dim]Its CSVs, reports and scorecard stay in results/. The "
                   f"measurement outlives the weights.[/dim]")
         # Untick immediately, so the next delete has to be confirmed on its
         # own terms rather than inheriting this one.
@@ -781,7 +781,7 @@ class ModelsScreen(Screen):
             self._apply_sort(quiet=True)
         if spills_n:
             log.write(f"[bold yellow]{spills_n} model(s) won't fit in this GPU's "
-                       f"{vram_mb:,} MB of VRAM and will run partly on CPU -- much slower, but "
+                       f"{vram_mb:,} MB of VRAM and will run partly on CPU: much slower, but "
                        f"still valid. \"spills (MoE)\" degrades far less than a dense model of "
                        f"the same size, since only a fraction of its parameters are active per "
                        f"token.[/bold yellow]")
@@ -796,7 +796,7 @@ class ModelsScreen(Screen):
         table = self.query_one("#models-table", DataTable)
         log = self.query_one("#models-log", RichLog)
         if table.row_count == 0 or table.cursor_row is None:
-            log.write("[bold red]No row selected -- click a model first.[/bold red]")
+            log.write("[bold red]No row selected: click a model first.[/bold red]")
             return
         row = table.get_row_at(table.cursor_row)
         tag = str(row[0])
@@ -826,11 +826,11 @@ class ModelsScreen(Screen):
                 # Refuse rather than widen. A typo in a field meant to LIMIT
                 # model calls must not turn into calling every model.
                 log.write("[bold red]Limit must be a positive whole number, or blank for "
-                          "all -- nothing started.[/bold red]")
+                          "all; nothing started.[/bold red]")
                 return
         argv = cbench_command("discover", flags)
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
-        log.write("[dim]Gate-checking every uncatalogued model, one at a time -- real model "
+        log.write("[dim]Gate-checking every uncatalogued model, one at a time: real model "
                   "calls, so this can take a while for a long list.[/dim]")
         self._gate_worker(argv, log)
 
@@ -860,10 +860,10 @@ class PullScreen(Screen):
         with Vertical(id="pull-form"):
             yield Static(
                 "Search Ollama's registry for an exact model tag (no download), then "
-                "pull it if you want it -- equivalent to running `cbench search` / "
+                "pull it if you want it: equivalent to running `cbench search` / "
                 "`cbench pull` (or `ollama pull`) yourself. [bold]Pull downloads real "
                 "data from Ollama's registry[/bold], possibly several GB, and can take "
-                "a while -- Search never does."
+                "a while; Search never does."
             )
             yield Input(placeholder="model tag, e.g. qwen3:4b", id="pull-model-input")
             with Horizontal():
@@ -932,18 +932,18 @@ class ScoreScreen(Screen):
         yield InvariantBar()
         with Vertical(id="score-form"):
             yield Static(
-                "Score a model -- equivalent to running `cbench score` yourself. Runs "
+                "Score a model: equivalent to running `cbench score` yourself. Runs "
                 "S1/S2/S3 at the chosen depth (or reads existing CSVs with \"From "
                 "existing\", making no model call), then saves an A-F grade (worst of the "
                 "three suites, not an average) plus the full per-suite detail underneath "
-                "it -- see README.md \"Scoring a model\". The Local models screen's Score column "
+                "it (see README.md \"Scoring a model\"). The Local models screen's Score column "
                 "and `cbench catalogue` both read whatever this produces.\n"
                 "Depth covers 1/3/5 trials. For any other trial count, run `cbench assess "
-                "--model <tag> --trials N` in a terminal -- that runs the identical suites "
+                "--model <tag> --trials N` in a terminal: that runs the identical suites "
                 "and aggregation this does, just without producing a grade afterward."
             )
             yield Select([], id="score-model-select", allow_blank=True,
-                         prompt="Pick a local model (or type the tag below) — loading...")
+                         prompt="Pick a local model (or type the tag below). Loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="score-model-input")
             yield Static("", id="score-catalogue-status")
             yield Static("", id="score-hardware-status")
@@ -952,16 +952,16 @@ class ScoreScreen(Screen):
                 yield Checkbox("S2 channel", id="score-s2", value=True)
                 yield Checkbox("S3 persistence", id="score-s3", value=True)
             yield Select(
-                [("quick — 1 trial (exploratory only, below this framework's own "
+                [("quick: 1 trial (exploratory only, below this framework's own "
                   "3-trial citability minimum)", "quick"),
-                 ("standard — 3 trials (default; this framework's own pre-registered "
+                 ("standard: 3 trials (default; this framework's own pre-registered "
                   "minimum for a rate worth citing)", "standard"),
-                 ("thorough — 5 trials (matches the extension-rule's own EXTEND target)",
+                 ("thorough: 5 trials (matches the extension-rule's own EXTEND target)",
                   "thorough")],
                 id="score-depth-select", value="standard", allow_blank=False,
             )
             yield Checkbox(
-                "From existing (score whatever CSVs are already on disk for this tag -- "
+                "From existing (score whatever CSVs are already on disk for this tag: "
                 "runs nothing, calls no model; depth above is ignored)",
                 id="score-from-existing", value=False,
             )
@@ -969,9 +969,9 @@ class ScoreScreen(Screen):
                 # Blank means "leave it to the catalogue". An explicit value
                 # beats the per-model config_overrides, which beat the
                 # suite default -- the same precedence the CLI flags have.
-                yield Input(placeholder="Context window, tokens (--num-ctx) -- blank = "
+                yield Input(placeholder="Context window, tokens (--num-ctx); blank = "
                                         "catalogue default", id="score-num-ctx")
-                yield Input(placeholder="Max tokens per reply (--num-predict) -- blank = "
+                yield Input(placeholder="Max tokens per reply (--num-predict); blank = "
                                         "catalogue default",
                             id="score-num-predict")
             # OFF by default, matching `cbench score`, whose --dry-run is
@@ -979,18 +979,18 @@ class ScoreScreen(Screen):
             # "Score" did not score unless you noticed and unticked it --
             # a TUI/CLI divergence, not a safety default.
             yield Checkbox(
-                "Dry run -- print the payloads and call no model. Leave OFF to actually score.",
+                "Dry run: print the payloads and call no model. Leave OFF to actually score.",
                 id="score-dry-run", value=False,
             )
             yield Checkbox(
-                "Run suites the pre-flight says can't produce a result (`--force-uncheckable`) "
-                "-- off by default: a suite whose validity guard cannot fire spends the full "
+                "Run suites the pre-flight says can't produce a result (`--force-uncheckable`). "
+                "Off by default: a suite whose validity guard cannot fire spends the full "
                 "time and grades INVALID. Tick this only to capture the raw transcripts.",
                 id="score-force-uncheckable", value=False,
             )
             yield Checkbox(
                 "Gate-check first if not catalogued (runs `cbench gate --save` before "
-                "scoring, so a net-new model isn't silently UNGATED -- recommended, "
+                "scoring, so a net-new model isn't silently UNGATED; recommended, "
                 "especially for a model this catalogue has never seen)",
                 id="score-gate-first", value=True,
             )
@@ -1144,8 +1144,8 @@ class ScoreScreen(Screen):
                     try:
                         args += [flag, str(int(raw))]
                     except ValueError:
-                        problems.append(f"{flag} must be a whole number, got {raw!r} "
-                                        f"-- ignoring it.")
+                        problems.append(f"{flag} must be a whole number, got {raw!r}; "
+                                        f"ignoring it.")
             if self.query_one("#score-dry-run", Checkbox).value:
                 args.append("--dry-run")
             # Without this the TUI has no way past the pre-flight refusal
@@ -1259,10 +1259,10 @@ class ScoreScreen(Screen):
         from openllm_cbench.core.registry import load_registry, lookup
         entry = lookup(model, load_registry())
         if entry is not None:
-            status.update("[green]✓ catalogued[/green] -- config guidance on file for this tag.")
+            status.update("[green]✓ catalogued[/green]: config guidance on file for this tag.")
         else:
             status.update(
-                "[bold yellow]⚠ not in your model catalogue[/bold yellow] -- this run will be "
+                "[bold yellow]⚠ not in your model catalogue[/bold yellow]: this run will be "
                 "UNGATED unless \"Gate-check first\" below is checked (it is, by default)."
             )
         hardware.update(self._hardware_fit_line(model, entry))
@@ -1319,7 +1319,7 @@ class ScoreScreen(Screen):
             if len(missing) == len(suites):
                 log.write(
                     f"[bold red]\"From existing\" is checked, but no "
-                    f"{'/'.join(s.upper() for s in suites)} CSVs exist yet for '{model}' -- there is "
+                    f"{'/'.join(s.upper() for s in suites)} CSVs exist yet for '{model}': there is "
                     f"nothing on disk to score. This would run nothing and produce grade N/A. Uncheck "
                     f"\"From existing\" (and pick a depth) to actually run trials.[/bold red]"
                 )
@@ -1327,7 +1327,7 @@ class ScoreScreen(Screen):
             elif missing:
                 log.write(
                     f"[bold yellow]\"From existing\": no {'/'.join(s.upper() for s in missing)} CSVs "
-                    f"exist yet for '{model}' -- {'those' if len(missing) > 1 else 'that'} suite will "
+                    f"exist yet for '{model}', so {'those suites' if len(missing) > 1 else 'that suite'} will "
                     f"show 'not run' below; the grade will only reflect whichever suite(s) do have "
                     f"data.[/bold yellow]"
                 )
@@ -1364,7 +1364,7 @@ class ScoreScreen(Screen):
     async def _run_worker(self, model, argv, log: RichLog, progress: ProgressBar,
                            gate_first_argv=None) -> None:
         if gate_first_argv:
-            log.write("[dim]Model not catalogued -- gate-checking first "
+            log.write("[dim]Model not catalogued, so gate-checking first "
                       "(uncheck \"Gate-check first\" to skip this):[/dim]")
             log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
             gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
@@ -1374,28 +1374,28 @@ class ScoreScreen(Screen):
             from openllm_cbench.core.registry import load_registry, lookup
             summary = summarize_gate_output(gate_result.lines)
             if gate_result.error:
-                log.write(f"[bold red]Gate-check process itself failed to run: {gate_result.error} -- "
+                log.write(f"[bold red]Gate-check process itself failed to run: {gate_result.error}; "
                           f"nothing was learned about this model automatically.[/bold red]")
             elif summary["hard_failure"]:
                 log.write(
                     "[bold red]Gate-check could not reach the endpoint for this model "
-                    f"({summary['reason']}) -- the score run below makes the identical call and "
+                    f"({summary['reason']}): the score run below makes the identical call and "
                     "will most likely fail the exact same way. Check the endpoint/model tag before "
                     "waiting on it.[/bold red]"
                 )
             elif summary["clean"] is False and summary["caveats"]:
                 log.write(
                     f"[bold yellow]Gate-check ran and found {len(summary['caveats'])} "
-                    "caveat(s) -- proceeding to score anyway (this framework never blocks a run "
+                    "caveat(s). Proceeding to score anyway (this framework never blocks a run "
                     "on gate status), but read these first:[/bold yellow]"
                 )
                 for c in summary["caveats"]:
                     log.write(f"[bold yellow]  - {c}[/bold yellow]")
             elif summary["clean"]:
-                log.write("[green]Gate-check clean -- no caveats.[/green]")
+                log.write("[green]Gate-check clean: no caveats.[/green]")
             else:
                 log.write("[bold yellow]Gate-check exited non-zero but printed no recognizable "
-                          "report -- proceeding to score anyway; see the full log above for "
+                          "report. Proceeding to score anyway; see the full log above for "
                           "whatever it did print.[/bold yellow]")
             # The gate check just wrote (--save) a fresh catalogue entry
             # for this tag if it got far enough to -- re-read it so the
@@ -1460,7 +1460,7 @@ class CommunityScreen(Screen):
                 "[bold]Validate[/bold] (`cbench community-validate`) checks a folder is shaped "
                 "correctly. Read-only.\n"
                 "[bold]Submit[/bold] (`cbench community-submit`) opens it as a pull request via "
-                "your own authenticated `gh` -- previews only, until \"confirm\" below is "
+                "your own authenticated `gh`. Previews only, until \"confirm\" below is "
                 "checked.\n"
                 "[bold]Raw data only:[/bold] a submission carries CSVs, never a grade. Anyone who "
                 "wants a score runs `cbench score --from-existing` against the rows themselves. "
@@ -1475,15 +1475,15 @@ class CommunityScreen(Screen):
                         f"No community-results/ directory at {root}.\n\n"
                         f"This is created the first time you package a submission. If you "
                         f"have packaged one before, you are probably in a different working "
-                        f"directory than when you did -- this path is resolved relative to "
+                        f"directory than when you did: this path is resolved relative to "
                         f"where you launched cbench.",
                         id="community-tree-empty",
                     )
                 with Vertical(id="community-form-inner"):
                     yield Select([], id="community-model-select", allow_blank=True,
-                                  prompt="Model to package — scanning results...")
+                                  prompt="Model to package (scanning results...)")
                     yield Select([], id="community-submission-select", allow_blank=True,
-                                  prompt="Packaged submission to validate/submit — scanning...")
+                                  prompt="Packaged submission to validate/submit (scanning...)")
                     yield Input(
                         placeholder="(or type a model tag)",
                         id="community-model-input",
@@ -1500,7 +1500,7 @@ class CommunityScreen(Screen):
                     # silently produced less useful submissions than the
                     # CLI one.
                     yield Input(
-                        placeholder="Notes for the reviewer (optional) -- anything unusual "
+                        placeholder="Notes for the reviewer (optional): anything unusual "
                                     "about this run",
                         id="community-notes-input",
                     )
@@ -1517,12 +1517,12 @@ class CommunityScreen(Screen):
                     )
                     yield Checkbox(
                         "Accept contributor terms (right to share, no confidential data, "
-                        "accurate hardware, Apache-2.0 licence grant, published permanently) "
-                        "-- required before a package can be submitted",
+                        "accurate hardware, Apache-2.0 licence grant, published permanently). "
+                        "Required before a package can be submitted",
                         id="community-terms", value=False,
                     )
                     yield Checkbox(
-                        "Confirm submit -- actually fork, push and open a PUBLIC pull "
+                        "Confirm submit: actually fork, push and open a PUBLIC pull "
                         "request as you (unchecked = preview the commands only)",
                         id="community-confirm", value=False,
                     )
@@ -1587,10 +1587,10 @@ class CommunityScreen(Screen):
         try:
             model_select.set_options(opts)
             model_select.prompt = ("Model to package" if opts else
-                                    "No model has results on disk yet — score one first")
+                                    "No model has results on disk yet: score one first")
             sub_select.set_options(sub_opts)
             sub_select.prompt = ("Packaged submission to validate/submit" if sub_opts else
-                                  "Nothing packaged yet — use Package first")
+                                  "Nothing packaged yet: use Package first")
         except NoMatches:
             return
 
@@ -1629,7 +1629,7 @@ class CommunityScreen(Screen):
         log.clear()
 
         if not path:
-            log.write("[bold red]A submission folder path is required -- click one in the "
+            log.write("[bold red]A submission folder path is required: click one in the "
                        "tree on the left, or type it.[/bold red]")
             return
 
@@ -1642,7 +1642,7 @@ class CommunityScreen(Screen):
         log.clear()
 
         if not model:
-            log.write("[bold red]A model tag is required to package -- type the tag whose "
+            log.write("[bold red]A model tag is required to package: type the tag whose "
                        "results you want to bundle.[/bold red]")
             return
 
@@ -1659,7 +1659,7 @@ class CommunityScreen(Screen):
         if self.query_one("#community-terms", Checkbox).value:
             args.append("--accept-terms")
         else:
-            log.write("[dim]Contributor terms not accepted -- the folder will be built so you "
+            log.write("[dim]Contributor terms not accepted: the folder will be built so you "
                        "can read it, but it won't validate until you tick the terms box and "
                        "package again.[/dim]")
         self._launch("community-package", args, log, preview)
@@ -1672,17 +1672,17 @@ class CommunityScreen(Screen):
         log.clear()
 
         if not path:
-            log.write("[bold red]A submission folder path is required -- package one first, "
+            log.write("[bold red]A submission folder path is required: package one first, "
                        "then click it in the tree on the left.[/bold red]")
             return
 
         args = [path]
         if confirm:
             args.append("--confirm")
-            log.write("[bold yellow]\"Confirm submit\" is checked -- this will open a PUBLIC "
+            log.write("[bold yellow]\"Confirm submit\" is checked: this will open a PUBLIC "
                        "pull request under your own GitHub account.[/bold yellow]")
         else:
-            log.write("[dim]Preview only -- nothing will be sent. Check \"Confirm submit\" "
+            log.write("[dim]Preview only: nothing will be sent. Check \"Confirm submit\" "
                        "above to actually open the pull request.[/dim]")
         self._launch("community-submit", args, log, preview)
 
@@ -1704,7 +1704,7 @@ _ABOUT_TEXT = """\
 [bold]About this framework[/bold]
 
 openllm-cbench was built collaboratively with an AI coding assistant \
-(Claude Code) -- not as a demo of that, but because the discipline an \
+(Claude Code), not as a demo of that, but because the discipline an \
 assistant like that is good at (reading its own prior output critically, \
 writing a regression test for every real bug before moving on, checking \
 a claim against the actual code instead of memory) turned out to matter \
@@ -1713,23 +1713,23 @@ capabilities match what it actually does.
 
 [bold]Extending it yourself[/bold]
 
-This project deliberately doesn't assume you use any one AI tool -- \
-that's why it has a CONTRIBUTING.md instead of a tool-specific config \
+This project deliberately doesn't assume you use any one AI tool. \
+That's why it has a CONTRIBUTING.md instead of a tool-specific config \
 file. If you want to extend a suite, add a model to the catalogue, or \
 build a new scoring metric with an AI coding assistant's help, any of \
 these work the same way: open this repo in [bold]Claude Code[/bold] or \
 [bold]Claude Cowork[/bold], or in [bold]Codex CLI[/bold] / \
 [bold]ChatGPT Cowork[/bold], and point it at:
 
-  - ARCHITECTURE.md   -- what every suite measures and why, the control
+  - ARCHITECTURE.md:     what every suite measures and why, the control
                          inventory, and "how not to fool yourself with
                          this tool" (the most transferable section)
-  - CONTRIBUTING.md    -- layout, conventions, and the standing rules
+  - CONTRIBUTING.md:     layout, conventions, and the standing rules
                          this project has learned the hard way (gate-check
                          both think states, never branch suite code on a
                          model name, smoke-test before calling something
                          done)
-  - tests/             -- the parity and safety-invariant tests any
+  - tests/:              the parity and safety-invariant tests any
                          change should keep passing
 
 None of this requires a specific vendor. The instructions above are \
@@ -1767,7 +1767,7 @@ class SettingsScreen(Screen):
             yield Input(placeholder="Full path, e.g. C:\\Users\\you\\cbench-results",
                         id="settings-results-input")
             yield Static(
-                "[bold]Model catalogue (models.json)[/bold] -- kept separate on "
+                "[bold]Model catalogue (models.json)[/bold]. Kept separate on "
                 "purpose: one catalogue can serve several results folders. An "
                 "unpinned catalogue does not lose anything, it silently presents a "
                 "DIFFERENT one, so models you have already gate-checked come back as "
@@ -1918,7 +1918,7 @@ class ReportsScreen(Screen):
         root = _results_root()
         with Vertical(id="reports-form"):
             yield Static(
-                f"Reports in [bold]{root}[/bold] -- trial summaries and scorecards. "
+                f"Reports in [bold]{root}[/bold] (trial summaries and scorecards). "
                 f"Pick a row to read it. Newest first. Raw CSVs and run logs are in the "
                 f"tree below.",
                 id="reports-caption",
@@ -1947,7 +1947,7 @@ class ReportsScreen(Screen):
                             f"No results directory at {root}.\n\n"
                             f"If you have run suites before, they wrote somewhere else. With "
                             f"no location pinned, results/ is relative to where you launch "
-                            f"cbench -- pin one under Settings so every launch finds the same "
+                            f"cbench: pin one under Settings so every launch finds the same "
                             f"folder, or set $OPENLLM_CBENCH_RESULTS_DIR.",
                             id="reports-empty",
                         )
@@ -2024,7 +2024,7 @@ class ReportsScreen(Screen):
         scope = {"scorecard": "scorecard(s)", "trial summary": "trial summary/summaries",
                  "single": "single-run report(s)", "all": "report(s)"}.get(kind_sel, "report(s)")
         extra = "" if shown == total else f" of {total} total"
-        table_empty = ("  [dim]Nothing matches this filter -- switch to "
+        table_empty = ("  [dim]Nothing matches this filter: switch to "
                        "\"Everything\" to see what is there.[/dim]" if shown == 0 else "")
         caption.update(
             f"[bold]{shown}[/bold] {scope}{extra} in [bold]{_results_root()}[/bold]. "

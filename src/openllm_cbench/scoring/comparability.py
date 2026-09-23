@@ -133,7 +133,7 @@ def pooling_problems(provenance_by_file):
         problems.append(
             "These runs used DIFFERENT generation budgets: " + shown_b + ". A budget "
             "changes how many rows truncate, and a truncated row leaves the "
-            "denominator -- so pooling these mixes a configuration difference into "
+            "denominator, so pooling these mixes a configuration difference into "
             "the rate exactly the way two temperatures would."
         )
 
@@ -208,7 +208,7 @@ def render_block(provenance_by_file, generated_at):
     problems = pooling_problems(provenance_by_file)
     if problems:
         lines += [
-            "> **STOP -- THESE RUNS ARE NOT COMPARABLE. This aggregate pools "
+            "> **STOP: THESE RUNS ARE NOT COMPARABLE. This aggregate pools "
             "incompatible runs.**",
             ">",
         ]

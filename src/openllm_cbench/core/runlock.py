@@ -3,7 +3,7 @@
 
 WHY THIS EXISTS. A multi-trial assessment is long, expensive, and produces
 usable data only on completion. Two of them running at once on one GPU do not
-fail -- they silently halve each other's throughput and inflate every wall-time
+fail: they silently halve each other's throughput and inflate every wall-time
 measurement taken from them. This is not hypothetical: two batches once ran
 concurrently for three hours after one was believed killed but never verified
 dead, and it was noticed only because a trial took 117 minutes against a gated
@@ -323,7 +323,7 @@ class RunLock:
             if not self.force:
                 raise RunLockBusy(msg)
             self._log(msg)
-            self._log("force=True -- proceeding into a contended machine.")
+            self._log("force=True: proceeding into a contended machine.")
 
     # -- api ---------------------------------------------------------------
     def acquire(self):
@@ -342,7 +342,7 @@ class RunLock:
                 if not self.force:
                     raise RunLockBusy(msg)
                 self._log(msg)
-                self._log("force=True -- proceeding anyway.")
+                self._log("force=True: proceeding anyway.")
             else:
                 # Stale. Reclaim, but say so: a batch that died without
                 # releasing is itself a reason to distrust its last artifact.

@@ -99,7 +99,7 @@ def test_a_timed_out_tool_call_is_unverified_not_invalid():
     """The endpoint reported the capability and a stopwatch cannot
     overrule it. Same doctrine as gate.warm_up()."""
     r = gate_result(tool_call_ok=False, tool_call_timed_out=True,
-                    tool_call_detail="TIMEOUT after 300s -- ...")
+                    tool_call_detail="TIMEOUT after 300s; this says nothing about ...")
     assert pf.suite_readiness(r)["s1"][0] == UNVERIFIED
     assert pf.unrunnable(r) == [], "UNVERIFIED must never stop a run"
 
@@ -133,7 +133,7 @@ def test_a_tool_call_with_no_response_is_unverified_not_invalid():
     """A refused or dropped connection says nothing about the model. An
     HTTP error the endpoint actually sent still can, and stays INVALID."""
     r = gate_result(tool_call_ok=False, tool_call_no_response=True,
-                    tool_call_detail="NO RESPONSE from the endpoint -- ...")
+                    tool_call_detail="NO RESPONSE from the endpoint. ...")
     assert pf.suite_readiness(r)["s1"][0] == UNVERIFIED
     assert pf.unrunnable(r) == []
     r = gate_result(tool_call_ok=False, tool_call_detail="HTTP 400: does not support tools")

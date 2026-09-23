@@ -132,7 +132,7 @@ def _next_action(local, catalogued, scored, citable, uncitable_scored):
                 f"{catalogued} model(s) catalogued, none scored yet.")
     if citable == 0 and uncitable_scored:
         return ("Re-score at standard depth",
-                f"{uncitable_scored} scorecard(s) exist but none are citable yet -- "
+                f"{uncitable_scored} scorecard(s) exist but none are citable yet: "
                 f"they need {MIN_CITABLE_TRIALS} trials per suite and no suite refused "
                 f"by a validity guard.")
     if catalogued > scored:

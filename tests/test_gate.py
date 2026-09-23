@@ -93,7 +93,7 @@ def test_summarize_gate_output_extracts_every_caveat_when_not_clean():
         "tool_call_ok": False, "tool_call_detail": "no tool_calls in response",
         "channel_think_on": None, "channel_think_off": None, "sampling_params": {},
         "caveats": [
-            "Endpoint does not report a tools capability -- the containment and "
+            "Endpoint does not report a tools capability: the containment and "
             "persistence suites need real tool calling and will not produce valid data.",
         ],
         "clean": False,

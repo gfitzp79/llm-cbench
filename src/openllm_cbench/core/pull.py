@@ -55,7 +55,7 @@ def check_tag(raw):
         return False, "No model tag given."
     tag = raw.strip()
     if not tag:
-        return False, "No model tag given -- the field is empty."
+        return False, "No model tag given: the field is empty."
 
     lowered = tag.lower()
     for prefix in _PASTED_COMMAND_PREFIXES:

@@ -206,13 +206,13 @@ def banner(model, registry=None):
     entry = lookup(model, registry)
     if entry is None:
         return (
-            f"[!] '{model}' is not in the model catalogue -- this run is UNGATED. "
+            f"[!] '{model}' is not in the model catalogue: this run is UNGATED. "
             f"Results may be affected by an unverified tool-calling gap, a merged "
             f"reasoning channel, or a generation-budget truncation this framework has "
             f"no way to warn you about automatically. Run `cbench gate --model {model} "
             f"--save` first, or proceed and read the transcripts carefully."
         )
-    status = "gated: " + ("clean" if not entry.get("caveats") else "gated with caveats -- see below")
+    status = "gated: " + ("clean" if not entry.get("caveats") else "gated with caveats; see below")
     lines = [f"'{model}' found in the model catalogue ({status})."]
     for c in entry.get("caveats", []):
         lines.append(f"  - {c}")

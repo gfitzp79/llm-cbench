@@ -64,11 +64,14 @@ REQUIRED_SUBMISSION_FIELDS = ("model", "contributor", "date", "hardware_summary"
 # Filename fragments that indicate a verdict rather than a measurement.
 VERDICT_MARKERS = ("scorecard", "trial_summary")
 
-ATTESTATION_VERSION = 1
+# The version identifies the exact wording a contributor accepted, so any
+# change to the text bumps it. 2: wording only (a dash became ", and"); the
+# terms themselves are unchanged. Bumped before any submission existed.
+ATTESTATION_VERSION = 2
 ATTESTATION_TEXT = (
     "I confirm that: (1) I have the right to share these files and they are "
     "mine to submit; (2) they contain no confidential, personal or "
-    "proprietary material -- I have read the raw CSVs, not just this "
+    "proprietary material, and I have read the raw CSVs, not just this "
     "summary; (3) the hardware, runtime and model tag recorded here are "
     "accurate and describe the machine that actually produced these rows; "
     "(4) I grant this project a perpetual, irrevocable licence to publish "
@@ -93,7 +96,7 @@ PRIVACY_NOTICE = (
     "Before you submit: these CSVs contain the model's raw output, including "
     "anything it produced while reaching for a tool. If you customised the "
     "sandbox fixtures or task files with real internal material, that material "
-    "is in these rows. A pull request publishes it permanently -- git history "
+    "is in these rows. A pull request publishes it permanently: git history "
     "keeps it even if the file is deleted later. Open the CSVs and read them "
     "before sending."
 )
@@ -118,7 +121,7 @@ def validate_submission(path):
     sub_path = path / "submission.json"
     meta = {}
     if not sub_path.exists():
-        problems.append("missing submission.json -- see SUBMISSION_TEMPLATE.json")
+        problems.append("missing submission.json (see SUBMISSION_TEMPLATE.json)")
     else:
         try:
             meta = json.loads(sub_path.read_text(encoding="utf-8"))
@@ -155,7 +158,7 @@ def validate_submission(path):
 
     if not found_any_csv:
         problems.append("no S1/S2/S3 CSVs found in s1_containment/, s2_channel/, or "
-                         "s3_persistence/ -- nothing here to score")
+                         "s3_persistence/: nothing here to score")
 
     problems += _checksum_problems(path, meta)
     problems += _policy_problems(path, meta)
@@ -188,7 +191,7 @@ def _policy_problems(folder, meta):
 
     for rel in _verdict_files(folder):
         problems.append(
-            f"'{rel}' is a verdict, not a measurement -- submissions carry raw CSVs only. "
+            f"'{rel}' is a verdict, not a measurement: submissions carry raw CSVs only. "
             f"Anyone who wants a grade runs `cbench score --from-existing` against these "
             f"rows themselves. Delete it and re-validate."
         )
@@ -196,26 +199,26 @@ def _policy_problems(folder, meta):
     for key in ("grade", "score", "rate", "band"):
         if meta.get(key) not in (None, ""):
             problems.append(
-                f"submission.json claims '{key}' -- a submission must not assert a result. "
+                f"submission.json claims '{key}'. A submission must not assert a result. "
                 f"Remove it; the CSVs are the claim."
             )
 
     att = meta.get("attestation") or {}
     if not att.get("accepted"):
         problems.append(
-            "contributor attestation not accepted -- re-run `cbench community-package` "
+            "contributor attestation not accepted: re-run `cbench community-package` "
             "with --accept-terms once you have read the terms and the raw CSVs."
         )
     elif att.get("version") != ATTESTATION_VERSION:
         problems.append(
             f"attestation is version {att.get('version')}, current terms are version "
-            f"{ATTESTATION_VERSION} -- re-package to accept the current terms."
+            f"{ATTESTATION_VERSION}: re-package to accept the current terms."
         )
 
     gate = meta.get("gate_check") or {}
     if not gate:
         problems.append(
-            "no gate_check record -- run `cbench gate --model <tag> --save` and re-package. "
+            "no gate_check record: run `cbench gate --model <tag> --save` and re-package. "
             "A submission from a machine that could not complete the gate checks cannot be "
             "distinguished from one where the model genuinely failed them."
         )
@@ -224,7 +227,7 @@ def _policy_problems(folder, meta):
             "gate check did not complete on this machine: "
             + "; ".join(gate.get("unverified", []))
             + ". This usually means the model is too large for available VRAM, NOT that it "
-              "failed -- which is exactly why the resulting rows must not be published as "
+              "failed, which is exactly why the resulting rows must not be published as "
               "though they measured the model. Re-run the gate where it can complete."
         )
 
@@ -317,12 +320,12 @@ def _checksum_problems(folder, meta):
             problems.append(f"checksums list '{rel}' but that file isn't in the submission")
         elif actual[rel] != digest:
             problems.append(
-                f"checksum mismatch for '{rel}' -- the file on disk is not the one that "
+                f"checksum mismatch for '{rel}': the file on disk is not the one that "
                 f"was packaged (corrupted in transit, or edited after packaging)"
             )
     for rel in sorted(set(actual) - set(recorded)):
-        problems.append(f"'{rel}' is in the submission but missing from checksums -- "
-                         f"added after packaging?")
+        problems.append(f"'{rel}' is in the submission but missing from checksums "
+                         f"(added after packaging?)")
     return problems
 
 

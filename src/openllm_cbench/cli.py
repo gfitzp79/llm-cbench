@@ -82,7 +82,7 @@ def _cmd_doctor(argv):
     print("\nSafety invariant:")
     try:
         server, port = start_canary()
-        print(f"  canary binds loopback-only -- confirmed live (127.0.0.1:{port})")
+        print(f"  canary binds loopback-only, confirmed live (127.0.0.1:{port})")
         server.shutdown()
     except Exception as e:
         print(f"  [!] canary self-check FAILED: {e}")
@@ -120,7 +120,7 @@ def _cmd_gate(argv):
                     help="Write this result into the local model catalogue overlay (default ./models.json) "
                          "so every suite picks it up automatically on future runs against this tag. "
                          "config_overrides is left empty except for `think`, set to false when this "
-                         "check finds the model only calls tools with its reasoning channel off -- add "
+                         "check finds the model only calls tools with its reasoning channel off. Add "
                          "any num_predict/num_ctx/etc a real run turns out to need by hand-editing "
                          "the saved entry. Nothing is saved if the check never reached the model.")
     p.add_argument("--registry-file", default=None,
@@ -190,20 +190,20 @@ def _cmd_assess(argv):
     p = argparse.ArgumentParser(
         prog="cbench assess",
         description="Full assessment of one model: N trials each of the selected suites "
-                     "(s1 containment, s2 channel, s3 persistence -- this framework's own "
-                     "three, no more), then auto-aggregate each into a trial-summary report.",
+                     "(this framework's own three, no more: s1 containment, s2 channel, "
+                     "s3 persistence), then auto-aggregate each into a trial-summary report.",
         epilog=safety_epilog(),
     )
     p.add_argument("--model", required=True)
     p.add_argument("--suites", default="s1,s2,s3",
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--trials", type=int, default=3,
-                    help="Trials per suite (default 3 -- this framework's own pre-registered "
+                    help="Trials per suite (default 3, this framework's own pre-registered "
                          "minimum for a rate worth citing; see ARCHITECTURE.md).")
     add_sampling_args(p)
     add_budget_args(p)
     p.add_argument("--dry-run", action="store_true",
-                    help="Pass --dry-run through to every suite invocation -- prints each "
+                    help="Pass --dry-run through to every suite invocation: prints each "
                          "payload, calls no model, and skips aggregation since there would "
                          "be no real CSVs to aggregate.")
     p.add_argument("--force-concurrent", action="store_true",
@@ -225,7 +225,7 @@ def _cmd_assess(argv):
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     unknown = [s for s in suites if s not in SUITE_INFO]
     if unknown:
-        print(f"[!] Unknown suite(s): {', '.join(unknown)} -- choose from s1,s2,s3", file=sys.stderr)
+        print(f"[!] Unknown suite(s): {', '.join(unknown)} (choose from s1,s2,s3)", file=sys.stderr)
         return 2
     if not suites:
         print("[!] --suites resolved to nothing to run.", file=sys.stderr)
@@ -236,7 +236,7 @@ def _cmd_assess(argv):
 
     print(f"Full assessment: '{args.model}', suites={','.join(suites)}, trials={args.trials}"
           f"{' (dry-run)' if args.dry_run else ''}")
-    print("S1+S2+S3 only -- see this command's own --help / module docstring for what "
+    print("S1+S2+S3 only: see this command's own --help / module docstring for what "
           "other evaluations aren't included.\n")
 
     # LAUNCH-TIME CAPABILITY GUARD.
@@ -282,7 +282,7 @@ def _cmd_assess(argv):
             lock = RunLock(label="assess %s" % args.model,
                            force=args.force_concurrent).acquire()
         except RunLockBusy as e:
-            print("\n[!] NOT STARTING -- %s" % e, file=sys.stderr)
+            print("\n[!] NOT STARTING: %s" % e, file=sys.stderr)
             print("\n    An assessment already running, or a suite process still "
                   "live, means\n    this one would contend for the same GPU. "
                   "Stop it and VERIFY the process\n    table before retrying: a "
@@ -347,7 +347,7 @@ def _assess_preflight(args, suites, narrowed=None):
         # endpoints.
         result = run_gate(args.model, base_url)
     except Exception as e:
-        print(f"[!] Pre-flight could not complete ({e}) -- continuing anyway. "
+        print(f"[!] Pre-flight could not complete ({e}); continuing anyway. "
               f"Nothing here is evidence about the model.", file=sys.stderr)
         return None
 
@@ -359,7 +359,7 @@ def _assess_preflight(args, suites, narrowed=None):
     if not model_answered(result):
         reason = result.get("show_info_error") or "no response"
         sys.stdout.flush()
-        print(f"[!] NOT STARTING -- the pre-flight could not reach '{args.model}' at "
+        print(f"[!] NOT STARTING: the pre-flight could not reach '{args.model}' at "
               f"{base_url}: {reason}", file=sys.stderr)
         print("    Every trial would fail the same way, so nothing would be measured.\n"
               "    Check the endpoint is up and serves this tag: cbench doctor, then "
@@ -370,7 +370,7 @@ def _assess_preflight(args, suites, narrowed=None):
     readiness = suite_readiness(result)
     for suite in suites:
         verdict, reason = readiness[suite]
-        print(f"  {SUITE_LABELS[suite]}: {verdict.upper()} -- {reason}")
+        print(f"  {SUITE_LABELS[suite]}: {verdict.upper()} ({reason})")
 
     bad = unrunnable(result, suites)
     if not bad:
@@ -388,11 +388,11 @@ def _assess_preflight(args, suites, narrowed=None):
     sys.stdout.flush()
     if args.force_uncheckable:
         print("[!] %s cannot produce a gradeable result on this model, and "
-              "--force-uncheckable\n    was given. Running anyway -- expect those suites to "
+              "--force-uncheckable\n    was given. Running anyway: expect those suites to "
               "score INVALID; the\n    transcripts are the only thing you get." % named,
               file=sys.stderr)
         return None
-    print("[!] NOT STARTING -- %s cannot produce a gradeable result on this model." % named,
+    print("[!] NOT STARTING: %s cannot produce a gradeable result on this model." % named,
           file=sys.stderr)
     print("    Running it would spend the full time and score INVALID, which is a missing\n"
           "    measurement rather than a finding. See the reasons above.", file=sys.stderr)
@@ -404,7 +404,7 @@ def _assess_preflight(args, suites, narrowed=None):
         print("    Read any grade from that as covering only those suites.", file=sys.stderr)
     else:
         print("\n    No suite here would produce anything. This model is not assessable by\n"
-              "    this framework as it stands -- most often because the endpoint reports\n"
+              "    this framework as it stands, most often because the endpoint reports\n"
               "    neither a `tools` nor a `thinking` capability for it.", file=sys.stderr)
     print("\n    Override with --force-uncheckable to run anyway (the suites will still\n"
           "    score INVALID; the transcripts are the only thing you get).", file=sys.stderr)
@@ -464,7 +464,7 @@ def _assess_body(args, suites, SUITE_INFO):
     failures = []
     for suite in suites:
         label, module_path, aggregate_fn, results_subdir = SUITE_INFO[suite]
-        print(f"=== {suite.upper()} ({label}) -- {args.trials} trial(s) ===")
+        print(f"=== {suite.upper()} ({label}): {args.trials} trial(s) ===")
         for trial in range(1, args.trials + 1):
             print(f"\n--- {suite} trial {trial}/{args.trials} ---")
             trial_args = ["--model", args.model]
@@ -473,12 +473,12 @@ def _assess_body(args, suites, SUITE_INFO):
                 trial_args.append("--dry-run")
             rc = _dispatch_passthrough(module_path, trial_args)
             if rc != 0:
-                print(f"[!] {suite} trial {trial} exited {rc} -- continuing with remaining trials.",
+                print(f"[!] {suite} trial {trial} exited {rc}; continuing with remaining trials.",
                       file=sys.stderr)
                 failures.append((suite, trial, rc))
 
         if args.dry_run:
-            print(f"\n[dry-run] Skipping aggregation for {suite} -- no real CSVs were produced.\n")
+            print(f"\n[dry-run] Skipping aggregation for {suite}: no real CSVs were produced.\n")
             continue
 
         print(f"\nAggregating {suite}...")
@@ -497,7 +497,7 @@ def _assess_body(args, suites, SUITE_INFO):
     print(f"Assessment complete: {len(suites)} suite(s), {args.trials} trial(s) each"
           f"{' (dry-run, no reports)' if args.dry_run else ''}.")
     if failures:
-        print(f"\n[!] {len(failures)} trial(s) exited non-zero -- read the output above "
+        print(f"\n[!] {len(failures)} trial(s) exited non-zero. Read the output above "
               f"before trusting any aggregate that includes them:")
         for suite, trial, rc in failures:
             print(f"    {suite} trial {trial}: exit {rc}")
@@ -561,42 +561,42 @@ def _cmd_score(argv):
     p = argparse.ArgumentParser(
         prog="cbench score",
         description="Run (or read existing) S1/S2/S3 trials for one model and produce a "
-                     "cross-suite scorecard -- an A-F grade (0-100) plus the per-suite detail "
+                     "cross-suite scorecard: an A-F grade (0-100) plus the per-suite detail "
                      "behind it. See this command's own module docstring.",
         epilog=safety_epilog(),
     )
     p.add_argument("--model", required=True)
     p.add_argument("--depth", choices=sorted(DEPTH_TRIALS), default="standard",
-                    help="Trial count preset -- quick=1, standard=3 (default), thorough=5. "
+                    help="Trial count preset: quick=1, standard=3 (default), thorough=5. "
                          "Ignored with --from-existing.")
     add_sampling_args(p)
     add_budget_args(p)
     p.add_argument("--suites", default="s1,s2,s3",
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--from-existing", action="store_true",
-                    help="Score whatever S1/S2/S3 CSVs already exist for this model tag -- "
+                    help="Score whatever S1/S2/S3 CSVs already exist for this model tag: "
                          "runs nothing, makes no model call. To score a specific submission "
                          "rather than your own results/ directory, set $OPENLLM_CBENCH_RESULTS_DIR "
-                         "in the shell BEFORE running this command (see community-results/README.md) "
-                         "-- there is no --results-dir flag here; the env var has to be set before "
+                         "in the shell BEFORE running this command (see community-results/README.md). "
+                         "There is no --results-dir flag here; the env var has to be set before "
                          "this process starts, not after.")
     p.add_argument("--dry-run", action="store_true",
                     help="Pass --dry-run through to every suite invocation and skip scoring "
-                         "entirely -- previews payloads, calls no model. Ignored with "
+                         "entirely: previews payloads, calls no model. Ignored with "
                          "--from-existing, which already makes no model call.")
     p.add_argument("--force-concurrent", action="store_true",
-                    help="Same override as `cbench assess --force-concurrent` -- see there.")
+                    help="Same override as `cbench assess --force-concurrent` (see there).")
     p.add_argument("--force-uncheckable", action="store_true",
-                    help="Same override as `cbench assess --force-uncheckable` -- see there. "
+                    help="Same override as `cbench assess --force-uncheckable` (see there). "
                          "The scorecard will grade INVALID for the affected suites.")
     p.add_argument("--skip-preflight", action="store_true",
-                    help="Same override as `cbench assess --skip-preflight` -- see there.")
+                    help="Same override as `cbench assess --skip-preflight` (see there).")
     args = p.parse_args(argv)
 
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     unknown = [s for s in suites if s not in SUITE_INFO]
     if unknown:
-        print(f"[!] Unknown suite(s): {', '.join(unknown)} -- choose from s1,s2,s3", file=sys.stderr)
+        print(f"[!] Unknown suite(s): {', '.join(unknown)} (choose from s1,s2,s3)", file=sys.stderr)
         return 2
     if not suites:
         print("[!] --suites resolved to nothing to run.", file=sys.stderr)
@@ -633,9 +633,9 @@ def _cmd_score(argv):
                 lock = RunLock(label="score %s" % args.model,
                                force=args.force_concurrent).acquire()
             except RunLockBusy as e:
-                print("\n[!] NOT STARTING -- %s" % e, file=sys.stderr)
-                print("\n    Same contention `cbench assess` guards against -- see its own "
-                      "--force-concurrent help.", file=sys.stderr)
+                print("\n[!] NOT STARTING: %s" % e, file=sys.stderr)
+                print("\n    Same contention `cbench assess` guards against (see its own "
+                      "--force-concurrent help).", file=sys.stderr)
                 return 2
         try:
             rc = _assess_body(assess_args, suites, SUITE_INFO)
@@ -644,10 +644,10 @@ def _cmd_score(argv):
                 lock.release()
 
         if args.dry_run:
-            print("\n[dry-run] No CSVs were produced -- nothing to score.")
+            print("\n[dry-run] No CSVs were produced: nothing to score.")
             return rc
         if rc != 0:
-            print("\n[!] At least one trial exited non-zero -- scoring anyway, but read the "
+            print("\n[!] At least one trial exited non-zero; scoring anyway, but read the "
                   "output above before trusting the result.", file=sys.stderr)
     else:
         rc = 0
@@ -671,7 +671,7 @@ def _cmd_score(argv):
             why.append(f"{', '.join(s.upper() for s in invalid)} came back INVALID")
         if rc != 0:
             why.append("at least one trial exited non-zero")
-        print(f"\n[!] Scored, but {' and '.join(why)} -- the grade covers only what "
+        print(f"\n[!] Scored, but {' and '.join(why)}: the grade covers only what "
               f"could be measured. The card above says why for each suite.", file=sys.stderr)
         return 1
     return 0
@@ -695,7 +695,7 @@ def _cmd_search(argv):
     p = argparse.ArgumentParser(
         prog="cbench search",
         description="Check whether an exact model tag exists in Ollama's registry, and its "
-                     "download size, without downloading it. Not a keyword/browse search -- "
+                     "download size, without downloading it. Not a keyword/browse search: "
                      "you need the exact tag (as it would appear to `ollama pull`); this "
                      "confirms it exists before you commit to pulling it.",
         epilog=safety_epilog(),
@@ -723,7 +723,7 @@ def _cmd_search(argv):
         print(f"Found: '{args.model}' exists ({size_str}). "
               f"Run `cbench pull --model {args.model}` to download it.")
         return 0
-    print(f"Not found: '{args.model}' -- {result['error'] or 'no matching manifest'}.",
+    print(f"Not found: '{args.model}' ({result['error'] or 'no matching manifest'}).",
           file=sys.stderr)
     return 1
 
@@ -785,7 +785,7 @@ def _cmd_config(argv):
         print(f"Model catalogue set to {resolved}")
         print(f"Stored in {config_path()}")
         if not resolved.exists():
-            print("That file does not exist yet -- `cbench gate --model <tag> --save` "
+            print("That file does not exist yet; `cbench gate --model <tag> --save` "
                   "creates it.")
         _print_resolution()
         return 0
@@ -813,7 +813,7 @@ def _cmd_config(argv):
         print(f"Results location set to {resolved}")
         print(f"Stored in {config_path()}")
         print("\nThis applies from any directory, for both `cbench` and `cbench tui`.")
-        print("Existing results elsewhere are NOT moved -- run `cbench config "
+        print("Existing results elsewhere are NOT moved: run `cbench config "
               "--find-results` to see what is where.")
         _print_resolution()
         return 0
@@ -862,7 +862,7 @@ def _print_resolution():
         # back as uncatalogued and the next run goes out ungated.
         print()
         print("[!] The catalogue is not pinned, so launching from another directory reads")
-        print("    a different models.json -- models you have already gate-checked come")
+        print("    a different models.json: models you have already gate-checked come")
         print("    back as uncatalogued and run ungated.")
         print("    Pin it with:  cbench config --set-models-file <path>")
 
@@ -912,7 +912,7 @@ def _find_results():
         print("  cbench config --set-results-dir <path>")
         print("\nNothing here has been moved. Move the others yourself if you want "
               "them pooled,")
-        print("and read docs/METHODOLOGY.md 3.5 first -- runs from different "
+        print("and read docs/METHODOLOGY.md 3.5 first: runs from different "
               "harness versions")
         print("are not always comparable just because they are now in one folder.")
     return 0
@@ -931,7 +931,7 @@ def _cmd_remove(argv):
     p = argparse.ArgumentParser(
         prog="cbench remove",
         description="Delete a model from the local endpoint. This frees the disk "
-                     "space and CANNOT be undone from here -- getting the model back "
+                     "space and CANNOT be undone from here: getting the model back "
                      "means pulling it again.",
         epilog=safety_epilog(),
     )
@@ -959,7 +959,7 @@ def _cmd_remove(argv):
     print(detail if ok else f"[!] {detail}", file=sys.stdout if ok else sys.stderr)
     if ok:
         print("Any CSVs, reports and scorecards for this model are untouched in "
-              "results/ -- the measurement outlives the weights.")
+              "results/; the measurement outlives the weights.")
     return 0 if ok else 1
 
 
@@ -976,7 +976,7 @@ def _cmd_pull(argv):
     p = argparse.ArgumentParser(
         prog="cbench pull",
         description="Pull a model into the local endpoint. Downloads real data, "
-                     "potentially several GB -- streams progress as it happens.",
+                     "potentially several GB. Streams progress as it happens.",
         epilog=safety_epilog(),
     )
     p.add_argument("--model", required=True)
@@ -1027,7 +1027,7 @@ def _cmd_discover(argv):
     p = argparse.ArgumentParser(
         prog="cbench discover",
         description="List locally-pulled models the catalogue doesn't know about yet. "
-                     "Only ever talks to your local endpoint's own /api/tags -- never "
+                     "Only ever talks to your local endpoint's own /api/tags, never "
                      "ollama.com. Does not pull anything; run `ollama pull <tag>` yourself "
                      "first for a model that isn't local yet.",
         epilog=safety_epilog(),
@@ -1040,7 +1040,7 @@ def _cmd_discover(argv):
     p.add_argument("--gate-all", action="store_true",
                     help="Gate-check and save every uncatalogued model found, one at a time "
                          "(same as running `cbench gate --model <tag> --save` per model). "
-                         "Real model calls -- can take a while for a long list; see --limit.")
+                         "Real model calls: can take a while for a long list; see --limit.")
     p.add_argument("--limit", type=int, default=None,
                     help="With --gate-all, only process the first N uncatalogued models found "
                          "(in /api/tags's own order). Useful to bound a long batch run.")
@@ -1061,7 +1061,7 @@ def _cmd_discover(argv):
           f"({len(local) - len(uncatalogued)} already covered).\n")
 
     if not uncatalogued:
-        print("Nothing to do -- every locally-pulled model is already catalogued.")
+        print("Nothing to do: every locally-pulled model is already catalogued.")
         return 0
 
     for m in uncatalogued:
@@ -1077,7 +1077,7 @@ def _cmd_discover(argv):
     if args.limit is not None and args.limit < len(uncatalogued):
         print(f"\n--limit {args.limit}: processing the first {len(to_gate)} of "
               f"{len(uncatalogued)} uncatalogued models.")
-    print(f"\nGate-checking {len(to_gate)} model(s) -- this makes real calls to each "
+    print(f"\nGate-checking {len(to_gate)} model(s). This makes real calls to each "
           f"and can take a while:\n")
     results = []
     for m in to_gate:
@@ -1090,13 +1090,13 @@ def _cmd_discover(argv):
             results.append((tag, "error", str(e)))
             continue
         if not model_answered(result):
-            print(f"  [!] never reached this model -- nothing saved.\n{render_gate_report(result)}")
+            print(f"  [!] never reached this model; nothing saved.\n{render_gate_report(result)}")
             results.append((tag, "error", "never reached"))
             continue
         entry = to_registry_entry(result)
         path = save_entry(tag, entry, args.registry_file)
         status = "clean" if result.get("clean") else "caveats found"
-        print(f"  {status} -- saved to {path}")
+        print(f"  {status}, saved to {path}")
         if not result.get("clean"):
             # Same detail `cbench gate` itself prints for one model -- a bare
             # "caveats found" here would force a separate re-run per flagged
@@ -1136,7 +1136,7 @@ def _cmd_compare(argv):
         prog="cbench compare",
         description="Compare two models' saved scorecards. Reports whether the difference "
                      "between them survives clustering and whether the comparison had the "
-                     "power to detect one. Runs nothing and calls no model -- score both "
+                     "power to detect one. Runs nothing and calls no model: score both "
                      "models first.",
         epilog=safety_epilog(),
     )
@@ -1183,7 +1183,7 @@ def _cmd_catalogue(argv):
     p = argparse.ArgumentParser(
         prog="cbench catalogue",
         description="List every locally-pulled model with its catalogue and scorecard "
-                     "status. Read-only -- makes no model call.",
+                     "status. Read-only: makes no model call.",
         epilog=safety_epilog(),
     )
     p.add_argument("--endpoint", default=None, help="Endpoint base URL to list models from.")
@@ -1202,7 +1202,7 @@ def _cmd_catalogue(argv):
         return 1
 
     if not local:
-        print("No models pulled into this endpoint yet -- `cbench search`/`cbench pull` "
+        print("No models pulled into this endpoint yet: `cbench search`/`cbench pull` "
               "to get one, or `ollama pull <tag>` directly.")
         return 0
 
@@ -1221,7 +1221,7 @@ def _cmd_catalogue(argv):
             params_b=m.get("params_b"), quant=m.get("quant"),
             size_mb=round(m["size"] / (1024 * 1024)) if m.get("size") else None,
         )
-        fit_part = "" if assessment["tier"] == "unknown" else f" -- fit: {assessment['headline']}"
+        fit_part = "" if assessment["tier"] == "unknown" else f"; fit: {assessment['headline']}"
         entry = registry.get("models", {}).get(tag) or {}
         perf = performance_estimate(
             fit_tier=assessment["tier"], params_b=m.get("params_b"),
@@ -1235,7 +1235,7 @@ def _cmd_catalogue(argv):
         if assessment["tier"] == "spills":
             spills.append((tag, assessment))
         print(f"{tag}  ({m['architecture']}, {m['params_b']}B, {m['quant']}, "
-              f"{format_size(m['size'])}) -- {cat_status}{fit_part} -- "
+              f"{format_size(m['size'])}): {cat_status}{fit_part}; "
               f"score: {catalogue_compact_label(tag)}")
         detail = catalogue_summary_line(tag)
         if detail != "not scored yet":
@@ -1243,23 +1243,23 @@ def _cmd_catalogue(argv):
 
     if spills:
         print(f"\n{len(spills)} model(s) larger than this GPU's usable VRAM "
-              f"({vram_mb:,} MB total). They still run and still produce valid results -- "
+              f"({vram_mb:,} MB total). They still run and still produce valid results; "
               f"they just run partly on CPU, which is much slower:")
         for tag, a in spills:
-            kind = ("MoE, so only a fraction of its parameters are active per token -- "
+            kind = ("MoE, so only a fraction of its parameters are active per token; "
                     "degrades far less than a dense model this size"
                     if a["moe"] else
-                    "dense, so every parameter is read for every token -- expect 5-20x slower")
+                    "dense, so every parameter is read for every token; expect 5-20x slower")
             print(f"  {tag}: ~{a['needed_mb']:,.0f} MB vs ~{a['usable_mb']:,} MB usable ({kind})")
 
     uncatalogued_n = sum(1 for m in local if m["name"] not in catalogued)
     print(f"\n{len(local)} model(s) total, {uncatalogued_n} uncatalogued. "
           f"`cbench discover` to catalogue the rest; `cbench score --model <tag>` to "
           f"generate or refresh a scorecard.\n"
-          f"score legend: A-F grade (0-100), worst-of-3-suites, not an average -- "
+          f"score legend: A-F grade (0-100), worst-of-3-suites, not an average. "
           f"N/A = nothing gradable yet. INVALID = a validity guard fired, that suite is "
           f"excluded from the grade (see grade_basis in the full scorecard). Trailing "
-          f"'*' = an otherwise-ok suite still has an unresolved caveat -- read the full "
+          f"'*' = an otherwise-ok suite still has an unresolved caveat; read the full "
           f"scorecard (`results/scorecards/<tag>.md`) before citing the grade alone.")
     return 0
 
@@ -1290,10 +1290,10 @@ def _cmd_community_validate(argv):
 
     problems = validate_submission(args.path)
     if not problems:
-        print(f"OK -- {args.path} looks like a valid submission.")
+        print(f"OK: {args.path} looks like a valid submission.")
         print("\nNext: review submission.json's claims against the actual CSVs by hand, then "
-              "score it -- set $OPENLLM_CBENCH_RESULTS_DIR to this folder BEFORE running "
-              "`cbench score` (has to be set before the process starts, not after -- see "
+              "score it: set $OPENLLM_CBENCH_RESULTS_DIR to this folder BEFORE running "
+              "`cbench score` (has to be set before the process starts, not after; see "
               "`cbench score --help`):\n"
               f"    bash/zsh:    OPENLLM_CBENCH_RESULTS_DIR={args.path} cbench score --model <tag> --from-existing\n"
               f"    PowerShell:  $env:OPENLLM_CBENCH_RESULTS_DIR=\"{args.path}\"; "
@@ -1337,7 +1337,7 @@ def _cmd_community_package(argv):
     p.add_argument("--contributor", default=None,
                     help="Your GitHub handle or name (default: git config user.name).")
     p.add_argument("--notes", default="",
-                    help="Anything unusual about the run -- a config_overrides you needed, "
+                    help="Anything unusual about the run: a config_overrides you needed, "
                          "trials you excluded and why.")
     p.add_argument("--out", default=None,
                     help="Root to write the submission under (default ./community-results).")
@@ -1358,7 +1358,7 @@ def _cmd_community_package(argv):
     for suite_dir in sorted(copied):
         print(f"  {suite_dir}: {len(copied[suite_dir])} file(s)")
     if not total:
-        print(f"\n[!] No CSVs found on disk for '{args.model}' -- run the suites first "
+        print(f"\n[!] No CSVs found on disk for '{args.model}': run the suites first "
               f"(`cbench score --model {args.model} --depth standard`), then package.")
 
     if args.zip:
@@ -1372,21 +1372,21 @@ def _cmd_community_package(argv):
         print("[!] The gate check did not complete on this machine:")
         for u in gate["unverified"]:
             print(f"      - {u}")
-        print("    That usually means the model is too large for the available VRAM -- NOT")
+        print("    That usually means the model is too large for the available VRAM, NOT")
         print("    that it failed the check. Rows produced that way can measure the machine")
         print("    rather than the model, so they cannot be submitted. Re-run")
         print(f"    `cbench gate --model {args.model} --save` somewhere it completes.")
     elif not gate:
         print()
         print(f"[!] '{args.model}' has no gate check on file. Run")
-        print(f"    `cbench gate --model {args.model} --save` first -- without one there is no")
+        print(f"    `cbench gate --model {args.model} --save` first: without one there is no")
         print("    way to tell a model that failed a check from a machine that could not run one.")
 
     print()
     print("Contributor terms:")
     print(f"  {ATTESTATION_TEXT}")
     print("  ACCEPTED, recorded in submission.json (--accept-terms)." if args.accept_terms
-          else "  NOT accepted -- read the CSVs, then re-run with --accept-terms.")
+          else "  NOT accepted: read the CSVs, then re-run with --accept-terms.")
     print()
     print("This submission carries raw CSVs only. No grade or score travels with it:")
     print("anyone who wants one runs `cbench score --from-existing` against these rows")
@@ -1443,7 +1443,7 @@ def _cmd_community_submit(argv):
 
     problems = validate_submission(args.path)
     if problems:
-        print(f"[!] Not submitting -- {len(problems)} problem(s) with {args.path}:\n")
+        print(f"[!] Not submitting. {len(problems)} problem(s) with {args.path}:\n")
         for p_ in problems:
             print(f"  - {p_}")
         print("\nFix these first (`cbench community-validate` re-checks), or re-run "
@@ -1457,7 +1457,7 @@ def _cmd_community_submit(argv):
     # by hand.
     copied = suites_in_folder(args.path)
 
-    print("This submits raw CSVs only -- no grade or score travels with them. Whoever")
+    print("This submits raw CSVs only: no grade or score travels with them. Whoever")
     print("reads them computes their own verdict with `cbench score --from-existing`.")
     print("See community-results/README.md.")
     print()
@@ -1502,7 +1502,7 @@ def _cmd_tui(argv):
         print(
             "usage: cbench tui\n\n"
             "Launches the Textual control panel (requires the 'textual' "
-            "package: pip install textual). Takes no arguments -- every suite's own "
+            "package: pip install textual). Takes no arguments: every suite's own "
             "flags are entered through its form inside the TUI, not on this "
             "command line. See README.md 'Terminal UI'."
         )

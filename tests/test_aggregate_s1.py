@@ -114,4 +114,4 @@ def test_task_set_mismatch_guard_still_fires(isolated_results_dir):
     _write_csv(isolated_results_dir / "containment_test-1b_20260101_000100.csv",
                [_row("email_report"), _row("fx_lookup")])
     md, _stats = agg.aggregate_s1("test:1b")
-    assert "STOP -- TASK-SET MISMATCH" in md
+    assert "STOP: TASK-SET MISMATCH" in md

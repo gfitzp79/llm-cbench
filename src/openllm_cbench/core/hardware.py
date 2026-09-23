@@ -245,12 +245,12 @@ def fit_assessment(vram_mb, tag="", architecture=None, params_b=None, quant=None
     if needed <= usable * 0.85:
         return {**base, "tier": "fits", "headline": "fits",
                 "note": (f"Hardware: ~{needed:,.0f} MB {measured}, ~{usable:,} MB usable "
-                         f"VRAM -- fits, should run at full GPU speed.")}
+                         f"VRAM. It fits and should run at full GPU speed.")}
 
     if needed <= usable:
         return {**base, "tier": "tight", "headline": "tight",
                 "note": (f"Hardware: ~{needed:,.0f} MB {measured} against ~{usable:,} MB usable "
-                         f"VRAM -- fits, but with almost no headroom. A long context or a "
+                         f"VRAM. It fits, but with almost no headroom. A long context or a "
                          f"second process on this GPU will push it into system RAM mid-run.")}
 
     over = needed - usable
@@ -258,16 +258,16 @@ def fit_assessment(vram_mb, tag="", architecture=None, params_b=None, quant=None
         active_note = (f"only ~{active:g}B of ~{params_b:g}B parameters are active per token"
                         if active and params_b else
                         "only a fraction of its parameters are active per token")
-        speed = (f"It's a mixture-of-experts model, so {active_note} -- it degrades far less "
+        speed = (f"It's a mixture-of-experts model, so {active_note}; it degrades far less "
                  f"than a dense model this size would. Expect slower, not unusable.")
     else:
-        speed = ("It's a dense model, so every parameter is read for every token -- expect "
+        speed = ("It's a dense model, so every parameter is read for every token: expect "
                  "roughly 5-20x slower than a model that fits, which turns a minutes-long "
                  "run into an hours-long one.")
 
     return {**base, "tier": "spills", "headline": "spills (MoE)" if moe else "spills",
             "note": (f"Hardware: ~{needed:,.0f} MB {measured} but only ~{usable:,} MB of VRAM "
-                     f"is usable -- about {over:,.0f} MB will spill into system RAM. {speed}")}
+                     f"is usable; about {over:,.0f} MB will spill into system RAM. {speed}")}
 
 
 # --- Expected speed ------------------------------------------------------
@@ -360,7 +360,7 @@ def probe():
 
 def format_report(info=None):
     info = info or probe()
-    lines = ["Hardware (advisory only -- every suite runs regardless):"]
+    lines = ["Hardware (advisory only; every suite runs regardless):"]
     if info["gpu_vendor"] and info["gpu_vram_mb"]:
         lines.append(f"  GPU: {info['gpu_vendor']}, {info['gpu_vram_mb']} MB VRAM")
     else:
@@ -372,7 +372,7 @@ def format_report(info=None):
     if info["advisory_max_params_b_q4"]:
         lines.append(
             f"  Advisory band: up to ~{info['advisory_max_params_b_q4']}B params at Q4_K_M "
-            f"(rough headroom estimate, not a hard limit -- context length and runtime "
+            f"(rough headroom estimate, not a hard limit: context length and runtime "
             f"overhead both eat into this)"
         )
     else:

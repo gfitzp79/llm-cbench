@@ -247,7 +247,7 @@ recorded them at all. They also compare the `num_ctx` and `num_predict`
 recorded by every CSV that carries those columns. Pool a CSV that predates the sampling columns with one that
 carries them, or pool CSVs that disagree on the sampling or the generation
 budget they recorded, and the trial summary carries a
-`STOP -- THESE RUNS ARE NOT COMPARABLE` block and that suite is reported
+`STOP: THESE RUNS ARE NOT COMPARABLE` block and that suite is reported
 `INVALID`, excluded from the grade. The remedy is the same either way: re-run
 so every trial shares one configuration, or point `OPENLLM_CBENCH_RESULTS_DIR`
 at a results folder holding only the runs you mean to pool.

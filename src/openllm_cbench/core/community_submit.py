@@ -121,7 +121,7 @@ def pr_title_and_body(meta, copied):
         f"- Harness version: {meta.get('cbench_version') or 'not stated'}\n\n"
         f"Notes: {meta.get('notes') or '(none)'}\n\n"
         f"Validated locally with `cbench community-validate` before opening. "
-        f"No score is claimed here -- these are the raw CSVs so the scorecard "
+        f"No score is claimed here: these are the raw CSVs so the scorecard "
         f"can be regenerated independently with "
         f"`cbench score --model {meta.get('model')} --from-existing`."
     )
@@ -140,7 +140,7 @@ def build_submit_plan(folder, meta, copied, repo=UPSTREAM_REPO, workdir="<tmp>")
          "why": f"ensure you have a fork of {repo} to push to (no-op if you already do, "
                 f"and skipped automatically if you own the repo)"},
         {"argv": ["gh", "repo", "clone", repo, workdir, "--", "--depth", "1"],
-         "why": "shallow-clone into a temp directory -- your own checkout is never touched"},
+         "why": "shallow-clone into a temp directory; your own checkout is never touched"},
         {"argv": ["git", "-C", workdir, "checkout", "-b", branch],
          "why": f"branch for this submission"},
         {"argv": ["<copy>", str(folder), f"{workdir}/community-results/..."],
@@ -172,7 +172,7 @@ def manual_instructions(folder, meta, repo=UPSTREAM_REPO, zip_path=None, copied=
     issue_url = (f"https://github.com/{repo}/issues/new?"
                  + urllib.parse.urlencode({"title": title, "body": body}))
     lines = [
-        "Route A -- fork and pull request (needs git and a GitHub account):",
+        "Route A: fork and pull request (needs git and a GitHub account)",
         f"  1. Fork https://github.com/{repo} in your browser.",
         "  2. Clone your fork, then copy this folder into it, preserving the path:",
         f"       {folder}",
@@ -180,7 +180,7 @@ def manual_instructions(folder, meta, repo=UPSTREAM_REPO, zip_path=None, copied=
         "  3. git add community-results && git commit && git push",
         "  4. Open the PR against the upstream repo.",
         "",
-        "Route B -- attach to an issue (needs only a GitHub account and a browser):",
+        "Route B: attach to an issue (needs only a GitHub account and a browser)",
     ]
     if zip_path:
         lines.append(f"  1. This zip is ready to attach: {zip_path}")
@@ -192,8 +192,8 @@ def manual_instructions(folder, meta, repo=UPSTREAM_REPO, zip_path=None, copied=
         f"       {issue_url}",
         "",
         f"Either way a maintainer re-runs `cbench score --model {meta.get('model')} "
-        f"--from-existing` against your CSVs before anything is trusted -- see "
-        f"community-results/README.md.",
+        f"--from-existing` against your CSVs before anything is trusted (see "
+        f"community-results/README.md).",
     ]
     return "\n".join(lines)
 

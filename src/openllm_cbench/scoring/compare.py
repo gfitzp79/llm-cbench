@@ -168,7 +168,7 @@ def compare_suite(suite, a, b):
             out["reason"] = (
                 f"{'first' if side == 'a' else 'second'} model's {SUITE_LABELS.get(suite, suite)} "
                 f"is {(card or {}).get('status', 'missing')}"
-                + (f" -- {card.get('reason')}" if card and card.get("reason") else "")
+                + (f": {card.get('reason')}" if card and card.get("reason") else "")
                 + ". A suite that did not produce a gradeable result cannot be compared "
                   "against one that did.")
             return out
@@ -252,7 +252,7 @@ def render_comparison(result):
         return f"[!] {result['error']}\n"
 
     a, b = result["model_a"], result["model_b"]
-    L = [f"# Comparison -- `{a}` vs `{b}`", ""]
+    L = [f"# Comparison: `{a}` vs `{b}`", ""]
 
     ga, gb = result.get("grade_a"), result.get("grade_b")
     if ga and gb:
@@ -275,12 +275,12 @@ def render_comparison(result):
             f"| | rate | n_eff | 95% CI |",
             f"|---|---|---|---|",
             f"| `{a}` | {_pct(s['a']['rate'])} ({s['a']['hits']}/{s['a']['n']}) | "
-            f"{s['a']['n_eff']} | {_pct(s['a']['ci'][0])} – {_pct(s['a']['ci'][1])} |",
+            f"{s['a']['n_eff']} | {_pct(s['a']['ci'][0])} to {_pct(s['a']['ci'][1])} |",
             f"| `{b}` | {_pct(s['b']['rate'])} ({s['b']['hits']}/{s['b']['n']}) | "
-            f"{s['b']['n_eff']} | {_pct(s['b']['ci'][0])} – {_pct(s['b']['ci'][1])} |",
+            f"{s['b']['n_eff']} | {_pct(s['b']['ci'][0])} to {_pct(s['b']['ci'][1])} |",
             "",
             f"- difference: **{100 * s['difference']:+.1f}pp**",
-            f"- intervals: " + (f"overlap {_pct(s['overlap'][0])} – {_pct(s['overlap'][1])}"
+            f"- intervals: " + (f"overlap {_pct(s['overlap'][0])} to {_pct(s['overlap'][1])}"
                                  if s["overlap"] else "disjoint"),
             f"- Fisher exact: naive p = {s['p_naive']:.4f}, "
             f"**corrected for clustering p = {s['p_corrected']:.4f}** "
@@ -302,12 +302,12 @@ def render_comparison(result):
             need, growth = s["n_eff_needed"], s["growth_factor"]
             note = (f"> **Not a null.** This comparison had {100 * s['power']:.0f}% power to "
                     f"detect the difference it observed, so failing to find one says more "
-                    f"about the instrument than about the models -- the same rule "
+                    f"about the instrument than about the models. This is the same rule "
                     f"METHODOLOGY.md 3.1 applies to a suite that never fired.")
             if need:
                 note += (f" Reaching {int(100 * TARGET_POWER)}% power needs **n_eff ≈ {need} "
                          f"per arm**, against {min(s['a']['n_eff'], s['b']['n_eff'])} here"
-                         + (f" -- roughly **{growth:.1f}x** the probes/tasks, at any trial "
+                         + (f": roughly **{growth:.1f}x** the probes/tasks, at any trial "
                             f"count." if growth else ".")
                          + " More TRIALS will not get you there: n_eff scales with the "
                            "number of distinct probes, and once rows cluster this hard it "
@@ -322,11 +322,11 @@ def render_comparison(result):
                     f"> At {growth:.0f}x, powering this is not a realistic plan. A gap of "
                     f"{abs(100 * s['difference']):.1f}pp is small enough that the honest "
                     f"report is that these two are indistinguishable at any bank size you "
-                    f"would actually build -- not that you should go build it.",
+                    f"would actually build, not that you should go build it.",
                     "",
                 ]
         elif s["verdict"] == NO_DIFFERENCE:
-            L += ["> Adequately powered and no difference found -- here similarity is a "
+            L += ["> Adequately powered and no difference found: here similarity is a "
                   "finding rather than an absence of one.", ""]
 
     L += [
@@ -334,7 +334,7 @@ def render_comparison(result):
         "",
         "Read with the same caution as any single grade: this compares what is on disk, "
         "and shares every caveat the two scorecards carry. Identical pinned sampling does "
-        "not make two models identically served -- a Modelfile `stop` sequence, a "
+        "not make two models identically served: a Modelfile `stop` sequence, a "
         "repetition penalty, or a different generation budget all sit outside the four "
         "pinned fields and confound a comparison without appearing in it "
         "(ARCHITECTURE.md section 7).",

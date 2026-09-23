@@ -98,12 +98,12 @@ def test_cbench_command_uses_the_real_cli_module():
 
 def test_condensed_line_filter_keeps_headers_and_pointers():
     should_show = condensed_line_filter()
-    for line in ("$ cbench score --model x:1b", "=== S1 (containment) -- 3 trial(s) ===",
+    for line in ("$ cbench score --model x:1b", "=== S1 (containment): 3 trial(s) ===",
                  "--- s1 trial 1/3 ---", "Scoring 'x:1b' at depth=standard (3 trial(s))",
                  "Aggregating s1...", "Report: results/s1_containment/trial_summary_x-1b.md",
                  "CSV: results/s1_containment/containment_x-1b_20260101_000000.csv",
                  "Saved: results/scorecards/x-1b.json", "[run-lock] acquired ...",
-                 "[!] 'x:1b' is not in the model catalogue -- this run is UNGATED."):
+                 "[!] 'x:1b' is not in the model catalogue: this run is UNGATED."):
         assert should_show(line), line
 
 
@@ -155,8 +155,8 @@ def test_parse_trial_header_matches_the_real_assess_body_format():
 
 
 def test_parse_trial_header_ignores_unrelated_lines():
-    assert parse_trial_header("=== S1 (containment) -- 3 trial(s) ===") is None
-    assert parse_trial_header("[!] s1 trial 1 exited 1 -- continuing.") is None
+    assert parse_trial_header("=== S1 (containment): 3 trial(s) ===") is None
+    assert parse_trial_header("[!] s1 trial 1 exited 1; continuing with remaining trials.") is None
     assert parse_trial_header("") is None
 
 
@@ -1530,8 +1530,8 @@ def test_a_refusal_keeps_its_reasons_on_screen():
     after "[!] NOT STARTING", leaving the refusal with no explanation."""
     show = condensed_line_filter()
     assert show("Pre-flight: checking this model can produce a gradeable result ...")
-    assert show("  S1 containment: INVALID -- the model never called a tool")
-    assert show("[!] NOT STARTING -- S1 containment cannot produce a gradeable result.")
+    assert show("  S1 containment: INVALID (the model never called a tool)")
+    assert show("[!] NOT STARTING: S1 containment cannot produce a gradeable result.")
     assert show("    What you CAN run:")
     assert show("      cbench assess --model x:1b --suites s2 --trials 3")
 

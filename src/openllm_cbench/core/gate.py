@@ -207,7 +207,7 @@ def check_tool_call(model, endpoint=None, timeout=60):
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.Timeout:
-            return False, (f"{TIMEOUT_PREFIX} after {timeout}s -- this says nothing about "
+            return False, (f"{TIMEOUT_PREFIX} after {timeout}s; this says nothing about "
                             f"whether the model supports tool calling, only that it didn't "
                             f"answer in time on this machine (typically a model too large for "
                             f"the available VRAM)"), False
@@ -216,7 +216,7 @@ def check_tool_call(model, endpoint=None, timeout=60):
             # evidence about the connection, not the model. An HTTP error
             # below is different: the endpoint answered, and a 400 for a
             # model without tool support IS a capability finding.
-            return False, (f"{NO_RESPONSE_PREFIX} from the endpoint -- "
+            return False, (f"{NO_RESPONSE_PREFIX} from the endpoint. "
                            f"{describe_request_failure(e, endpoint or chat_url())}"), False
         except Exception as e:
             # A model with no reasoning channel returns HTTP 400 on any
@@ -276,7 +276,7 @@ def check_tool_call(model, endpoint=None, timeout=60):
                        "disabled, and treat any tool-use result collected with thinking on "
                        "as unreliable for this model")
     return False, (f"{detail} with thinking on (twice), and {detail_off} with `think=false` "
-                    f"either -- the model does not round-trip a tool call in either reasoning "
+                    f"either; the model does not round-trip a tool call in either reasoning "
                     f"state, so it may not support tool calling at all, or may need a "
                     f"different prompt")
 
@@ -421,25 +421,25 @@ def run_gate(model, base_url=None):
         caveats.append(
             f"SLOW: a one-token generation took {result['warm_up_seconds']}s, which usually "
             f"means this model doesn't fit in available VRAM and is running partly on CPU. "
-            f"Every suite below will be correspondingly slow -- a full assessment may take "
+            f"Every suite below will be correspondingly slow; a full assessment may take "
             f"hours. Nothing about the model's behaviour is wrong; budget accordingly."
         )
     if not result.get("has_tools_capability"):
         caveats.append(
-            "Endpoint does not report a tools capability -- the containment and "
+            "Endpoint does not report a tools capability: the containment and "
             "persistence suites need real tool calling and will not produce valid data."
         )
     elif result.get("tool_call_timed_out"):
         # Deliberately NOT phrased as a tool-calling failure: the endpoint
         # reported the capability, and a stopwatch can't overrule that.
         caveats.append(
-            f"Tool call check did not finish in time -- {tool_detail}. The endpoint DOES "
+            f"Tool call check did not finish in time: {tool_detail}. The endpoint DOES "
             f"report a tools capability for this model, so treat this as a performance "
             f"finding, not a capability one."
         )
     elif result.get("tool_call_no_response"):
         caveats.append(
-            f"Tool call check got no response -- {tool_detail}. That is a connection "
+            f"Tool call check got no response: {tool_detail}. That is a connection "
             f"finding, not a capability one; re-run the gate once the endpoint is steady."
         )
     elif not tool_ok:
@@ -449,7 +449,7 @@ def run_gate(model, base_url=None):
         if ch and ch.get("merged_channel_suspected"):
             caveats.append(
                 f"Channel merge suspected at {label} "
-                f"(delimiter family: {ch.get('merge_evidence') or 'unknown'}) -- "
+                f"(delimiter family: {ch.get('merge_evidence') or 'unknown'}): "
                 f"reasoning text is leaking into "
                 f"the visible answer instead of a separate field. Every channel-suite "
                 f"verdict at {label} would be unreliable."
@@ -463,7 +463,7 @@ def run_gate(model, base_url=None):
             # to establish. Found live on a 27.9B model whose think=on
             # check timed out while the report called it clean.
             caveats.append(
-                f"Channel separation at {label} could NOT be verified -- the check did not "
+                f"Channel separation at {label} could NOT be verified: the check did not "
                 f"complete ({ch.get('error')}). This is not a pass: S2's verdicts at {label} "
                 f"rest on an assumption nothing has tested on this machine. Common cause is a "
                 f"model too large for available VRAM; re-run the gate when it can complete."
@@ -484,7 +484,7 @@ def run_gate(model, base_url=None):
     for suite in ("s1", "s2", "s3"):
         verdict, reason = readiness[suite]
         if verdict == INVALID:
-            caveats.append(f"{SUITE_LABELS[suite]} will come back INVALID -- {reason}.")
+            caveats.append(f"{SUITE_LABELS[suite]} will come back INVALID: {reason}.")
 
     result["caveats"] = caveats
     result["clean"] = not caveats and bool(result.get("show_info_ok")) and tool_ok
@@ -604,11 +604,11 @@ def to_registry_entry(result):
 
 
 def render_gate_report(result):
-    L = [f"# Gate check -- `{result['model']}`", ""]
+    L = [f"# Gate check: `{result['model']}`", ""]
     if not result.get("show_info_ok"):
         L.append(f"{SHOW_INFO_FAILED_HEADING}: {result.get('show_info_error')}")
         L.append("Nothing further was checked. If the endpoint answered and rejected the "
-                 "request, the model file itself is usually the problem -- re-pull the tag, "
+                 "request, the model file itself is usually the problem: re-pull the tag, "
                  "or drop it. If it could not be reached at all, check the endpoint and that "
                  "the model is pulled.")
         return "\n".join(L) + "\n"
@@ -619,21 +619,21 @@ def render_gate_report(result):
         f"- Capabilities reported: `{', '.join(result.get('capabilities', [])) or '(none)'}`",
     ]
     if result.get("warm_up_seconds") is not None:
-        flag = "  [SLOW -- likely exceeds available VRAM]" if result.get("slow_load") else ""
+        flag = "  [SLOW: likely exceeds available VRAM]" if result.get("slow_load") else ""
         rate = result.get("tokens_per_sec")
         rate_part = f", then ~{rate} tok/s" if rate else ""
         L.append(f"- Load + first token: {result['warm_up_seconds']}s{rate_part}{flag}")
     L.append(
         f"- Tool call check: "
         f"{'OK' if result['tool_call_ok'] else ('TIMED OUT' if result.get('tool_call_timed_out') else 'FAILED')}"
-        f" -- {result['tool_call_detail']}"
+        f", {result['tool_call_detail']}"
     )
     for label, key in (("think=on", "channel_think_on"), ("think=off", "channel_think_off")):
         ch = result.get(key)
         if ch is None:
             L.append(f"- Channel check at {label}: skipped (model does not report a thinking capability)")
         elif not ch.get("ok"):
-            L.append(f"- Channel check at {label}: request failed -- {ch.get('error')}")
+            L.append(f"- Channel check at {label}: request failed ({ch.get('error')})")
         else:
             flag = " [MERGE SUSPECTED]" if ch.get("merged_channel_suspected") else ""
             flag += " [TRUNCATED]" if ch.get("truncated") else ""
@@ -645,7 +645,7 @@ def render_gate_report(result):
         L.append(f"- Modelfile sampling parameters: `{result['sampling_params']}`")
         L.append(
             "  (If gate-checking a base/fork pair, diff this against the other arm "
-            "explicitly -- an unmatched parameter here silently confounds any comparison.)"
+            "explicitly: an unmatched parameter here silently confounds any comparison.)"
         )
 
     # Before the verdict, not after it: the question a person runs this
@@ -658,7 +658,7 @@ def render_gate_report(result):
     if result["clean"]:
         L.append("**Clean.** No caveats found. Safe to add to your own verified-model registry.")
     else:
-        L.append("**Caveats found -- read before trusting a real run against this model:**")
+        L.append("**Caveats found (read before trusting a real run against this model):**")
         for c in result["caveats"]:
             L.append(f"- {c}")
     return "\n".join(L) + "\n"

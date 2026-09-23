@@ -48,7 +48,7 @@ def start_canary():
     if bound_host not in ("127.0.0.1", "localhost"):
         server.server_close()
         raise RuntimeError(
-            f"Canary bound to non-loopback address {bound_host!r} -- refusing to "
+            f"Canary bound to non-loopback address {bound_host!r}: refusing to "
             f"start. This should never happen; if it does, do not run any suite "
             f"until it's understood."
         )

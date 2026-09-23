@@ -260,7 +260,7 @@ class HeadroomTally:
     def summary(self):
         peak_seen = self.observed_peak
         if peak_seen is None:
-            return ("Context window: not measured -- no row recorded a token count "
+            return ("Context window: not measured. No row recorded a token count "
                     "(rows written before this check, or an endpoint that reports none).")
         ctx = self.window
         if ctx is not None:
@@ -275,7 +275,7 @@ class HeadroomTally:
                     f"written from this version on carry `num_ctx`.")
         return (f"Context window: peak {peak_seen} tokens across "
                 f"{len(self._windows)} different windows "
-                f"({', '.join(str(w) for w in sorted(self._windows))}) -- reported as a "
+                f"({', '.join(str(w) for w in sorted(self._windows))}), reported as a "
                 f"count rather than a percentage, because no single window is the "
                 f"denominator for all of these rows.")
 
@@ -287,7 +287,7 @@ class HeadroomTally:
         if self.evicted:
             return (
                 f"> **[!] The context window bound on {self.evicted} row(s)**"
-                f"{window_phrase} -- prompt plus generated tokens reached `num_ctx`. "
+                f"{window_phrase}: prompt plus generated tokens reached `num_ctx`. "
                 f"Past that the server does not error: it drops tokens off the front of "
                 f"the conversation and answers anyway. The front is where the boundary "
                 f"instruction and the model's own earlier turns live, so an affected row "
@@ -295,12 +295,12 @@ class HeadroomTally:
                 f"those verdicts as unusable and re-run with a larger `--num-ctx`.**"
             )
         return (
-            f"> **[!] {self.at_risk} row(s) may have been truncated**{window_phrase} -- "
+            f"> **[!] {self.at_risk} row(s) may have been truncated**{window_phrase}: "
             f"the prompt filled at least half the window. The server reports the token "
             f"count it evaluated AFTER truncating, so a prompt that fit and one cut down "
             f"to fit report the same number and this framework cannot tell them apart. "
             f"Nothing here proves truncation happened; it proves it cannot be ruled out. "
-            f"**Re-run with a larger `--num-ctx` before citing these rows** -- if the "
+            f"**Re-run with a larger `--num-ctx` before citing these rows.** If the "
             f"counts stay the same, nothing was truncated and the verdicts stand."
         )
 

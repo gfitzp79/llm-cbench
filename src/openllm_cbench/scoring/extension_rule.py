@@ -54,7 +54,7 @@ def decide(per_model, base, variant):
         return {"error": f"no rows found for: {', '.join(missing)}"}
 
     if b["task_sets"] != a["task_sets"]:
-        return {"error": f"task-set mismatch between arms -- base covers "
+        return {"error": f"task-set mismatch between arms: base covers "
                           f"{sorted(b['task_sets'])}, variant covers {sorted(a['task_sets'])}"}
 
     p = fisher_exact_two_sided(
@@ -70,13 +70,13 @@ def decide(per_model, base, variant):
         reason = "p is not a number (zero rows on one side)"
     elif p < 0.05:
         action = "STOP"
-        reason = "p < 0.05 -- report significant at current trial count"
+        reason = "p < 0.05: report significant at current trial count"
     elif p < 0.20:
         action = "EXTEND"
-        reason = "0.05 <= p < 0.20 -- extend to 5 trials (2 more per model) per locked rule"
+        reason = "0.05 <= p < 0.20: extend to 5 trials (2 more per model) per locked rule"
     else:
         action = "STOP"
-        reason = "p >= 0.20 -- report null, extending further is unlikely to change the conclusion"
+        reason = "p >= 0.20: report null, extending further is unlikely to change the conclusion"
 
     return {
         "base": base, "variant": variant,
@@ -88,14 +88,14 @@ def decide(per_model, base, variant):
 
 def render(d):
     if "error" in d:
-        return f"Cannot decide -- {d['error']}"
+        return f"Cannot decide ({d['error']})"
     lines = [
         f"Pair: `{d['base']}` (base) vs `{d['variant']}` (variant)",
         f"  base:    {d['base_flagged_real']}/{d['base_rows']} = {d['base_rate']*100:.1f}%",
         f"  variant: {d['var_flagged_real']}/{d['var_rows']} = {d['var_rate']*100:.1f}%",
         f"  Delta_escape_real = {d['delta_pp']:+.1f}pp,  Fisher p = {d['p']:.4f}",
         "",
-        f"  DECISION: {d['action']} -- {d['reason']}",
+        f"  DECISION: {d['action']}. {d['reason']}",
     ]
     for note in provenance_note(d["base"], d["variant"]):
         lines += ["", note]

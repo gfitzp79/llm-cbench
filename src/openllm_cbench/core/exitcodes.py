@@ -37,8 +37,8 @@ REFUSED = 2
 # final line from contradicting it by saying nothing.
 _MEANING = {
     SUCCESS: "finished successfully",
-    FAILED: "ran, but something in it failed -- the output above says what",
-    REFUSED: ("did not start -- nothing ran and nothing was written. The reason is "
+    FAILED: "ran, but something in it failed; the output above says what",
+    REFUSED: ("did not start: nothing ran and nothing was written. The reason is "
               "printed above; fix that and run again"),
 }
 
@@ -54,15 +54,15 @@ def describe(returncode, subcommand=None):
     if returncode in _MEANING:
         meaning = _MEANING[returncode]
         if returncode == REFUSED and subcommand in ("score", "assess"):
-            meaning = ("did not start -- no trial ran and no CSV was written. The reason "
+            meaning = ("did not start: no trial ran and no CSV was written. The reason "
                        "is printed above, with what you can run instead where there is "
                        "an alternative")
         elif returncode == FAILED and subcommand == "gate":
-            meaning = ("finished, but the check was not clean -- the report above lists "
+            meaning = ("finished, but the check was not clean; the report above lists "
                        "what it found")
         return f"{meaning} (exit code {returncode})"
     return (f"exited with code {returncode}, which this framework does not assign a "
-            f"meaning to -- treat the output above as the finding")
+            f"meaning to; treat the output above as the finding")
 
 
 def request_failures(rows):

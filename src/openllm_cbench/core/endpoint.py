@@ -59,7 +59,7 @@ def describe_request_failure(exc, base_url):
     import requests
 
     if isinstance(exc, requests.exceptions.ConnectionError):
-        return (f"Could not reach {base_url} -- nothing is listening there, or the host "
+        return (f"Could not reach {base_url}: nothing is listening there, or the host "
                 f"is wrong. Check the endpoint is running ({exc}).")
     if isinstance(exc, requests.exceptions.Timeout):
         return (f"{base_url} accepted the connection but did not answer in time. The "
@@ -81,12 +81,12 @@ def describe_request_failure(exc, base_url):
                 # with JSON, so an HTML body means whatever is on this
                 # address is not the endpoint you think it is, which is a
                 # far more useful thing to be told than the page's text.
-                detail = ("the response was an HTML page, not JSON -- whatever is "
+                detail = ("the response was an HTML page, not JSON, so whatever is "
                           "listening here does not look like an Ollama endpoint")
             else:
                 detail = text[:300]
         detail = " ".join(detail.split())[:300]
         return (f"{base_url} REJECTED the request with HTTP {response.status_code}"
-                f"{': ' + detail if detail else ''}. The endpoint is reachable -- it is "
+                f"{': ' + detail if detail else ''}. The endpoint is reachable; it is "
                 f"the request it did not accept.")
     return f"Request to {base_url} failed: {exc}"

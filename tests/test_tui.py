@@ -33,19 +33,28 @@ from openllm_cbench.tui.app import (  # noqa: E402
 
 
 async def _click(pilot, selector):
-    """Click a widget once it has been laid out.
+    """Click a widget once it has been laid out and has stopped moving.
 
     A click issued before layout lands at (0, 0), which is the header's
     command-palette icon: the palette opens and the test's next query runs
     against it. Seen on the slow Windows / Python 3.10 CI runner, a
     different test each time, straight after navigating to a new screen.
+
+    Laid out is not enough on its own. Typing a model tag updates two
+    status lines above the Score screen's checkboxes asynchronously (the
+    catalogue lookup, the hardware probe), and under load the reflow landed
+    between measuring a checkbox and clicking it, so the click hit its
+    neighbour. Two identical readings 50 ms apart means the layout settled.
     """
+    previous = None
     for _ in range(100):
         try:
-            if pilot.app.screen.query_one(selector).region.area:
-                break
+            region = pilot.app.screen.query_one(selector).region
         except Exception:
-            pass  # not mounted yet
+            region = None  # not mounted yet
+        if region is not None and region.area and region == previous:
+            break
+        previous = region
         await pilot.pause(0.05)
     await pilot.click(selector)
 
@@ -1430,3 +1439,159 @@ def test_score_screen_rejects_a_non_numeric_budget():
             assert "--num-ctx" not in command
             assert "must be a whole number" in preview
     asyncio.run(scenario())
+
+
+# --- Pre-release review fixes (2026-09-23) ------------------------------
+
+def _score_screen_with_model(tag, *, tick_dry_run):
+    """Score screen, `tag` typed in, gate-first left at its default (on)."""
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-score")
+            await pilot.pause()
+            await _click(pilot, "#score-model-input")
+            await pilot.press(*list(tag))
+            if tick_dry_run:
+                await _click(pilot, "#score-dry-run")
+            await pilot.pause()
+            args, _, _ = app.screen._score_flags()
+            return (app.screen._gate_first_argv(args),
+                    str(app.screen.query_one("#score-preview").content))
+    return asyncio.run(scenario())
+
+
+def test_a_dry_run_never_gate_checks_even_with_gate_first_ticked():
+    """A dry run is previewed as "calls no model". It gate-checked an
+    uncatalogued model anyway -- a real model call that also wrote the
+    catalogue -- because the gate decision lived outside the builder the
+    preview reads."""
+    gate_argv, preview = _score_screen_with_model("uncatalogued-x:1b", tick_dry_run=True)
+    assert gate_argv is None
+    assert "gate-check" not in preview.lower()
+    assert "calls no model" in preview
+
+
+def test_the_preview_says_when_a_gate_check_will_run_first():
+    gate_argv, preview = _score_screen_with_model("uncatalogued-x:1b", tick_dry_run=False)
+    assert gate_argv is not None and "gate" in gate_argv
+    assert "First: gate-check" in preview
+    assert "saves the result to your catalogue" in preview
+
+
+def test_browse_reports_reads_the_pinned_results_location(tmp_path, monkeypatch):
+    """Pinned under Settings, shown on the dashboard -- and ignored by
+    Browse reports, which checked only the env var and ./results."""
+    from openllm_cbench.core.config import set_results_dir
+    from openllm_cbench.tui.app import _results_root
+    monkeypatch.delenv("OPENLLM_CBENCH_RESULTS_DIR", raising=False)
+    pinned = tmp_path / "pinned-results"
+    set_results_dir(pinned)
+    monkeypatch.chdir(tmp_path)
+    assert _results_root() == pinned.resolve()
+
+
+def test_an_uncreatable_results_location_is_refused_and_not_saved(tmp_path):
+    """Saving first, then failing to create it, left a config every later
+    run -- and every TUI action -- crashed on."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x")
+    bad = blocker / "results"          # a directory under a file cannot exist
+    config = tmp_path / "config.json"
+    src = Path(__file__).parent.parent / "src"
+    result = subprocess.run(
+        [sys.executable, "-m", "openllm_cbench.cli", "config", "--set-results-dir", str(bad)],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ, "PYTHONPATH": str(src), "OPENLLM_CBENCH_CONFIG": str(config)},
+    )
+    assert result.returncode == 2
+    assert "Nothing was saved" in result.stderr
+    assert not config.exists() or "a-file" not in config.read_text()
+
+
+def test_a_log_that_cannot_be_saved_is_reported_not_raised(tmp_path, monkeypatch):
+    from openllm_cbench.tui.app import _saved_log_line
+    from openllm_cbench.tui.jobs import JobResult, save_job_log
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x")
+    monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(blocker / "results"))
+    result = JobResult(argv=["python", "-m", "openllm_cbench.cli", "doctor"], returncode=0)
+    assert save_job_log(result) is None
+    assert "Could not save the full log" in _saved_log_line(result)
+
+
+def test_a_refusal_keeps_its_reasons_on_screen():
+    """The condensed view dropped the per-suite reasons and everything
+    after "[!] NOT STARTING", leaving the refusal with no explanation."""
+    show = condensed_line_filter()
+    assert show("Pre-flight: checking this model can produce a gradeable result ...")
+    assert show("  S1 containment: INVALID -- the model never called a tool")
+    assert show("[!] NOT STARTING -- S1 containment cannot produce a gradeable result.")
+    assert show("    What you CAN run:")
+    assert show("      cbench assess --model x:1b --suites s2 --trials 3")
+
+
+def test_package_zips_only_when_asked_and_passes_the_contributor(monkeypatch):
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(140, 60)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-community")
+            await pilot.pause()
+            app.screen.query_one("#community-model-input").value = "x:1b"
+            app.screen.query_one("#community-contributor-input").value = "someone"
+            app.screen.query_one("#community-terms").value = True
+            await _click(pilot, "#community-package")
+            for _ in range(5):
+                await pilot.pause()
+
+    asyncio.run(scenario())
+    argv = captured.get("argv", [])
+    assert "--zip" not in argv                      # off by default, as on the CLI
+    assert argv[argv.index("--contributor") + 1] == "someone"
+
+
+def test_a_zero_limit_refuses_instead_of_gating_everything(monkeypatch):
+    """A typo in the field that LIMITS model calls must not turn into
+    calling every model."""
+    captured = {}
+
+    async def fake_run_job(argv, on_line, cwd=None):
+        captured["argv"] = argv
+        from openllm_cbench.tui.jobs import JobResult
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+
+    async def scenario():
+        app = CBenchTUI()
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-models")
+            await pilot.pause()
+            app.screen.query_one("#models-limit-input").value = "0"
+            await _click(pilot, "#models-gate-all")
+            for _ in range(5):
+                await pilot.pause()
+            log = [str(x) for x in app.screen.query_one("#models-log").lines]
+            return log
+
+    log = asyncio.run(scenario())
+    assert "argv" not in captured
+    assert any("nothing started" in line for line in log)

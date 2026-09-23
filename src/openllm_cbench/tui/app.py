@@ -15,6 +15,10 @@ from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
+# Module level: ten teardown guards below catch it, and were written
+# against a name that was only ever imported inside two functions -- so
+# each guard raised NameError instead of returning quietly.
+from textual.css.query import NoMatches
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (
@@ -32,10 +36,12 @@ from openllm_cbench.tui.jobs import (
 
 
 def _results_root() -> Path:
-    # Same precedence core.paths.results_dir() uses for a single suite,
-    # applied to the shared results/ root the TUI's report browser lists.
-    override = os.environ.get("OPENLLM_CBENCH_RESULTS_DIR")
-    return Path(override) if override else Path.cwd() / "results"
+    # THE resolver, not a copy of it. A copy here once skipped the config
+    # file, so after pinning a location under Settings the dashboard showed
+    # the pinned folder while Browse reports listed ./results and found
+    # nothing.
+    from openllm_cbench.core.paths import results_root
+    return results_root()
 
 
 async def _populate_model_select(select: Select) -> dict:
@@ -87,6 +93,17 @@ async def _populate_model_select(select: Select) -> dict:
     return {m["name"]: m for m in local}
 
 
+def _saved_log_line(result) -> str:
+    """Where the full log went, or that it could not be saved -- never
+    "saved to None". save_job_log() returns None rather than raising when
+    the results folder cannot be written."""
+    path = save_job_log(result)
+    if path is None:
+        return ("[yellow]Could not save the full log -- the results folder could not be "
+                "written. The output above is all there is.[/yellow]")
+    return f"[dim]Full log saved to {path}[/dim]"
+
+
 def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
     """The tail every action-taking screen shares once its subprocess
     exits: save the full output to a real file and say where, then report
@@ -98,7 +115,7 @@ def _report_job_result(log: RichLog, result, success_note: str = "") -> bool:
     Was copy-pasted verbatim across six screens before this existed --
     identical enough that a change to how a job reports itself had to be
     made in six places or become inconsistent in five."""
-    log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
+    log.write(_saved_log_line(result))
     if result.error:
         log.write(f"[bold red]{result.error}[/bold red]")
         return False
@@ -279,7 +296,7 @@ class DashboardScreen(Screen):
     @work(exclusive=True)
     async def _run_doctor_worker(self, argv, log: RichLog) -> None:
         result = await run_job(argv, on_line=lambda line: log.write(line))
-        log.write(f"[dim]Full log saved to {save_job_log(result)}[/dim]")
+        log.write(_saved_log_line(result))
 
 
 class RunScreen(Screen):
@@ -289,7 +306,9 @@ class RunScreen(Screen):
         yield Header()
         yield InvariantBar()
         with Vertical(id="run-form"):
-            yield Static("Run a suite -- equivalent to running `cbench <suite>` yourself.")
+            yield Static("Run a suite -- equivalent to running `cbench <suite>` yourself. "
+                         "One run of one suite: writes a CSV and a report, no grade. For a "
+                         "grade, use Score a model.")
             yield Select(
                 [(label, subcmd) for label, subcmd in RUNNABLE_SUITES],
                 id="suite-select", value=RUNNABLE_SUITES[0][1], allow_blank=False,
@@ -303,7 +322,10 @@ class RunScreen(Screen):
                 id="dry-run-checkbox", value=False,
             )
             yield Input(
-                placeholder="extra flags, e.g. --boundary both --sandbox extended",
+                # The old example (--boundary/--sandbox) exists only on
+                # containment, so it errored on the other two suites.
+                placeholder="extra flags for this suite (optional), e.g. --think false "
+                            "-- see `cbench <suite> --help`",
                 id="extra-args-input",
             )
             with Horizontal():
@@ -373,7 +395,8 @@ class GateScreen(Screen):
                          prompt="Pick a local model (or type the tag below) — loading...")
             yield Input(placeholder="model tag, e.g. gemma3:12b", id="gate-model-input")
             yield Checkbox(
-                "Save to local model catalogue overlay (models.json)",
+                "Save the result to my model catalogue (models.json) -- unticked = show "
+                "the result only, nothing is written",
                 id="gate-save-checkbox", value=False,
             )
             with Horizontal():
@@ -659,8 +682,8 @@ class ModelsScreen(Screen):
             log.write("[green]Deleted. Refreshing the list...[/green]")
             self._refresh()
         else:
-            log.write(f"[bold red]Delete failed (exit {result.returncode}) -- "
-                      f"nothing was removed.[/bold red]")
+            log.write(f"[bold red]Delete failed, nothing was removed: "
+                      f"{exitcodes.describe(result.returncode, 'remove')}[/bold red]")
 
     @work(exclusive=True)
     async def _refresh_worker(self) -> None:
@@ -800,8 +823,11 @@ class ModelsScreen(Screen):
             if limit > 0:
                 flags += ["--limit", str(limit)]
             else:
-                log.write("[bold red]Limit must be a positive whole number -- "
-                          "ignoring it and gating all uncatalogued models.[/bold red]")
+                # Refuse rather than widen. A typo in a field meant to LIMIT
+                # model calls must not turn into calling every model.
+                log.write("[bold red]Limit must be a positive whole number, or blank for "
+                          "all -- nothing started.[/bold red]")
+                return
         argv = cbench_command("discover", flags)
         log.write(f"[dim]$ {' '.join(argv)}[/dim]")
         log.write("[dim]Gate-checking every uncatalogued model, one at a time -- real model "
@@ -943,8 +969,10 @@ class ScoreScreen(Screen):
                 # Blank means "leave it to the catalogue". An explicit value
                 # beats the per-model config_overrides, which beat the
                 # suite default -- the same precedence the CLI flags have.
-                yield Input(placeholder="num_ctx (blank = model default)", id="score-num-ctx")
-                yield Input(placeholder="num_predict (blank = model default)",
+                yield Input(placeholder="Context window, tokens (--num-ctx) -- blank = "
+                                        "catalogue default", id="score-num-ctx")
+                yield Input(placeholder="Max tokens per reply (--num-predict) -- blank = "
+                                        "catalogue default",
                             id="score-num-predict")
             # OFF by default, matching `cbench score`, whose --dry-run is
             # store_true. It defaulted ON here, so the button labelled
@@ -1131,6 +1159,26 @@ class ScoreScreen(Screen):
                 total_trials = len(suites) * DEPTH_TRIALS[depth]
         return args, total_trials, problems
 
+    def _gate_first_argv(self, args):
+        """The `cbench gate` that will run before `score`, or None.
+
+        Shared by the preview and the launch, like _score_flags. It lived
+        only in the launch once, so a dry run -- previewed as "calls no
+        model" -- gate-checked an uncatalogued model and wrote the result
+        into the catalogue anyway. A dry run and --from-existing both
+        promise no model call, and a gate check is one, so both skip it."""
+        if "--dry-run" in args or "--from-existing" in args:
+            return None
+        if not self.query_one("#score-gate-first", Checkbox).value:
+            return None
+        model = args[args.index("--model") + 1]
+        if not model:
+            return None
+        from openllm_cbench.core.registry import load_registry, lookup
+        if lookup(model, load_registry()) is not None:
+            return None
+        return cbench_command("gate", ["--model", model, "--save"])
+
     def _refresh_preview(self) -> None:
         """Say in words what pressing Score will do, before it is pressed.
 
@@ -1172,7 +1220,13 @@ class ScoreScreen(Screen):
                 what += (" Pre-flight refusals are OVERRIDDEN, so a suite that cannot "
                          "produce a result will still spend its full time and grade INVALID.")
         argv = cbench_command("score", args)
-        preview.update(f"{warning}[b]{what}[/b]\n[dim]$ {' '.join(argv)}[/dim]")
+        gate_argv = self._gate_first_argv(args)
+        first = ""
+        if gate_argv:
+            first = ("[b]First: gate-check this model, which is not in your catalogue "
+                     "(calls the model and saves the result to your catalogue).[/b]\n"
+                     f"[dim]$ {' '.join(gate_argv)}[/dim]\n")
+        preview.update(f"{warning}{first}[b]{what}[/b]\n[dim]$ {' '.join(argv)}[/dim]")
 
     def _refresh_catalogue_status(self, model: str) -> None:
         """Local-only registry read (same function `cbench discover`/
@@ -1301,11 +1355,8 @@ class ScoreScreen(Screen):
         # to -- a convenience, not a requirement: this framework never
         # refuses to run against an unlisted or failed-gate model, it only
         # warns, so a gate failure below doesn't block the score run either.
-        gate_first_argv = None
-        if self.query_one("#score-gate-first", Checkbox).value:
-            from openllm_cbench.core.registry import load_registry, lookup
-            if lookup(model, load_registry()) is None:
-                gate_first_argv = cbench_command("gate", ["--model", model, "--save"])
+        # Decided by the same helper the preview uses -- see _gate_first_argv.
+        gate_first_argv = self._gate_first_argv(args)
 
         self._run_worker(model, argv, log, progress, gate_first_argv)
 
@@ -1317,7 +1368,7 @@ class ScoreScreen(Screen):
                       "(uncheck \"Gate-check first\" to skip this):[/dim]")
             log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
             gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
-            log.write(f"[dim]Full log saved to {save_job_log(gate_result)}[/dim]")
+            log.write(_saved_log_line(gate_result))
 
             from openllm_cbench.core.gate import summarize_gate_output
             from openllm_cbench.core.registry import load_registry, lookup
@@ -1453,6 +1504,17 @@ class CommunityScreen(Screen):
                                     "about this run",
                         id="community-notes-input",
                     )
+                    # Without this, a machine with no `git config user.name`
+                    # produced a package that failed validation, and nothing
+                    # on this screen could fix it.
+                    yield Input(
+                        placeholder="Your GitHub handle (blank = your git config user.name)",
+                        id="community-contributor-input",
+                    )
+                    yield Checkbox(
+                        "Also make a .zip (to attach to a GitHub issue without using git)",
+                        id="community-zip", value=False,
+                    )
                     yield Checkbox(
                         "Accept contributor terms (right to share, no confidential data, "
                         "accurate hardware, Apache-2.0 licence grant, published permanently) "
@@ -1584,7 +1646,13 @@ class CommunityScreen(Screen):
                        "results you want to bundle.[/bold red]")
             return
 
-        args = ["--model", model, "--zip"]
+        # --zip is off by default, as on the CLI; it was always on here.
+        args = ["--model", model]
+        if self.query_one("#community-zip", Checkbox).value:
+            args.append("--zip")
+        contributor = self.query_one("#community-contributor-input", Input).value.strip()
+        if contributor:
+            args += ["--contributor", contributor]
         notes = self.query_one("#community-notes-input", Input).value.strip()
         if notes:
             args += ["--notes", notes]
@@ -1709,9 +1777,9 @@ class SettingsScreen(Screen):
             yield Input(placeholder="Catalogue file path",
                         id="settings-models-input")
             with Horizontal(id="settings-buttons"):
-                yield Button("Save location", id="settings-save", variant="primary")
-                yield Button("Save catalogue", id="settings-save-models")
-                yield Button("Clear (use current directory)", id="settings-unset")
+                yield Button("Save results location", id="settings-save", variant="primary")
+                yield Button("Save catalogue location", id="settings-save-models")
+                yield Button("Clear results location (back to ./results)", id="settings-unset")
                 yield Button("Find existing results", id="settings-find")
                 yield Button("Back", id="settings-back")
             yield RichLog(id="settings-log", wrap=True, highlight=True, markup=True)
@@ -1785,7 +1853,7 @@ class SettingsScreen(Screen):
             # than leaving the screen showing what it used to be.
             self._refresh_current()
         else:
-            log.write(f"[bold red]Exited {result.returncode}.[/bold red]")
+            log.write(f"[bold red]{exitcodes.describe(result.returncode, 'config')}[/bold red]")
 
 
 class AboutScreen(Screen):
@@ -1877,11 +1945,10 @@ class ReportsScreen(Screen):
                     else:
                         yield Static(
                             f"No results directory at {root}.\n\n"
-                            f"If you have run suites before, you are almost certainly in a "
-                            f"different working directory than when you ran them -- results/ "
-                            f"is resolved relative to where you launch cbench. cd to your "
-                            f"project directory and reopen, or set "
-                            f"$OPENLLM_CBENCH_RESULTS_DIR.",
+                            f"If you have run suites before, they wrote somewhere else. With "
+                            f"no location pinned, results/ is relative to where you launch "
+                            f"cbench -- pin one under Settings so every launch finds the same "
+                            f"folder, or set $OPENLLM_CBENCH_RESULTS_DIR.",
                             id="reports-empty",
                         )
                 with VerticalScroll(id="reports-viewer-container"):

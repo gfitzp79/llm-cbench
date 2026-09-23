@@ -109,11 +109,23 @@ async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | N
 # complete" -- see condensed_line_filter()'s own docstring for why this is
 # an allowlist, not a blocklist, and why it's a prefix match against
 # stripped()'d lines rather than a regex.
+def _preflight_prefixes():
+    # The per-suite verdict lines the pre-flight prints ("S1 containment:
+    # READY -- ..."), from the same constant it prints them with. Dropping
+    # them left a refusal on screen with its reasons filtered out.
+    from openllm_cbench.core.preflight import SUITE_LABELS
+    return ("Pre-flight",) + tuple(f"{label}:" for label in SUITE_LABELS.values())
+
+
 _CONDENSED_KEEP_PREFIXES = (
     "$ ", "=== ", "--- ", "Scoring '", "Full assessment:", "Assessment complete",
     "Aggregating ", "Report:", "CSV:", "Saved:", "[run-lock]", "[!]",
     "Model not catalogued", "Gate-checking", "Full log saved",
-)
+) + _preflight_prefixes()
+
+# After this line nothing else runs, and what follows is the explanation:
+# what you CAN run instead, and how to override. Shown in full.
+_REFUSAL_PIVOT = "[!] NOT STARTING"
 
 
 def condensed_line_filter():
@@ -153,7 +165,8 @@ def condensed_line_filter():
         if seen_complete:
             return True
         stripped = line.strip()
-        if stripped.startswith("Assessment complete") or stripped.startswith("# Grade:"):
+        if (stripped.startswith("Assessment complete") or stripped.startswith("# Grade:")
+                or stripped.startswith(_REFUSAL_PIVOT)):
             seen_complete = True
             return True
         if not stripped:
@@ -183,7 +196,7 @@ def parse_trial_header(line: str) -> tuple[int, int] | None:
     return int(m.group(1)), int(m.group(2))
 
 
-def save_job_log(result: JobResult) -> Path:
+def save_job_log(result: JobResult) -> "Path | None":
     """Writes a completed job's full stdout/stderr (result.lines) to a
     timestamped file under results/tui-logs/, and returns its path.
 
@@ -213,16 +226,21 @@ def save_job_log(result: JobResult) -> Path:
     except (ValueError, IndexError):
         subcommand = "unknown"
 
-    d = results_dir("tui-logs")
-    d.mkdir(parents=True, exist_ok=True)
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = d / f"{subcommand}_{ts}.log"
     # Says what happened, not just the number -- the saved log is read
     # later, out of context, so it needs the meaning more than the screen
     # does. See core/exitcodes.py.
     from openllm_cbench.core import exitcodes
     footer = (f"\n[{exitcodes.describe(result.returncode, subcommand)}]\n"
               if not result.error else f"\n[error: {result.error}]\n")
-    path.write_text(f"$ {' '.join(result.argv)}\n\n" + "\n".join(result.lines) + footer,
-                     encoding="utf-8")
+    # The promise above was not kept: an uncreatable results folder raised
+    # here, inside a worker, and took every TUI action down with it.
+    try:
+        d = results_dir("tui-logs")
+        d.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = d / f"{subcommand}_{ts}.log"
+        path.write_text(f"$ {' '.join(result.argv)}\n\n" + "\n".join(result.lines) + footer,
+                        encoding="utf-8")
+    except OSError:
+        return None
     return path

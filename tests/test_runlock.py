@@ -86,6 +86,7 @@ def test_stale_lock_is_reclaimed_and_reported(lockdir):
 
 
 # --- runner preflight ------------------------------------------------------
+@pytest.mark.real_process_table
 def test_preflight_detects_a_real_live_suite_process(lockdir, monkeypatch):
     """Uses a REAL process, not a mock: the detector's only job is reading the
     real process table, and a mock would test the mock.

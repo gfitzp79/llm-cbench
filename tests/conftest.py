@@ -16,6 +16,13 @@ is nothing in it to leak.
 import pytest
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_process_table: let this test's run lock read the machine's real process table",
+    )
+
+
 @pytest.fixture(autouse=True)
 def isolate_user_config(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENLLM_CBENCH_CONFIG",
@@ -35,6 +42,22 @@ def isolate_run_lock(tmp_path, monkeypatch):
     A test that wants to exercise contention still can, by constructing
     RunLock with an explicit lock_dir."""
     monkeypatch.setenv("CBENCH_LOCK_DIR", str(tmp_path / "run.lock"))
+
+
+@pytest.fixture(autouse=True)
+def isolate_process_table(request, monkeypatch):
+    """Keeps the run lock's live-runner check off the machine's processes.
+
+    Besides the lock file, the lock refuses to start while any `cbench
+    score`, `assess` or suite process is live, and it reads that from the
+    real process table, which isolate_run_lock does not cover. Running the
+    tests during a real run failed five pre-flight tests with "NOT
+    STARTING: 1 suite runner process(es) already live". A test about that
+    check itself is marked real_process_table."""
+    if request.node.get_closest_marker("real_process_table"):
+        return
+    import openllm_cbench.core.runlock as runlock
+    monkeypatch.setattr(runlock, "live_runners", lambda *a, **k: [])
 
 
 @pytest.fixture(autouse=True)

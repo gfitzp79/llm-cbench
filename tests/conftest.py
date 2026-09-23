@@ -35,3 +35,18 @@ def isolate_run_lock(tmp_path, monkeypatch):
     A test that wants to exercise contention still can, by constructing
     RunLock with an explicit lock_dir."""
     monkeypatch.setenv("CBENCH_LOCK_DIR", str(tmp_path / "run.lock"))
+
+
+@pytest.fixture(autouse=True)
+def isolate_endpoint_runtime(monkeypatch):
+    """Keeps community packaging off the live endpoint.
+
+    Packaging records the endpoint's runtime version, read from its
+    /api/version, and leaves the field empty when nothing answers -- which
+    validation then refuses, as designed. Six tests passed only on a machine
+    with Ollama running and failed on every CI runner, which has none.
+
+    A test about the undetectable case still overrides this with None."""
+    import openllm_cbench.core.community as community
+    monkeypatch.setattr(community, "detect_endpoint_runtime",
+                        lambda *a, **k: "ollama 0.0.0-test")

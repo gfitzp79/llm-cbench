@@ -86,9 +86,14 @@ def test_stale_lock_is_reclaimed_and_reported(lockdir):
 
 
 # --- runner preflight ------------------------------------------------------
-def test_preflight_detects_a_real_live_suite_process(lockdir):
+def test_preflight_detects_a_real_live_suite_process(lockdir, monkeypatch):
     """Uses a REAL process, not a mock: the detector's only job is reading the
-    real process table, and a mock would test the mock."""
+    real process table, and a mock would test the mock.
+
+    COLUMNS=80 forces the adverse case everywhere: ps honours it, and on a
+    CI runner's long interpreter path the module name fell past column 80,
+    so this test failed on Linux only, and only where COLUMNS was set."""
+    monkeypatch.setenv("COLUMNS", "80")
     child = subprocess.Popen(
         [sys.executable, "-c",
          "import time  # openllm_cbench.suites.containment marker\ntime.sleep(20)"])

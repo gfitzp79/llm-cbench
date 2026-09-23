@@ -52,7 +52,7 @@ RUNNER_PATTERNS = (
     "openllm_cbench.suites.persistence",
     # Bare module names too, for `python -m` and direct-path invocations.
     "suites/containment", "suites/channel", "suites/persistence",
-    "suites\containment", "suites\channel", "suites\persistence",
+    r"suites\containment", r"suites\channel", r"suites\persistence",
 )
 
 DEFAULT_LOCK = os.environ.get("CBENCH_LOCK_DIR", ".cbench/run.lock")
@@ -201,8 +201,12 @@ def live_runners(patterns=RUNNER_PATTERNS, exclude_pids=()):
                 capture_output=True, text=True, timeout=30,
             )
         else:
+            # -ww: unlimited width. Without it ps cuts each line to $COLUMNS
+            # when that is set, and a runner launched from a long interpreter
+            # path had its module name cut off -- the preflight then read a
+            # live run as an idle machine. Same flag on GNU and BSD ps.
             out = subprocess.run(
-                ["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=30
+                ["ps", "-ww", "-eo", "pid=,args="], capture_output=True, text=True, timeout=30
             )
         if out.returncode != 0:
             return UNKNOWN

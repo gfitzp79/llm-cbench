@@ -1,18 +1,18 @@
 {
-  "_comment": "Copy this file to <your-submission-folder>/submission.json and fill it in -- or just run `cbench community-package --model <tag> --accept-terms`, which writes the whole thing for you. Every field except _comment, _*_comment and notes is required; cbench community-validate refuses a submission missing any of them.",
+  "_comment": "The simplest route is `cbench community-package --model <tag> --accept-terms`, which writes this whole file for you. To assemble a submission by hand, copy this file to <your-submission-folder>/submission.json and fill it in. Required: model, contributor, date, hardware_summary, endpoint, gate_check and attestation; cbench community-validate refuses a submission missing any of them. Optional: quant, cbench_version and notes.",
   "model": "gemma3:12b",
-  "_model_comment": "The exact tag your endpoint calls this model, verbatim -- the same string every CSV filename in this submission must contain (cbench community-validate checks this).",
+  "_model_comment": "The exact tag your endpoint calls this model. Every CSV file name in the submission must contain the same tag, and cbench community-validate checks this.",
   "contributor": "your-github-handle-or-name",
   "date": "2026-09-12",
-  "_date_comment": "The date you ran these trials, not the date you opened the PR.",
+  "_date_comment": "The date the submission was packaged (community-package writes today's date). Each CSV row records when its own run started, in its run-time columns.",
   "hardware_summary": "e.g. RTX 4080 16GB VRAM, 64GB system RAM, Windows 11",
   "endpoint": "e.g. ollama 0.5.1",
-  "_endpoint_comment": "Runtime and version -- sampling defaults and quant handling differ between runtimes and versions, and this is exactly the kind of thing ARCHITECTURE.md's own \"how not to fool yourself\" section warns can confound a comparison.",
+  "_endpoint_comment": "Runtime and version. Sampling defaults and quantisation handling differ between runtimes and versions, and either can confound a comparison (see ARCHITECTURE.md section 7).",
   "quant": "e.g. Q4_K_M",
-  "cbench_version": "output of `pip show openllm-cbench`, or the git commit hash you ran from",
-  "notes": "Optional free text -- anything unusual about the run: a config_overrides you had to set, a caveat this model needed, trials you excluded and why, etc.",
-  "_checksums_comment": "Written automatically by `cbench community-package`: SHA-256 per CSV, relative posix paths. Optional for a hand-assembled submission, but if present every entry must match, and every CSV present must be listed -- a mismatch means the file changed after packaging.",
-  "_policy_comment": "RAW DATA ONLY. A submission must NOT contain a grade, score, band or rate field, and must not include a scorecard or trial_summary file -- validation refuses both. Anyone who wants a grade computes it from these CSVs with `cbench score --from-existing`. See community-results/README.md, 'The publication rule'.",
+  "cbench_version": "the output of `cbench --version`",
+  "notes": "Optional free text: anything unusual about the run, such as a config_overrides you had to set, a caveat this model needed, or trials you excluded and why.",
+  "_checksums_comment": "Written by `cbench community-package`: a SHA-256 per CSV, keyed by relative POSIX path. Optional for a hand-assembled submission, but when present every entry must match and every CSV must be listed; a mismatch means a file changed after packaging.",
+  "_policy_comment": "Raw data only. A submission must not contain a grade, score, band or rate field, or any scorecard or trial summary file; validation refuses both. Anyone who wants a grade computes it from these CSVs with `cbench score --from-existing`. See community-results/README.md, 'The publication rule'.",
   "gate_check": {
     "catalogued": true,
     "caveats": [],
@@ -22,11 +22,11 @@
       "think_off": "clean"
     }
   },
-  "_gate_check_comment": "Written automatically from your local catalogue by `cbench community-package`. `unverified` MUST be empty: a gate check that timed out is an absent check, not a failed one, and rows produced on that machine may measure the machine rather than the model. Run `cbench gate --model <tag> --save` first.",
+  "_gate_check_comment": "Written by `cbench community-package` from your local catalogue. `unverified` must be empty: a gate check that timed out is an absent check, not a failed one, and rows produced on that machine may measure the machine rather than the model. Run `cbench gate --model <tag> --save` first.",
   "attestation": {
-    "accepted": true,
+    "accepted": false,
     "version": 1,
     "text": "(written by community-package)"
   },
-  "_attestation_comment": "Recorded by `--accept-terms` (or the TUI checkbox). You confirm you have the right to share these files, that they contain nothing confidential (having read the raw CSVs), that the recorded hardware and model tag are accurate, that you grant an Apache-2.0 licence to publish them, and that publication is permanent in git history."
+  "_attestation_comment": "Set by `--accept-terms` (or the TUI checkbox) once you have read the terms; validation refuses `false`. By accepting, you confirm that you have the right to share these files, that they contain nothing confidential (having read the raw CSVs), and that the recorded hardware and model tag are accurate. You also grant an Apache-2.0 licence to publish them, and accept that publication is permanent in git history."
 }

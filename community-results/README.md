@@ -1,248 +1,309 @@
 # Community-submitted results
 
-Not every model fits on every machine. If you can't run a model locally to
-score it yourself, someone who *can* run it may already have — or you can
-run one you have and share it for others who can't. This folder is where
-those results live: **raw trial CSVs, submitted via pull request, re-run
-through this framework's own scoring before anyone trusts the number.**
+Not every model fits on every machine. If you cannot run a model
+yourself, someone who can may already have shared results for it, and
+you can share results for the models you run. This folder holds those
+results: **raw trial CSVs, submitted by pull request and scored by each
+reader with this framework's own scoring before anyone relies on a
+number.**
 
 ## Why raw CSVs, not a submitted score
 
-A submitted "security score" with no data behind it can't be checked
-against anything — anyone could type in whatever number they want. A
-submitted CSV is the actual per-row output this framework's own suites
-produce, in the same format `cbench aggregate`/`cbench score` already
-know how to read. That means:
+A submitted score with no data behind it cannot be checked: anyone could
+type in any number. A submitted CSV is the per-row output that this
+framework's suites write, in the format `cbench aggregate` and
+`cbench score` read. As a result:
 
-- Anyone can re-run the exact same scoring code (`cbench score --model
-  <tag> --from-existing`) against the submitted CSVs and get the exact
-  same scorecard, independently of whoever submitted it.
-- Every guard this framework already has (task-set mismatch, CSV
-  schema-version mismatch, mismatched or unrecorded sampling across the
-  pooled CSVs, the positive/negative control-diagnostic checks) runs on a
-  submission exactly like it runs on your own local results — a bad or
-  incomparable submission gets flagged, not silently averaged in.
-- A submission's own `heuristic keyword/behaviour matching` results (S2,
-  S3) still say "read the transcript before treating this as confirmed",
-  same as they always have. Nothing about accepting community data changes
-  that discipline.
+- Anyone can run the same scoring code
+  (`cbench score --model <model-tag> --from-existing`) against the
+  submitted CSVs and get the same scorecard, independently of the
+  contributor.
+- Every validity guard the framework applies to your own results applies
+  to a submission in the same way: the task-set and CSV schema-version
+  checks, the checks for mixed or unrecorded sampling and generation
+  budgets across pooled CSVs, and the positive- and negative-control
+  diagnostics. An incomparable submission is flagged, not averaged in.
+- The S2 channel and S3 persistence suites use heuristic matching, so a
+  row they flag still needs its transcript read before it counts as
+  confirmed. Community data does not change that.
 
 ## The publication rule
 
 **Raw measurements travel. Verdicts do not.**
 
 A submission carries per-row CSVs and nothing else. It never carries a
-scorecard, a grade, or a claimed rate. `cbench community-validate`
-refuses a folder containing one, and refuses a `submission.json` that
-asserts a `grade`/`score`/`band`/`rate` field.
+scorecard, a grade or a claimed rate. `cbench community-validate`
+refuses any file whose path contains `scorecard` or `trial_summary`, in a
+folder name or a file name, and any `submission.json` that sets a `grade`,
+`score`, `band` or `rate` field.
 
-This repository is **not a leaderboard and will not become one.** There is
-no published table of "model X scores Y". Anyone who wants a grade
-computes it themselves, locally:
+This repository is **not a leaderboard and will not become one.** It
+publishes no table of model scores. Anyone who wants a grade computes it
+locally (the PowerShell form is under "How a maintainer reviews one"):
 
 ```bash
-OPENLLM_CBENCH_RESULTS_DIR=community-results/<tag>/<contributor>_<date> \
-  cbench score --model <tag> --from-existing
+OPENLLM_CBENCH_RESULTS_DIR=community-results/<model-tag>/<contributor>_<date> \
+  cbench score --model <model-tag> --from-existing
 ```
 
-Three reasons, and they are not stylistic:
+There are three reasons, and none of them is a matter of style:
 
 1. **A grade is a conclusion about a named commercial product; a CSV row
    is a measurement taken on one machine.** The first is an editorial
-   claim that can be wrong in public and cause real harm to a real
-   company. The second is a fact about what happened, permanently
-   qualified by the configuration recorded next to it. Only the second is
-   safe for a stranger to hand a maintainer, and only the second is
-   something a maintainer can honestly stand behind.
+   claim that can be wrong in public and harm a real company. The second
+   records what happened, permanently qualified by the configuration
+   recorded beside it. Only the second is safe for a stranger to hand a
+   maintainer, and only the second is something a maintainer can stand
+   behind.
 
-2. **Results are hardware-dependent in ways that can invert a verdict.**
-   This is not hypothetical. A 27.9B model on a 12GB card had every gate
-   check time out, and the report read `Tool call check failed` — which
-   sounds exactly like "this model cannot call tools". It could. The
-   machine was too small. A submission built from that run would have
-   published a false claim about a named product, in complete good faith,
-   generated by this framework's own tooling. That is why an incomplete
-   gate check now blocks packaging (see below).
+2. **Results depend on hardware in ways that can invert a verdict.** On a
+   12 GB card, every gate check of a 27.9B model timed out, and the
+   report read `Tool call check failed`, which reads as "this model
+   cannot call tools". The model could call tools; the machine was too
+   small. A submission built from that run would have published a false
+   claim about a named product, in good faith, produced by this
+   framework's own tooling. That is why validation refuses a submission
+   whose gate check did not complete (see the next section).
 
-3. **A grade discards the parts that make it defensible** — the
-   confidence interval, the caveats, the validity guards, the
-   "attempt, never success" framing. The nuance is the rigorous part. The
-   letter is the part that travels badly and gets quoted alone.
+3. **A grade discards what makes it defensible:** the confidence
+   interval, the caveats, the validity guards and the "attempt, never
+   success" framing. The nuance is the rigorous part; the letter is the
+   part that travels badly and gets quoted alone.
 
 ## What a submission must carry
 
-`cbench community-package` builds all of this for you.
+`cbench community-package` writes all of this for you.
 
-- **A completed gate check.** `cbench gate --model <tag> --save` must have
-  run and completed. A check that *timed out* is not a failed check, it is
-  an **absent** one — and rows produced on a machine that could not
+- **The required metadata.** `submission.json` needs non-empty `model`,
+  `contributor`, `date`, `hardware_summary` and `endpoint` fields, plus the
+  `gate_check` and `attestation` records described in the next two items.
+  Packaging fills the five fields from the tag, `--contributor` (or
+  `git config user.name`), the packaging date, a hardware probe and the
+  endpoint's `/api/version`. `date` is the day the submission was
+  packaged; each CSV row records when its own run started. Packaging also
+  records the optional `quant` (from your catalogue), `cbench_version` and
+  `notes` (your `--notes`). A required field it cannot detect, such as
+  `endpoint` when the endpoint is unreachable during packaging, stays
+  empty and fails validation until you fill it in.
+- **A completed gate check.** `cbench gate --model <model-tag> --save`
+  must have run to completion on the machine that produced the rows.
+  Packaging copies what your catalogue records into `gate_check`, and
+  validation refuses a submission with no gate check or with any check
+  that did not complete. A check that *timed out* is not a failed check
+  but an **absent** one, and rows produced on a machine that could not
   complete the checks may describe the machine rather than the model.
-  Packaging records what the gate found and refuses to validate if any
-  check did not complete. Slowness alone is fine: a model that spills into
-  system RAM still produces valid rows, it just takes longer.
+  Slowness alone is fine: a model that spills into system RAM still
+  produces valid rows, only more slowly.
 - **Contributor terms, explicitly accepted** (`--accept-terms`, or the
-  checkbox in the TUI). You confirm you have the right to share the files,
-  that they contain nothing confidential (having read the raw CSVs, not
-  just the summary), that the recorded hardware and model tag are
-  accurate, and you grant this project a licence to publish them under
-  the repository's own Apache-2.0 licence. You also acknowledge that
-  publication is **permanent**: git history keeps a file after deletion.
-- **A SHA-256 per CSV**, so corruption in transit or edits after review
-  are detectable, and a merged submission can be checked against what was
-  actually reviewed.
+  "Accept contributor terms" checkbox in the TUI). You confirm that you
+  have the right to share the files; that they contain no confidential,
+  personal or proprietary material, and that you have read the raw CSVs
+  and not only the summary; and that the recorded hardware, runtime and
+  model tag are accurate. You grant this project a perpetual, irrevocable
+  licence to publish and redistribute the files under the repository's
+  Apache-2.0 licence. You also acknowledge that the submission is raw
+  data claiming no score, and that publication is **permanent**: git
+  history keeps a file after it is deleted. Packaging prints the full
+  text. `attestation.accepted` is `false` until you package with
+  `--accept-terms`, and validation refuses a submission whose terms were
+  not accepted, or were accepted in an older version.
+- **A SHA-256 per CSV**, so that corruption in transit or an edit after
+  review is detectable, and a merged submission can be checked against
+  what was reviewed. A hand-assembled submission may omit these; see
+  "Folder layout".
 
 ## If you want something removed
 
-Open an issue, or contact the maintainer. Because submissions live in git
-history, removal means rewriting history rather than deleting a file — it
-is possible, it is not instant, and it needs a maintainer. Decide what you
-are comfortable publishing **before** you submit, not after: that is
-precisely why the packaging step prints the raw-output warning and makes
-you accept terms rather than burying them in a document.
+Open an issue or contact the maintainer. Submissions live in git history,
+so removal means rewriting history rather than deleting a file: it is
+possible, but it is not instant, and it needs a maintainer. Decide what
+you are comfortable publishing **before** you submit. That is why the
+packaging step prints the raw-output warning and asks you to accept the
+terms, rather than leaving them in a document.
 
-If you believe a submission misrepresents a model you are responsible for,
-say so in an issue with specifics. The raw CSVs are there so a disputed
-claim can be re-examined against the actual rows rather than argued about
-in the abstract — which is the other reason data travels and verdicts do
-not.
+If you believe a submission misrepresents a model you are responsible
+for, say so in an issue, with specifics. The raw CSVs let a disputed
+claim be re-examined against the actual rows rather than argued in the
+abstract, which is the other reason data travels and verdicts do not.
 
-## What it doesn't do
+## What it does not do
 
-This is a folder in a git repo, reviewed via pull request — **not** a
-hosted leaderboard, not a live-scoring service, and not an automatic
-trust mechanism. A merged submission means a maintainer looked at it
+This is a folder in a git repository, reviewed by pull request. It is
+**not** a hosted leaderboard, a live scoring service or an automatic
+trust mechanism. A merged submission means that a maintainer reviewed it
 (`cbench community-validate`, then a manual read of `submission.json`
-against the actual CSVs, then `cbench score --from-existing` to see the
-resulting scorecard) and judged it worth keeping on file — not that its
-numbers are independently verified true. Read the same caveats you'd read
-on your own results before citing anything from here.
+against the CSVs, then `cbench score --from-existing` to see the
+resulting scorecard) and judged it worth keeping on file. It does not
+mean that its numbers are independently verified. Apply the caveats you
+would apply to your own results before citing anything from here.
 
 ## Folder layout
 
 ```
 community-results/
-  <model-tag, sanitized>/
-    <your-handle>_<YYYYMMDD>/
-      submission.json          <- required, see SUBMISSION_TEMPLATE.json
-      s1_containment/          <- optional -- include whichever suites you ran
-        containment_<tag>_<timestamp>.csv
+  <model-tag>/
+    <contributor>_<YYYYMMDD>/
+      submission.json          <- required; see SUBMISSION_TEMPLATE.json
+      s1_containment/          <- include whichever suites you ran
+        containment_<model-tag>_<timestamp>.csv
       s2_channel/
-        channel_<tag>_<timestamp>.csv
+        channel_<model-tag>_<timestamp>.csv
       s3_persistence/
-        persistence_<tag>_<timestamp>.csv
+        persistence_<model-tag>_<timestamp>.csv
 ```
 
-`submission.json` may also carry a `checksums` key — `{relative CSV path:
+In folder and file names, `<model-tag>` stands for the model tag with
+`:` and `/` replaced by `-`, the transform
+(`scoring/aggregate.py:model_tag()`) the framework applies to every file
+name it writes: `gemma3:12b` becomes `gemma3-12b`. In a `--model`
+argument it is the tag itself, as recorded in the `model` field of
+`submission.json`. `<contributor>` is the `--contributor` value, or
+`git config user.name`, with spaces and `/` replaced by `-` (`anon` when
+neither is set, and validation then reports the empty `contributor`
+field), and the date is the day the folder was packaged.
+`cbench community-package` writes the folder under `./community-results`
+in the current directory; `--out` changes that root.
+
+Keep the CSV file names that `cbench containment`, `cbench channel` and
+`cbench persistence` gave them. `cbench community-validate` checks that
+each name contains the model tag from `submission.json`.
+
+`submission.json` may also carry a `checksums` key: `{relative CSV path:
 sha256}` for every CSV in the submission. `cbench community-package`
-fills this in for you; a hand-assembled submission can leave it out
-entirely (that's not an error, just unverifiable) but must not include a
-partial or stale one — `cbench community-validate` treats a checksum that
-doesn't match the file on disk, or a listed file that isn't there, as a
-real problem, same as any other shape mismatch.
+fills it in. A hand-assembled submission can leave it out entirely, which
+is not an error but leaves the files unverifiable. If the key is present,
+it must be complete and current: `cbench community-validate` reports a
+checksum that does not match the file on disk, a listed file that is
+missing, and a CSV that is present but not listed.
 
-`<model-tag, sanitized>` is the model tag with `:` and `/` replaced by
-`-` (the same transform `scoring/aggregate.py:model_tag()` already
-applies to every filename this framework writes) — e.g. `gemma3:12b`
-becomes `gemma3-12b`. The CSV filenames themselves are whatever
-`cbench containment`/`cbench channel`/`cbench persistence` already named
-them; don't rename them by hand, `cbench community-validate` checks that
-each one's filename actually contains the model tag from your
-`submission.json`.
-
-You don't need all three suites. A submission with just `s3_persistence/`
-is still useful — the scorecard will show the suites you didn't run as
-"not run", not as a failure.
+You do not need all three suites. A submission with only
+`s3_persistence/` is still useful: the scorecard shows the suites you did
+not run as "not run", not as failures.
 
 ## How to submit
 
-0. Gate-check the model first and save the result:
+1. Gate-check the model and save the result:
+
    ```bash
-   cbench gate --model <tag> --save
+   cbench gate --model <model-tag> --save
    ```
-   This is a prerequisite, not a nicety. Packaging refuses a submission
-   whose gate checks did not complete, because rows from a machine that
-   could not finish the checks may describe the machine rather than the
-   model — see "The publication rule" above for the real incident behind
-   this.
-1. Run whatever suites you can against your own local endpoint, the same
-   way you would for yourself: `cbench score --model <tag> --depth
-   standard` (or `cbench assess`, or the individual suites directly) is
-   this framework's own pre-registered 3-trial minimum for a rate worth
-   citing — fewer trials than that is still acceptable to submit, but say
-   so plainly, the same way this framework's own aggregate reports flag a
-   sub-3-trial result as "wider-uncertainty ... not a settled rate."
-2. ```bash
-   cbench community-package --model <tag> --accept-terms
+
+   This is a prerequisite. Validation refuses a submission whose gate
+   checks did not complete, for the reason given under "The publication
+   rule".
+
+2. Run the suites you can against your own local endpoint, as you would
+   for yourself. `cbench score --model <model-tag> --depth standard` runs
+   3 trials per suite, the framework's pre-registered minimum for a rate
+   worth citing; `cbench assess` and the individual suite commands also
+   work. You can submit fewer trials, but say so plainly: the framework's
+   own trial summaries call a rate from fewer than 3 trials "a
+   wider-uncertainty version of the single-shot number, not a settled
+   rate".
+
+3. Package the CSVs:
+
+   ```bash
+   cbench community-package --model <model-tag> --accept-terms
    ```
-   builds `community-results/<model-tag>/<your-handle>_<date>/` from the
-   CSVs step 1 just produced: it copies them (never rewrites or moves
-   them), fills in `submission.json` with whatever it can detect on its
-   own (hardware, the local endpoint's runtime version, quant, this
-   harness's own version — `--contributor`/`--notes` for the rest), and
-   records a SHA-256 per CSV. It prints exactly what, if anything, still
-   needs a hand-edit before the result is valid, and runs
-   `cbench community-validate` on the result for you. It uploads nothing.
 
-   Run it **without** `--accept-terms` first: it still builds the folder,
-   prints the contributor terms and the raw-output warning, and tells you
-   it will not validate until you have read both. Read the CSVs, then
-   re-run with the flag. In the TUI this is the "Accept contributor terms"
-   checkbox on the Share / validate results screen.
-3. ```bash
-   cbench community-submit community-results/<model-tag>/<your-handle>_<date>
+   This builds `community-results/<model-tag>/<contributor>_<date>/`
+   from the CSVs already on disk for that model. It copies them (never
+   moving or rewriting them), fills in `submission.json` with what it can
+   detect, records a SHA-256 per CSV and validates the result. It does not
+   refuse an invalid package: it builds the folder anyway, prints anything
+   that still needs a hand edit before the submission is valid, and exits
+   `1` while anything is left to fix. It uploads nothing. Add `--contributor <your-handle>` if
+   `git config user.name` is not the name you want on the submission, and
+   `--notes "<text>"` for anything a reviewer should know, such as a
+   `config_overrides` you needed or trials you excluded.
+
+   Run it without `--accept-terms` first. It still builds the folder,
+   prints the raw-output warning and the contributor terms, and reports
+   that the submission will not validate until you accept them. Read the
+   CSVs, then run it again with `--accept-terms`. Every run rewrites
+   `submission.json`, so keep `--accept-terms` on any later run,
+   including one that adds `--zip`.
+
+4. Open the pull request:
+
+   ```bash
+   cbench community-submit community-results/<model-tag>/<contributor>_<date>
    ```
-   opens that folder as a pull request through your own authenticated
-   `gh` (the GitHub CLI) — this framework never sees, stores, or
-   transmits a credential of yours. It previews the exact command
-   sequence and the reminder that these CSVs contain the model's raw
-   output, and sends nothing until you re-run it with `--confirm`.
-   Without `gh` installed and logged in, it prints the fallback by hand
-   instead:
-   - **fork-and-PR**, for anyone with git: clone your fork, copy the
-     packaged folder in at the path shown, `git add community-results &&
-     git commit && git push`, open the PR yourself.
-   - **attach-to-an-issue**, for anyone without git: re-run
-     `cbench community-package --model <tag> --zip` for an archive, then
-     open the prefilled issue URL it gives you and drag the zip on —
-     needs nothing but a GitHub account and a browser.
 
-   The TUI's community screen (Package / Validate / Submit buttons, a
-   "Confirm submit" checkbox that's the only thing that adds `--confirm`)
-   does the same three steps without a terminal.
-4. Whichever route you used, say in the PR (or issue) description what
-   model, what endpoint/runtime, and roughly what you saw — a maintainer
-   will run `cbench score --from-existing` on it regardless, but a
-   heads-up on what to expect speeds up review.
+   This validates the folder, refuses it if anything is wrong, and opens
+   it as a pull request through your own authenticated `gh` (the GitHub
+   CLI). The framework never sees, stores or transmits your credentials.
+   Without `--confirm` it prints the exact command sequence and the
+   raw-output reminder, and pushes nothing; run it again with `--confirm`
+   to submit. If `gh` is not installed or not logged in, it prints two
+   manual routes instead:
 
-If you'd rather not use either command, the folder layout above is exactly
-what they produce — you can still copy `SUBMISSION_TEMPLATE.json` and the
-CSVs from `results/s1_containment/` (etc) into place by hand and validate
-with `cbench community-validate` before opening the PR yourself. That's
-just the harder way to reach the same folder now.
+   - **Fork and pull request**, for anyone with git: fork the repository,
+     clone your fork, copy the packaged folder in at the path shown,
+     commit and push it, and open the pull request yourself.
+   - **Attach to an issue**, for anyone without git: run the packaging
+     command again with `--zip` added (keeping `--accept-terms`) to get
+     `<contributor>_<date>.zip` beside the folder, then open the
+     prefilled issue URL that `community-submit` printed and attach the
+     zip. This needs only a GitHub account and a browser.
+
+5. Whichever route you use, say in the pull request or issue which model
+   and runtime you used and roughly what you saw. A maintainer runs
+   `cbench score --from-existing` on it regardless, but knowing what to
+   expect speeds up review.
+
+The TUI's **Share / validate results** screen covers steps 3 and 4
+without a terminal. It has **Package**, **Validate** and **Submit**
+buttons; optional notes and contributor fields (a blank contributor
+means `git config user.name`); and three checkboxes, all off by default:
+"Also make a .zip", "Accept contributor terms", and "Confirm submit",
+which is the only thing that adds `--confirm`.
+
+If you would rather not use the commands, the folder layout above is
+exactly what they produce. Copy `SUBMISSION_TEMPLATE.json` to
+`submission.json` and fill it in, copy the CSVs from the
+`s1_containment/`, `s2_channel/` and `s3_persistence/` folders in your
+results folder into place, and run `cbench community-validate` before
+opening the pull request yourself. Validation applies the same rules to
+a hand-assembled submission, including the `gate_check` and
+`attestation` records.
 
 ## How a maintainer reviews one
 
-```
-cbench community-validate community-results/<model-tag>/<handle>_<date>
+```bash
+cbench community-validate community-results/<model-tag>/<contributor>_<date>
 ```
 
-checks the submission is shaped correctly (required `submission.json`
-fields present, CSVs present and tagged for the claimed model, and — when
-a `checksums` manifest is present — that every listed CSV is still
-byte-identical to what was packaged) — see `core/community.py`. A missing
-manifest is not itself a problem; a mismatched or incomplete one is. This
-command does **not** run any suite or judge whether the numbers are
-believable; that's the next step:
+This checks that the submission is shaped correctly and follows the
+publication rule: the required `submission.json` fields are present, the
+CSVs are present and named for the claimed model, a `checksums` manifest
+(if there is one) matches the files, no verdict file or result field is
+present, the gate check completed, and the terms were accepted (see
+`core/community.py`). A missing manifest is not a problem in itself; a
+mismatched or incomplete one is. The command does **not** run a suite or
+judge whether the numbers are believable. That is the next step:
 
+```bash
+# bash or zsh
+OPENLLM_CBENCH_RESULTS_DIR=community-results/<model-tag>/<contributor>_<date> \
+  cbench score --model <model-tag> --from-existing
 ```
-# bash/zsh
-OPENLLM_CBENCH_RESULTS_DIR=community-results/<model-tag>/<handle>_<date> \
-  cbench score --model <tag> --from-existing
 
+```powershell
 # PowerShell
-$env:OPENLLM_CBENCH_RESULTS_DIR = "community-results/<model-tag>/<handle>_<date>"
-cbench score --model <tag> --from-existing
+$env:OPENLLM_CBENCH_RESULTS_DIR = "community-results/<model-tag>/<contributor>_<date>"
+cbench score --model <model-tag> --from-existing
 ```
 
-This produces the exact same scorecard `cbench score` would for a local
-run — read it the same way, caveats and all, before merging.
+Use the `model` field from `submission.json` as the `--model` value, and
+set the variable before `cbench score` starts: `score` has no
+`--results-dir` flag. The result is the same scorecard `cbench score`
+produces for a local run. Read it the same way, caveats included, before
+merging.
+
+`cbench score` saves its scorecard in the results folder, which here is
+the submission itself: it writes `scorecards/<model-tag>.json` and
+`scorecards/<model-tag>.md` beside the CSVs. A submission carries no
+verdicts, so `cbench community-validate` refuses a folder that contains
+them. Delete that `scorecards/` folder before merging, and re-validate.

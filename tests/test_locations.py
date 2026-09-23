@@ -139,3 +139,7 @@ def test_doctor_reports_both_halves_without_an_endpoint(tmp_path):
     assert "Traceback" not in result.stdout + result.stderr
     assert "\nOllama:\n" in result.stdout and "\ncbench:\n" in result.stdout
     assert "model storage:" in result.stdout
+    # It pointed an installed copy at a source-tree path that only exists in
+    # a clone; the command that lists catalogue entries works everywhere.
+    assert "verified.json" not in result.stdout
+    assert "`cbench catalogue`" in result.stdout

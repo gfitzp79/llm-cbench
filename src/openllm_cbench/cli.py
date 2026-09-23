@@ -92,9 +92,10 @@ def _cmd_doctor(argv):
 
     registry = load_registry()
     n = len(registry.get("models", {}))
-    print(f"\nVerified-model registry: {n} model(s) gate-checked and on file.")
-    print("  Run `cbench gate --model <tag>` on any model before a real run, "
-          "or check `src/openllm_cbench/data/models/verified.json` for existing entries.")
+    print(f"\nModel catalogue: {n} model(s) on file, from the catalogue that ships with "
+          "cbench and any saved with `cbench gate --save`.")
+    print("  `cbench catalogue` shows which of your models have an entry. "
+          "Run `cbench gate --model <tag>` on any model before a real run.")
 
     print("\nDone. This command calls no model and writes nothing. Its only requests go to the "
           "endpoint above (reachability, version, model list); everything local is read-only.")

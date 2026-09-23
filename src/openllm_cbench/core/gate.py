@@ -656,7 +656,7 @@ def render_gate_report(result):
 
     L += ["", "## Result", ""]
     if result["clean"]:
-        L.append("**Clean.** No caveats found. Safe to add to your own verified-model registry.")
+        L.append("**Clean.** No caveats found. Safe to add to your catalogue.")
     else:
         L.append("**Caveats found (read before trusting a real run against this model):**")
         for c in result["caveats"]:

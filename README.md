@@ -81,6 +81,12 @@ talks to the endpoint reads. `--endpoint` overrides it on `doctor`, `gate`,
 and read the environment variable only. The package is not on PyPI, so
 install it from GitHub.
 
+**Keep Ollama on loopback.** Ollama has no authentication, so a server that
+listens on the network (`OLLAMA_HOST=0.0.0.0`, or "Expose Ollama to the
+network" in the Ollama app) lets anyone who can reach it use your models and
+GPU, and delete models. `cbench doctor` warns when it does. See
+[Securing the model endpoint](SECURITY.md#securing-the-model-endpoint).
+
 To install it with the terminal UI:
 
 ```bash
@@ -133,7 +139,8 @@ because the platform default can exist, be empty and be wrong: a folder
 chosen in the Ollama app's settings is not an environment variable any
 other process can see. For an endpoint on this machine, `cbench doctor`
 also warns when the server listens beyond loopback (`OLLAMA_HOST` set to
-`0.0.0.0` or a LAN address), because Ollama has no authentication.
+`0.0.0.0` or a LAN address), because Ollama has no authentication; see
+[Securing the model endpoint](SECURITY.md#securing-the-model-endpoint).
 
 Resolution order, most specific first:
 
@@ -387,7 +394,7 @@ spending anything, they run a gate check of their own (the pre-flight) and
 the reason, and the narrowed command that runs the rest:
 
 ```
-[!] NOT STARTING -- S2 channel cannot produce a gradeable result on this model.
+[!] NOT STARTING: S2 channel cannot produce a gradeable result on this model.
     Running it would spend the full time and score INVALID, which is a missing
     measurement rather than a finding. See the reasons above.
 
@@ -449,7 +456,7 @@ three exact equality checks:
   `num_predict` disagree on them.
 
 When any check fires, that suite's trial summary carries a
-`STOP -- THESE RUNS ARE NOT COMPARABLE` block, and `cbench score` reports
+`STOP: THESE RUNS ARE NOT COMPARABLE` block, and `cbench score` reports
 the suite `INVALID` and excludes it from the grade. A results folder that
 mixes CSVs from before and after sampling was recorded therefore produces
 an `INVALID` suite rather than a grade. The fix is the same in every case:

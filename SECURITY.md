@@ -48,6 +48,42 @@ intended use and how to report a problem.
   tool, a CLI with a terminal UI. It has not been reviewed for use as a
   shared service, and that use is not supported.
 
+## Securing the model endpoint
+
+cbench measures the model; it does not secure the server that runs it. On a
+machine running this tool, the most likely exposure is the Ollama server
+itself, so check it before anything else.
+
+**Ollama has no authentication.** Anyone who can reach its port can use it
+with no credentials. By default Ollama listens only on loopback
+(`127.0.0.1:11434`), which only this machine can reach. It listens on every
+network interface when `OLLAMA_HOST` is set to `0.0.0.0` (or to a LAN
+address), or when "Expose Ollama to the network" is turned on in the Ollama
+app's settings. Any device on the same network, and anything that can route
+to it, can then use the server.
+
+What an exposed server gives away:
+
+- **Your compute.** Anyone on the network can run inference on your GPU.
+- **Your models.** The API can pull and delete models (`/api/pull`,
+  `/api/delete`), so someone else can fill your disk or remove what you have.
+- **Your test traffic.** cbench's prompts, sandbox fixtures and the model's
+  replies travel over plain HTTP. On loopback that traffic never leaves the
+  machine; across a network, anyone on the path can read it.
+
+What to do:
+
+1. Run `cbench doctor`. For an endpoint on this machine, it reads the
+   running server's own startup log and warns when the server listens beyond
+   loopback.
+2. Unless you need remote access, keep Ollama on loopback: turn off "Expose
+   Ollama to the network" in the Ollama app, or set `OLLAMA_HOST=127.0.0.1`
+   and restart Ollama.
+3. If you do need Ollama on a network, put it behind something that
+   authenticates, such as a reverse proxy with authentication, a VPN or an SSH
+   tunnel, and restrict the port with a firewall. Point cbench at the endpoint
+   through that route, which also gives its traffic encryption.
+
 ## Intended use
 
 Run the framework against models you are testing, on infrastructure you

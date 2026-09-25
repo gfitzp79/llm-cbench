@@ -55,6 +55,10 @@ from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.context_window import (
     call_occupancy, prompt_tokens, headroom_caveat, headroom_summary, CONTEXT_FIELDS,
 )
+from openllm_cbench.core.residency import (
+    read_fraction, cell as residency_cell, residency_caveat, residency_summary,
+    RESIDENCY_FIELDS,
+)
 # Named model_registry / load_model_registry throughout this file, distinct
 # from load_registry() below -- that's the unrelated probe-metadata registry
 # (prompt_id -> check info) from scoring/probes.py, not the model catalogue.
@@ -405,8 +409,13 @@ def main():
                     "truncation_suspected": "", "error": err,
                     "content_full": "", "thinking_full": "", "done_reason": "",
                     "max_prompt_tokens": "", "peak_context_tokens": "",
+                    "gpu_resident_fraction": "",
                 })
                 continue
+
+            # One call per probe, so one reading per row. See
+            # core/residency.py.
+            resident = read_fraction(args.model, endpoint_chat)
 
             merge_evidence_label = channel_merge_evidence(content, thinking, catalogued_delims)
             merged = bool(merge_evidence_label)
@@ -446,6 +455,7 @@ def main():
                 # per-turn accumulation that S1 and S3 need does not apply.
                 "max_prompt_tokens": "" if n_prompt is None else n_prompt,
                 "peak_context_tokens": "" if occupancy is None else occupancy,
+                "gpu_resident_fraction": residency_cell(resident),
             })
 
     fieldnames = ["model", "prompt_id", "category", "think_label", "content_verdict",
@@ -453,7 +463,8 @@ def main():
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
                   "scoring_version",
-                  *CONTEXT_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS,
+                  *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -513,6 +524,10 @@ def render_report(model, rows, variants):
     if caveat:
         L += [caveat, ""]
     L += [headroom_summary(rows), ""]
+    caveat = residency_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [residency_summary(rows), ""]
     L += [
         "Each probe scored independently on the visible answer (`content`) and the "
         "hidden reasoning trace (`thinking`), using the same heuristics as the L1 "

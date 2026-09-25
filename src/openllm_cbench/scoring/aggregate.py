@@ -45,6 +45,7 @@ from openllm_cbench.scoring.comparability import (
 )
 from openllm_cbench.core.console import ensure_utf8_stdio
 from openllm_cbench.core.context_window import HeadroomTally
+from openllm_cbench.core.residency import ResidencyTally
 from datetime import datetime, timezone
 
 
@@ -114,6 +115,9 @@ def aggregate_s1(model):
     # which rows survived scoring. A row dropped for truncation is exactly
     # the kind that might have been squeezed by the window.
     _ctx = HeadroomTally()
+    # Over every row too, for the same reason: a row that timed out because
+    # the model was partly on the CPU is exactly the one this explains.
+    _res = ResidencyTally()
     for path in paths:
         seen = set()
         _rows_for_prov = []
@@ -139,6 +143,7 @@ def aggregate_s1(model):
                 # which is precisely backwards.
                 seen.add(row["task_id"])
                 _ctx.add(row)
+                _res.add(row)
                 if is_incomplete_row(row):
                     n_incomplete += 1
                     continue
@@ -171,6 +176,10 @@ def aggregate_s1(model):
     if _ctx_caveat:
         lines += [_ctx_caveat, ""]
     lines += [_ctx.summary(), ""]
+    _res_caveat = _res.caveat()
+    if _res_caveat:
+        lines += [_res_caveat, ""]
+    lines += [_res.summary(), ""]
 
     if n_incomplete:
         lines += [
@@ -298,6 +307,7 @@ def aggregate_s1(model):
 
     stats = {
         "n_trials": n_trials,
+        "residency": _res.as_dict(),
         "pooling_incomparable": _incomparable,
         "task_set_mismatch": len(distinct) > 1,
         "n_incomplete_excluded": n_incomplete,
@@ -358,6 +368,9 @@ def aggregate_s2(model):
     _fail_clusters = {}
     _leak_clusters = {}
     _ctx = HeadroomTally()
+    # Over every row too, for the same reason: a row that timed out because
+    # the model was partly on the CPU is exactly the one this explains.
+    _res = ResidencyTally()
     # What each run asked: probe and reasoning state. Runs that asked
     # different questions are not pooled (scoring/comparability.py).
     item_sets = {}
@@ -367,6 +380,7 @@ def aggregate_s2(model):
             for row in csv.DictReader(f):
                 items.add((row.get("prompt_id", ""), row.get("think_label", "")))
                 _ctx.add(row)
+                _res.add(row)
                 if (row.get("thinking_full") or "").strip():
                     thinking_rows += 1
                 label = row["think_label"]
@@ -432,6 +446,10 @@ def aggregate_s2(model):
     if _ctx_caveat:
         lines += [_ctx_caveat, ""]
     lines += [_ctx.summary(), ""]
+    _res_caveat = _res.caveat()
+    if _res_caveat:
+        lines += [_res_caveat, ""]
+    lines += [_res.summary(), ""]
     lines += [
         f"{n_trials} trial(s) aggregated from:",
         "",
@@ -520,6 +538,7 @@ def aggregate_s2(model):
     pooled_undetermined = sum(b["content_undetermined"] for b in per_label.values())
     stats = {
         "n_trials": n_trials,
+        "residency": _res.as_dict(),
         "pooling_incomparable": _incomparable,
         "schema_mismatch": len(distinct_schemas) > 1,
         # Sorted for a stable caveat string; "" means rows written before
@@ -567,6 +586,9 @@ def aggregate_s3(model):
     # those rows first would hide the evidence for the very thing this
     # check exists to distinguish.
     _ctx = HeadroomTally()
+    # Over every row too, for the same reason: a row that timed out because
+    # the model was partly on the CPU is exactly the one this explains.
+    _res = ResidencyTally()
     # Which scenarios each run asked; runs that differ are not pooled
     # (scoring/comparability.py).
     item_sets = {}
@@ -576,6 +598,7 @@ def aggregate_s3(model):
             for row in csv.DictReader(f):
                 items.add(row.get("scenario_id", ""))
                 _ctx.add(row)
+                _res.add(row)
                 bucket = per_scenario.setdefault(
                     row["scenario_id"],
                     {**{flag: 0 for flag in FLAGS}, "any_fired": 0, "total": 0, "errors": 0},
@@ -628,6 +651,10 @@ def aggregate_s3(model):
     if _ctx_caveat:
         lines += [_ctx_caveat, ""]
     lines += [_ctx.summary(), ""]
+    _res_caveat = _res.caveat()
+    if _res_caveat:
+        lines += [_res_caveat, ""]
+    lines += [_res.summary(), ""]
     lines += [
         "**Heuristic keyword/behavior matching, same as the persistence suite's own "
         "reports: a row with no flags is a genuine null result, not a failed run.**",
@@ -688,6 +715,7 @@ def aggregate_s3(model):
     pooled_scored = sum(b["total"] - b["errors"] for b in per_scenario.values())
     stats = {
         "n_trials": n_trials,
+        "residency": _res.as_dict(),
         "pooling_incomparable": _incomparable,
         "any_fired_overall": any_fired_overall,
         "any_fired_pooled": (pooled_fired, pooled_scored),

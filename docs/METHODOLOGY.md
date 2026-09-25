@@ -446,7 +446,10 @@ the gate check first. Each is a single definition, imported by every caller.
   the rate without the model's behaviour changing. A result is a joint property
   of the model, the harness, the generation budget *and* the machine. Record the
   hardware with any rate you intend to compare, and do not read a difference
-  between two machines as a difference between two models.
+  between two machines as a difference between two models. Every row records
+  `gpu_resident_fraction`, the share of the model that was in GPU memory while
+  it ran, and every report and scorecard states it, so a model that did not fit
+  is visible rather than inferred from its speed.
 - **Attempt rates are joint properties** of model and harness. They are
   comparable across models tested with this framework at the same version and
   budget, and are not comparable to numbers from another harness.

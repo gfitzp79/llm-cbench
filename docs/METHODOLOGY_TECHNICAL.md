@@ -519,6 +519,25 @@ Two columns are needed, and neither substitutes for the other:
 S1 row measured 300 prompt tokens against 812 occupied; recording only the
 prompt would have understated the window's use by 63%.
 
+**GPU residency is recorded for the same reason: a model that does not fit
+fails silently too.** The server runs the remainder on the CPU and the reply
+says nothing; the slower requests time out or stop early and leave the rates.
+Every suite records `gpu_resident_fraction` per row: `size_vram / size` for the
+model in Ollama's `/api/ps`, read after every successful model call and reduced
+to the lowest reading in the row, so an eviction and reload part-way through a
+row is caught. The size includes the context cache, so the figure answers for
+the budget the run actually used. It is measured by bytes rather than inferred
+from speed, because a mixture-of-experts model computes only its active experts
+for each token and can generate quickly with much of itself on the CPU.
+Measured live on a 12 GB card, `gpt-oss:20b` recorded 0.7142 on every row,
+matching the server's own `ollama ps` report of 29% CPU and 71% GPU. A failed
+read never fails a run: it leaves the cell blank, and blank means not measured.
+The column is recorded, not scored. A row below full adds a caveat to its suite
+and a sentence to the scorecard's hardware section, and changes no rate. The
+scorecard counts residency over every row it read, including suites refused by
+their own validity guard, because a model that did not fit is a common reason a
+suite runs short of usable rows.
+
 **What remains your responsibility:** two runs straddling a harness fix that
 changed what an existing column means, a mismatched turn budget, and a CSV that
 predates the budget columns pooled with one that records them. Section 3.5 of
@@ -644,6 +663,7 @@ its full complement.
 | server errors | failed requests are excluded from every rate and counted, and the suite run exits 1; if failures concentrate on particular tasks, the remaining rate over-represents the tasks that completed, so the direction of bias depends on which rows fail |
 | turn budget not recorded per row | the aggregate applies the S1 INCOMPLETE turn-budget test at the default `max_turns` (6), so a run at a non-default turn budget can report a different rate in its single-run report than in the aggregate |
 | harness-joint rates | comparable within this framework, at one version, only |
+| GPU residency read from Ollama | an endpoint that does not report model sizes leaves the column blank (not measured); on unified-memory machines the figure has not yet been checked against the platform's own reporting |
 | transform-dependent probes | measure the transform, not the attack; **biases grades up** |
 | probes no model ever fails | consume a cluster and dilute the rate; **biases grades up** |
 | English-only verdict vocabulary | a non-English answer is unadjudicable, and says so |

@@ -52,6 +52,10 @@ from openllm_cbench.core.context_window import (
     call_occupancy, prompt_tokens, peak as peak_tokens,
     headroom_caveat, headroom_summary, CONTEXT_FIELDS,
 )
+from openllm_cbench.core.residency import (
+    read_fraction, lowest as lowest_residency, cell as residency_cell,
+    residency_caveat, residency_summary, RESIDENCY_FIELDS,
+)
 from openllm_cbench.core.runclock import (
     run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
 )
@@ -261,6 +265,9 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # alone cannot answer the second, or the occupancy the first.
     occupancies = []
     prompt_counts = []
+    # Share of the model in GPU memory after each call; the row keeps the
+    # lowest. See core/residency.py.
+    residencies = []
 
     messages = [{"role": "user", "content": scenario["task_prompt"]}]
 
@@ -280,6 +287,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
 
         occupancies.append(call_occupancy(data))
         prompt_counts.append(prompt_tokens(data))
+        residencies.append(read_fraction(model, endpoint))
         msg = data.get("message", {})
         messages.append(msg)
         tool_calls = msg.get("tool_calls") or []
@@ -314,6 +322,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
 
     occupancies.append(call_occupancy(data))
     prompt_counts.append(prompt_tokens(data))
+    residencies.append(read_fraction(model, endpoint))
     challenge_done_reason = data.get("done_reason", "")
     msg = data.get("message", {})
     messages.append(msg)
@@ -368,6 +377,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
             data2 = resp.json()
             occupancies.append(call_occupancy(data2))
             prompt_counts.append(prompt_tokens(data2))
+            residencies.append(read_fraction(model, endpoint))
             challenge_response = data2.get("message", {}).get("content", "") or ""
             challenge_done_reason = data2.get("done_reason", "")
         except Exception:
@@ -384,6 +394,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         "challenge_done_reason": challenge_done_reason,
         "max_prompt_tokens": peak_tokens(prompt_counts),
         "peak_context_tokens": peak_tokens(occupancies),
+        "gpu_resident_fraction": residency_cell(lowest_residency(residencies)),
     }
 
 
@@ -499,6 +510,7 @@ def main():
                 "fresh_identity_flag": "", "log_before_challenge": "", "log_after": "",
                 "challenge_response": "", "challenge_done_reason": "",
                 "max_prompt_tokens": "", "peak_context_tokens": "",
+                "gpu_resident_fraction": "",
             })
             continue
 
@@ -527,12 +539,14 @@ def main():
             "challenge_done_reason": result.get("challenge_done_reason", ""),
             "max_prompt_tokens": result.get("max_prompt_tokens") or "",
             "peak_context_tokens": result.get("peak_context_tokens") or "",
+            "gpu_resident_fraction": result.get("gpu_resident_fraction", ""),
         })
 
     fieldnames = ["model", "scenario_id", "error", "log_rewrite", "log_append_correction",
                   "denial_flag", "fresh_identity_flag", "log_before_challenge", "log_after",
                   "rewrite_detail", "challenge_response", "challenge_done_reason",
-                  *CONTEXT_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS, *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS,
+                  *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -575,6 +589,10 @@ def render_report(model, rows):
     if caveat:
         L += [caveat, ""]
     L += [headroom_summary(rows), ""]
+    caveat = residency_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [residency_summary(rows), ""]
     L += [
         "**Heuristic keyword/behavior matching: every non-clean verdict below is "
         "REVIEW, meant to be read manually before it's cited. A row with no flags "

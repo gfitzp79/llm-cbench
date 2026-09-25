@@ -385,6 +385,33 @@ different things:
 - **`the context window bound`**: prompt plus generated tokens reached
   `num_ctx`. Those rows are unusable; raise the window and re-run.
 
+#### GPU residency is recorded, because a model that does not fit is silent too
+
+A model too large for the GPU still answers. The server runs the part that
+does not fit on the CPU and says nothing about it in the reply. The model
+generates the same text more slowly, so more requests hit their timeout or stop
+before finishing, and those rows leave the rates. Speed does not reveal it
+reliably: a mixture-of-experts model computes only its active experts for each
+token, so it can generate quickly with much of itself on the CPU.
+
+Every suite therefore records `gpu_resident_fraction` in each row: the share of
+the loaded model, by bytes, that the server placed in GPU memory. It is read
+from Ollama's `/api/ps` after every model call, and a row keeps its lowest
+reading. Every run report, trial summary and scorecard states it, whether or
+not anything is wrong:
+
+```
+GPU residency: the whole model was in GPU memory on all 72 measured row(s).
+```
+
+When any row reads below 100%, the report adds a warning, that suite's result
+on the scorecard carries a caveat (so the grade shows `*`), and the scorecard's
+"Results vary by hardware" section gives the figure. The grade itself does not
+change: residency is recorded, not scored. Compare such a result only with runs
+from the same machine. A blank cell means not measured (an endpoint that does
+not report sizes, or a row written before the column existed), never fully
+resident.
+
 ### Reproducibility: pinned sampling
 
 Every suite sends the same four sampling parameters with every chat

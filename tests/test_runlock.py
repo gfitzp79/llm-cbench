@@ -4,6 +4,7 @@ No model, no network, no GPU. Cross-platform: these run unchanged on Windows
 and POSIX, which matters because the liveness and process-listing code paths
 are platform-specific by necessity.
 """
+import json
 import os
 import subprocess
 import sys
@@ -132,6 +133,58 @@ def test_idle_machine_reads_as_idle():
     hits = live_runners(patterns=("__definitely_not_running__",))
     assert hits != UNKNOWN
     assert hits == []
+
+
+# The child asks the preflight; the marker reaches it as an argument, so its
+# own command line matches and must be excluded as self.
+_ASK = (
+    "import json, sys\n"
+    "from openllm_cbench.core.runlock import UNKNOWN, live_runners\n"
+    "hits = live_runners(patterns=(sys.argv[1],))\n"
+    "print(json.dumps('UNKNOWN' if hits == UNKNOWN else [p for p, _ in hits]))\n"
+)
+# The parent stands in for a launcher: its command line carries the marker
+# too, and it waits for the child, exactly as a Windows venv's
+# Scripts\python.exe waits for the real interpreter it started. ONE line,
+# with the marker ahead of the child's code: the process listing yields one
+# command line per output line, so a marker after a multi-line argument
+# would never be matched, and the test would pass without the fix. (It did,
+# first time; a real launcher's command line is a single line.)
+_LAUNCH = ("import subprocess, sys; "
+           "out = subprocess.run([sys.executable, '-c', sys.argv[2], sys.argv[1]], "
+           "capture_output=True, text=True); "
+           "sys.stdout.write(out.stdout); sys.stderr.write(out.stderr)")
+
+
+@pytest.mark.real_process_table
+def test_a_run_ignores_its_own_launcher_but_still_sees_a_second_run():
+    """Found live: every `cbench score` from a Windows virtual environment
+    refused to start, naming its own launcher (`.venv\\Scripts\\python.exe`,
+    whose command line is the run's own) as the live run. Real processes,
+    no mock: a launcher-shaped parent must not count, and an unrelated
+    second run started beside it still must."""
+    marker = "openllm_cbench.suites.persistence"
+    second = subprocess.Popen(
+        [sys.executable, "-c", f"import time  # {marker}\ntime.sleep(30)"])
+    try:
+        seen, launcher_pid = [], None
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            launcher = subprocess.Popen([sys.executable, "-c", _LAUNCH, marker, _ASK],
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        text=True)
+            out, err = launcher.communicate(timeout=60)
+            launcher_pid = launcher.pid
+            seen = json.loads(out.strip().splitlines()[-1])
+            assert seen != "UNKNOWN", err
+            if second.pid in seen:
+                break
+            time.sleep(0.5)
+        assert second.pid in seen, (seen, second.pid)
+        assert launcher_pid not in seen, "a run must not detect the launcher above it"
+    finally:
+        second.terminate()
+        second.wait(timeout=10)
 
 
 def test_unverifiable_preflight_refuses_by_default(lockdir, monkeypatch):

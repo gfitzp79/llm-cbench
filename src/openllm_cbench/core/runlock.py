@@ -124,6 +124,26 @@ def parent_pid() -> int:
     """
     if os.name != "nt":
         return os.getppid()
+    return _parent_map().get(os.getpid(), 0)
+
+
+def _parent_map():
+    """{pid: parent pid} for every process on the machine, or {} when the
+    process list cannot be read. Windows reads the toolhelp snapshot (pure
+    ctypes, the same pid space `pid_alive()` uses); POSIX asks `ps`."""
+    if os.name != "nt":
+        try:
+            out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True,
+                                 text=True, timeout=30)
+        except Exception:
+            return {}
+        parents = {}
+        for line in (out.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                parents[int(parts[0])] = int(parts[1])
+        return parents
+
     TH32CS_SNAPPROCESS = 0x00000002
 
     class PROCESSENTRY32(ctypes.Structure):
@@ -139,22 +159,52 @@ def parent_pid() -> int:
                     ("szExeFile", ctypes.c_char * 260)]
 
     k32 = ctypes.windll.kernel32
-    me = os.getpid()
     snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if snap == -1:
-        return 0
+        return {}
+    parents = {}
     try:
         e = PROCESSENTRY32()
         e.dwSize = ctypes.sizeof(PROCESSENTRY32)
         if not k32.Process32First(snap, ctypes.byref(e)):
-            return 0
+            return {}
         while True:
-            if e.th32ProcessID == me:
-                return int(e.th32ParentProcessID)
+            parents[int(e.th32ProcessID)] = int(e.th32ParentProcessID)
             if not k32.Process32Next(snap, ctypes.byref(e)):
-                return 0
+                break
     finally:
         k32.CloseHandle(snap)
+    return parents
+
+
+def ancestor_pids(pid=None, limit=32):
+    """The chain of processes above `pid` (default: this one), nearest first.
+
+    WHY THE PREFLIGHT NEEDS THIS. Excluding only `os.getpid()` is not enough
+    to stop a run detecting ITSELF. In a virtual environment on Windows,
+    `.venv\\Scripts\\python.exe` is a launcher that starts the real
+    interpreter as a child process and waits: `cbench score` from a venv is
+    a launcher process whose command line reads `... cbench.exe" score ...`
+    with the real interpreter underneath it. The launcher matches the runner
+    patterns and is not `os.getpid()`, so every score from a Windows venv
+    refused to start, naming its own launcher as the live run. Measured: the
+    interpreter's parent was the venv's `Scripts\\python.exe`, command line
+    and all.
+
+    An ancestor is always part of the same run (a launcher, the TUI that
+    started it, a batch script), never a second one, so excluding the chain
+    cannot hide a contending run. A PID reused after a parent exited could
+    in principle be skipped; the lock directory still refuses such a run,
+    because a real second run holds it."""
+    parents = _parent_map()
+    chain, current = [], os.getpid() if pid is None else pid
+    for _ in range(limit):
+        parent = parents.get(current)
+        if not parent or parent == current or parent in chain:
+            break
+        chain.append(parent)
+        current = parent
+    return chain
 
 
 def pid_alive(pid: int) -> bool:
@@ -209,8 +259,11 @@ def live_runners(patterns=RUNNER_PATTERNS, exclude_pids=()):
 
     Returning UNKNOWN rather than [] when the probe fails is the other half of
     the same principle: a check that cannot run must not report success.
+
+    This process AND its ancestors are excluded: see `ancestor_pids()` for
+    the venv launcher that made every Windows venv run detect itself.
     """
-    exclude = {os.getpid()} | set(exclude_pids)
+    exclude = {os.getpid()} | set(ancestor_pids()) | set(exclude_pids)
     try:
         if os.name == "nt":
             ps = (

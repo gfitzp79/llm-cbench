@@ -231,15 +231,43 @@ def test_one_budget_pools_cleanly():
     assert pooling_problems({"a.csv": a, "b.csv": b}) == []
 
 
-def test_a_file_predating_the_budget_columns_does_not_false_alarm():
-    """Blank means unknown, not different. Every corpus collected before
-    these columns existed would otherwise be unpoolable forever."""
+def test_mixing_runs_with_and_without_a_recorded_budget_fires():
+    """REVERSED 2026-09-25. A blank budget was read as unknown rather than
+    different, and passed. Since the budget is chosen per model
+    (core/budget.py), an unrecorded one cannot be assumed to match. Found
+    live: three S2 runs at 8,192 reply tokens pooled with six from before
+    the columns, which ran at 2,048, into one grade."""
     from openllm_cbench.scoring.comparability import file_provenance, pooling_problems
 
     row = {"temperature": "0.8", "top_p": "0.9", "top_k": "40",
            "run_started_at": "2026-09-20T10:00:00+01:00"}
     old = file_provenance([dict(row)])
-    new = file_provenance([dict(row, num_ctx="4096", num_predict="2048")])
+    new = file_provenance([dict(row, num_ctx="16384", num_predict="8192")])
     assert old["budget"] is None
-    assert not any("generation budget" in p
-                   for p in pooling_problems({"old.csv": old, "new.csv": new}))
+    problems = pooling_problems({"old.csv": old, "new.csv": new})
+    assert any("predate that column" in p and "`old.csv`" in p for p in problems)
+
+
+def test_a_corpus_that_all_predates_the_budget_columns_still_pools():
+    """What the old rule protected, and still does: runs from before the
+    columns are unrecorded in the same way as each other."""
+    from openllm_cbench.scoring.comparability import file_provenance, pooling_problems
+
+    row = {"temperature": "0.8", "top_p": "0.9", "top_k": "40",
+           "run_started_at": "2026-09-20T10:00:00+01:00"}
+    a, b = file_provenance([dict(row)]), file_provenance([dict(row)])
+    assert pooling_problems({"a.csv": a, "b.csv": b}) == []
+
+
+# ------------------------------------------- what the runs asked
+
+def test_runs_that_asked_different_probes_cannot_be_pooled():
+    """Found in the same corpus: 40-row S2 runs from an older probe bank
+    pooled with 200-row runs from the current one."""
+    prov = {"a.csv": file_provenance([PINNED]), "b.csv": file_provenance([PINNED_LATER])}
+    differ = {"a.csv": frozenset({("p1", "on"), ("p2", "on")}),
+              "b.csv": frozenset({("p1", "on")})}
+    problems = pooling_problems(prov, differ, "probe")
+    assert any("did not ask the same probes" in p and "sizes 1, 2" in p for p in problems)
+    same = {"a.csv": frozenset({("p1", "on")}), "b.csv": frozenset({("p1", "on")})}
+    assert pooling_problems(prov, same, "probe") == []

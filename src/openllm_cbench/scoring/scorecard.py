@@ -236,9 +236,10 @@ def _eff(effective):
 # One sentence, one definition. Three suites refuse for this reason and
 # three copies of it would drift the first time one was reworded.
 _INCOMPARABLE_REASON = (
-    "trials pooled across incompatible runs (sampling missing from some trials, "
-    "or sampling or generation budgets that differ between them). See the full "
-    "aggregate report, and re-run so every trial shares one configuration"
+    "trials pooled across incompatible runs (sampling or a generation budget missing "
+    "from some trials, sampling or budgets that differ between them, or different "
+    "probe or scenario sets). See the full aggregate report, and pool only runs that "
+    "share one configuration: move older runs out of the results folder, or re-run"
 )
 
 

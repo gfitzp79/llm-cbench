@@ -260,17 +260,19 @@ other signal.
 Results collected before a harness fix are not pooled with results collected
 after it. Runs at different generation budgets are not pooled.
 
-**Sampling and the generation budget are checked for you, by three exact
-equality checks.** `cbench aggregate` and `cbench score` compare the
-temperature, top_p and top_k recorded by every pooled CSV, and whether it
-recorded them at all. They also compare the `num_ctx` and `num_predict`
-recorded by every CSV that carries those columns. Pool a CSV that predates the sampling columns with one that
-carries them, or pool CSVs that disagree on the sampling or the generation
-budget they recorded, and the trial summary carries a
-`STOP: THESE RUNS ARE NOT COMPARABLE` block and that suite is reported
-`INVALID`, excluded from the grade. The remedy is the same either way: re-run
-so every trial shares one configuration, or point `OPENLLM_CBENCH_RESULTS_DIR`
-at a results folder holding only the runs you mean to pool.
+**Sampling, the generation budget and what each run asked are checked for
+you, by exact equality checks.** `cbench aggregate` and `cbench score` compare
+the temperature, top_p and top_k recorded by every pooled CSV, and the
+`num_ctx` and `num_predict`, and whether each CSV recorded them at all. They
+also compare which probes each S2 run asked and which scenarios each S3 run
+ran; S1 checks its task set. Pool a CSV that predates the sampling or budget
+columns with one that carries them, CSVs that disagree on the sampling or the
+budget they recorded, or runs that asked different questions, and the trial
+summary carries a `STOP: THESE RUNS ARE NOT COMPARABLE` block and that suite
+is reported `INVALID`, excluded from the grade. The remedy is the same every
+time: move the older runs out of the results folder, re-run so every trial
+shares one configuration, or point `OPENLLM_CBENCH_RESULTS_DIR` at a results
+folder holding only the runs you mean to pool.
 
 **Separately, the context window is checked for whether it bound at all.**
 Running out of `num_predict` is loud: the row is marked `TRUNCATED` and leaves
@@ -284,8 +286,7 @@ truncation cannot be ruled out. Re-running at a larger `num_ctx` is what
 separates a prompt that fit from one cut down to fit.
 
 **Every other dimension is your responsibility.** A mismatched `max_turns` does
-not stop a pool. Neither does a CSV that predates the budget columns pooled
-with one that records them, nor a harness correctness fix that changed what an
+not stop a pool. Neither does a harness correctness fix that changed what an
 existing column means without changing whether it is present. Every row records
 the sampling parameters, the generation budget and the time the run started,
 which is what makes the rule checkable at all. Beyond the checks above, however,

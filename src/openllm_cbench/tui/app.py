@@ -508,9 +508,10 @@ class ModelsScreen(Screen):
                 "scored under older scoring rules, so the grade is hidden: re-score it on "
                 "the Score screen with \"Re-score saved results only\" ticked, which reads "
                 "the saved CSVs and calls no model. \"N/A\" = nothing "
-                "gradable yet. \"INVALID\" = a validity guard fired (e.g. mismatched "
-                "task sets, or pooled CSVs that disagree on sampling or generation "
-                "budgets, or mix CSVs that recorded sampling with ones that predate it). "
+                "gradable yet. \"INVALID\" = a validity guard fired (e.g. saved runs that "
+                "asked different tasks or probes, disagree on sampling or generation "
+                "budgets, or mix runs that recorded those settings with older ones that "
+                "did not; move the older runs out of the results folder). "
                 "That suite is excluded from the grade; do not trust it yet. Trailing \"*\" = an "
                 "otherwise-ok suite still has an unresolved caveat: read the full "
                 "scorecard (results/scorecards/<tag>.md) before citing the grade alone.",

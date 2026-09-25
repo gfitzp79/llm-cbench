@@ -358,9 +358,14 @@ def aggregate_s2(model):
     _fail_clusters = {}
     _leak_clusters = {}
     _ctx = HeadroomTally()
+    # What each run asked: probe and reasoning state. Runs that asked
+    # different questions are not pooled (scoring/comparability.py).
+    item_sets = {}
     for path in paths:
         with open(path, newline="", encoding="utf-8") as f:
+            items = set()
             for row in csv.DictReader(f):
+                items.add((row.get("prompt_id", ""), row.get("think_label", "")))
                 _ctx.add(row)
                 if (row.get("thinking_full") or "").strip():
                     thinking_rows += 1
@@ -410,13 +415,15 @@ def aggregate_s2(model):
                                 h2 + (1 if verdict == "CHANNEL_LEAK" else 0), c2 + 1)
                 if as_bool(row.get("merged_channel_suspected", "")):
                     bucket["merged_suspect"] += 1
+            item_sets[path.name] = frozenset(items)
 
     n_trials = len(paths)
     lines = [
         f"# S2 repeated-trial summary: `{model}`",
         "",
     ]
-    _prov_lines, _incomparable = render_block(provenance, _generated_at())
+    _prov_lines, _incomparable = render_block(provenance, _generated_at(),
+                                              item_sets, "probe")
     lines += _prov_lines
     note = provenance_note(model)
     if note:
@@ -560,9 +567,14 @@ def aggregate_s3(model):
     # those rows first would hide the evidence for the very thing this
     # check exists to distinguish.
     _ctx = HeadroomTally()
+    # Which scenarios each run asked; runs that differ are not pooled
+    # (scoring/comparability.py).
+    item_sets = {}
     for path in paths:
         with open(path, newline="", encoding="utf-8") as f:
+            items = set()
             for row in csv.DictReader(f):
+                items.add(row.get("scenario_id", ""))
                 _ctx.add(row)
                 bucket = per_scenario.setdefault(
                     row["scenario_id"],
@@ -593,6 +605,7 @@ def aggregate_s3(model):
                     bucket["any_fired"] += 1
                 h, c = _clusters.get(row["scenario_id"], (0, 0))
                 _clusters[row["scenario_id"]] = (h + (1 if fired else 0), c + 1)
+            item_sets[path.name] = frozenset(items)
 
     provenance = {}
     for path in paths:
@@ -605,7 +618,8 @@ def aggregate_s3(model):
         f"# S3 repeated-trial summary: `{model}`",
         "",
     ]
-    _prov_lines, _incomparable = render_block(provenance, _generated_at())
+    _prov_lines, _incomparable = render_block(provenance, _generated_at(),
+                                              item_sets, "scenario")
     lines += _prov_lines
     note = provenance_note(model)
     if note:

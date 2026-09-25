@@ -40,9 +40,21 @@ cannot do either.
   3. DIFFERENT GENERATION BUDGETS. CSVs that recorded num_ctx and
      num_predict disagree on them. A budget changes how many rows
      truncate, and a truncated row leaves the denominator, so two budgets
-     pooled are two instruments averaged. CSVs that predate the budget
-     columns are left out of this comparison rather than treated as a
-     mismatch: their budget is unknown, not different.
+     pooled are two instruments averaged.
+
+  4. MIXED BUDGET INSTRUMENTATION. Some CSVs recorded a budget and others
+     predate the columns. This used to pass on the grounds that an
+     unrecorded budget is unknown rather than different. Since the budget
+     is chosen per model (core/budget.py), an older run's budget can no
+     longer be assumed to match: found live, three S2 runs at 8,192 reply
+     tokens pooled with six from before the columns, which ran at 2,048.
+
+  5. DIFFERENT PROBE OR SCENARIO SETS. The runs did not ask the same
+     questions, so their rates describe different instruments. S1 has its
+     own task-set guard in aggregate_s1; this is the same check for S2
+     (probe and reasoning state) and S3 (scenario). Found in the same
+     corpus: 40-row S2 runs from an older probe bank pooled with 200-row
+     runs from the current one.
 
 WHAT IT DELIBERATELY DOES NOT CHECK. A corpus that is uniformly OLD does
 not fire. Those runs are unpinned but they are unpinned in the same way
@@ -98,12 +110,15 @@ def _budget_fingerprint(row):
     return tuple(values)
 
 
-def pooling_problems(provenance_by_file):
+def pooling_problems(provenance_by_file, item_sets=None, item_noun="probe"):
     """Returns a list of human-readable problems, empty when the files may
     be pooled.
 
     `provenance_by_file` maps a display name to a file_provenance() dict.
-    A single file is trivially self-consistent and never a problem."""
+    `item_sets`, when given, maps the same names to the frozenset of items
+    each file asked (S2 probes with their reasoning state, S3 scenarios),
+    and `item_noun` names them. A single file is trivially self-consistent
+    and never a problem."""
     if len(provenance_by_file) < 2:
         return []
 
@@ -135,6 +150,24 @@ def pooling_problems(provenance_by_file):
             "changes how many rows truncate, and a truncated row leaves the "
             "denominator, so pooling these mixes a configuration difference into "
             "the rate exactly the way two temperatures would."
+        )
+
+    unbudgeted = sorted(n for n, p in provenance_by_file.items() if p.get("budget") is None)
+    if budgets and unbudgeted:
+        problems.append(
+            "Some of these runs recorded their generation budget and some predate "
+            "that column. The budget is chosen per model, so an unrecorded one cannot "
+            "be assumed to match, and a different budget changes how many rows "
+            "truncate. Unrecorded: " + ", ".join(f"`{n}`" for n in unbudgeted)
+        )
+
+    if item_sets and len(set(item_sets.values())) > 1:
+        sizes = sorted({len(s) for s in item_sets.values()})
+        problems.append(
+            f"These runs did not ask the same {item_noun}s, so their rates describe "
+            f"different instruments: {len(set(item_sets.values()))} different "
+            f"{item_noun} sets across {len(item_sets)} runs (sizes "
+            + ", ".join(str(s) for s in sizes) + ")."
         )
 
     distinct = sorted(set(pinned.values()))
@@ -169,7 +202,7 @@ def run_window(provenance_by_file):
     return stamps[0], stamps[-1], len(stamps)
 
 
-def render_block(provenance_by_file, generated_at):
+def render_block(provenance_by_file, generated_at, item_sets=None, item_noun="probe"):
     """The markdown every trial summary carries: when it was generated,
     what window the pooled runs span, and any pooling problem.
 
@@ -205,7 +238,7 @@ def render_block(provenance_by_file, generated_at):
             )
     lines.append("")
 
-    problems = pooling_problems(provenance_by_file)
+    problems = pooling_problems(provenance_by_file, item_sets, item_noun)
     if problems:
         lines += [
             "> **STOP: THESE RUNS ARE NOT COMPARABLE. This aggregate pools "

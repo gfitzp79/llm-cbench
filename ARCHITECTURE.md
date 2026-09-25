@@ -481,21 +481,23 @@ Most of them apply to any evaluation of agentic or reasoning models.
   you only in part.** `cbench aggregate` and `cbench score` glob every CSV
   on disk for a model tag, which is how a results folder spanning several
   harness versions gets averaged into one confident-looking rate.
-  `scoring/comparability.py` refuses three combinations: CSVs of which
+  `scoring/comparability.py` refuses five combinations: CSVs of which
   some recorded sampling (`temperature`, `top_p`, `top_k`) and some
   predate those columns; CSVs that all recorded sampling but disagree on
-  it; and CSVs that recorded different generation budgets (`num_ctx`,
-  `num_predict`). Two suite-specific guards add to these: S1 refuses to
-  pool trials that ran different task sets, and S2 refuses to pool CSVs
-  from before and after its `truncation_suspected` column. Each of these
+  it; CSVs of which some recorded a generation budget (`num_ctx`,
+  `num_predict`) and some predate those columns; CSVs that recorded
+  different budgets; and S2 or S3 CSVs that asked different probes (with
+  their reasoning state) or scenarios. Two suite-specific guards add to
+  these: S1 refuses to pool trials that ran different task sets, and S2
+  refuses to pool CSVs from before and after its `truncation_suspected`
+  column. Each of these
   puts a `STOP` block in that suite's trial summary and marks its
   scorecard verdict `INVALID`, excluded from the grade, so a results
   folder that mixes CSVs from before and after sampling was pinned grades
   `INVALID` for the suites affected. The guards deliberately do not fire
   on a differing `seed` (varying it per trial is the point) or on a
   corpus that is uniformly old and therefore internally consistent. They
-  do not catch a CSV that predates the budget columns pooled with one
-  that records them, a mismatched turn budget (`--max-turns`,
+  do not catch a mismatched turn budget (`--max-turns`,
   `--max-task-turns`), or a harness fix that changed what an
   already-present column means; those are still yours to check. See
   `docs/METHODOLOGY.md` section 3.5 and `docs/METHODOLOGY_TECHNICAL.md`
@@ -603,7 +605,7 @@ Most of them apply to any evaluation of agentic or reasoning models.
 | `num_ctx` / `num_predict` | every suite, `core/sampling.py`, `core/budget.py` | The context window and generation budget the row ran under. Recorded but not pinned, because the right budget depends on the model: an explicit flag wins, then the catalogue's `config_overrides`, then the automatic budget from `core/budget.py`, which is larger for a model that reasons (README.md, "Generation budgets"). Runs with different recorded budgets are not pooled (section 7), and `num_ctx` is the window `headroom_verdict()` checks against. A blank cell means the row predates the columns. |
 | `max_prompt_tokens` / `peak_context_tokens` | every suite, `core/context_window.py` | Tokens the row used: the largest prompt the server evaluated, and the largest prompt-plus-generated total. Both are needed and neither substitutes for the other: the first answers "was the input truncated", the second "did the window bind during generation" (one S1 row recorded 300 against 812). `headroom_verdict()` reads them to produce `OK`, `AT_RISK`, `EVICTED` or `UNKNOWN`. A blank cell means the row predates the columns and reads as `UNKNOWN`, never as `OK`. `AT_RISK` claims only that truncation cannot be ruled out, because the count is taken after truncation (section 7). |
 | `run_started_at` | every suite, `core/runclock.py` | ISO 8601 local timestamp with a UTC offset, taken once when the run starts and written into every row: the wall-clock time the run happened, recorded in the data rather than inferred from a file's mtime, which belongs to whatever tool last touched the file. See section 7 and `docs/METHODOLOGY_TECHNICAL.md` section 6.1. |
-| `pooling_incomparable` (scorecard `INVALID`) | `scoring/comparability.py`, read by `aggregate_s1`, `aggregate_s2`, `aggregate_s3` and `scoring/scorecard.py` | True when a suite's pooled CSVs mix sampling instrumentation (some carry `temperature`, `top_p` and `top_k`, some predate the columns), carry it but disagree on the values, or record different generation budgets (`num_ctx`, `num_predict`). Puts a `STOP` block in that suite's trial summary and excludes the suite from the scorecard's grade. Exact equality checks only, never a heuristic; section 7 sets out what this does and does not catch. |
+| `pooling_incomparable` (scorecard `INVALID`) | `scoring/comparability.py`, read by `aggregate_s1`, `aggregate_s2`, `aggregate_s3` and `scoring/scorecard.py` | True when a suite's pooled CSVs mix sampling or budget instrumentation (some carry `temperature`, `top_p` and `top_k`, or `num_ctx` and `num_predict`, and some predate the columns), carry them but disagree on the values, or, for S2 and S3, asked different probes or scenarios. Puts a `STOP` block in that suite's trial summary and excludes the suite from the scorecard's grade. Exact equality checks only, never a heuristic; section 7 sets out what this does and does not catch. |
 | `is_incomplete_row()` | `scoring/containment_metrics.py` | True when an S1 row never reached a stopping point: the request failed, or `final_text` is empty and the token or turn budget ran out. Excluded from the numerator and the denominator by every S1 scorer, including `aggregate_s1` and so `cbench score`'s grade, which report the number dropped; marked `SKIPPED` by `integrations/inspect_reconcile.py`. Section 7 explains why the denominator matters. |
 | Fisher exact and Poisson-count tests | `scoring/containment_metrics.py:fisher_exact_two_sided()`, `poisson_count_test()` | Base-versus-variant comparisons in `cbench score-containment --pair`. `cbench extension-rule` (`scoring/extension_rule.py`) applies the pre-registered trial-extension rule with the same Fisher test, so the decision is never a manual read: at 3 trials, extend to 5 when `0.05 <= p < 0.20`, and stop otherwise. Its exit code is the decision: 0 to stop, 2 to extend, 1 when the rule cannot be evaluated. Three trials is this framework's pre-registered minimum for a rate worth citing, which is why `cbench assess --trials` and `cbench score --depth standard` default to 3 (`docs/METHODOLOGY_TECHNICAL.md` section 5.1). `cbench compare` uses its own clustering-corrected Fisher test (`scoring/compare.py`). |
 

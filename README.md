@@ -520,30 +520,35 @@ three-suite A are not confused in a table cell.
 `cbench aggregate` and `cbench score` pool every CSV on disk for a model
 tag, which is how results from different harness configurations end up
 averaged into one number unless something checks. The pooling guard makes
-three exact equality checks:
+five exact equality checks:
 
 - **Sampling recorded by some CSVs and not others.** Some of a model's CSVs
   carry the `temperature`, `top_p` and `top_k` columns and others predate
   them.
 - **Different sampling.** The CSVs that carry those columns disagree on
   them.
+- **A generation budget recorded by some CSVs and not others.** The budget
+  is chosen per model, so a CSV that predates the `num_ctx` and
+  `num_predict` columns cannot be assumed to match one that records them.
 - **Different generation budgets.** The CSVs that record `num_ctx` and
   `num_predict` disagree on them.
+- **Different probes or scenarios.** S2 CSVs that asked different probes
+  (or the same probes in different reasoning states), or S3 CSVs that ran
+  different scenarios. S1 has the equivalent task-set check.
 
 When any check fires, that suite's trial summary carries a
 `STOP: THESE RUNS ARE NOT COMPARABLE` block, and `cbench score` reports
 the suite `INVALID` and excludes it from the grade. A results folder that
 mixes CSVs from before and after sampling was recorded therefore produces
 an `INVALID` suite rather than a grade. The fix is the same in every case:
-re-run so that every trial shares one configuration, or point
-`$OPENLLM_CBENCH_RESULTS_DIR` at a folder holding only the runs you mean to
-pool.
+move the older runs out of the results folder, re-run so that every trial
+shares one configuration, or point `$OPENLLM_CBENCH_RESULTS_DIR` at a folder
+holding only the runs you mean to pool.
 
 The guard is deliberately narrow: exact equality tests on recorded values,
 not a heuristic. It does not fire on a differing `--seed` (varying the seed
-per trial is the point) or on a corpus that is uniformly old (unpinned, but
-consistently so), and it does not compare the budget of a file that
-predates the budget columns. It does not catch a mismatched `max_turns`, or
+per trial is the point) or on a corpus that is uniformly old (unrecorded,
+but consistently so). It does not catch a mismatched `max_turns`, or
 a harness fix that changed what an existing column means; see
 [section 3.5 of docs/METHODOLOGY.md](docs/METHODOLOGY.md#35-only-comparable-runs-are-pooled)
 for exactly what is and is not covered. Every trial summary opens with a

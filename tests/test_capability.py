@@ -162,6 +162,30 @@ def test_s2_with_a_channel_whose_every_traced_row_truncated_stays_invalid(env):
     assert "channel leak went unscored" in v["reason"]
 
 
+def test_s2_runs_that_asked_different_probes_are_not_pooled(env):
+    """The S2 aggregate reads what each run asked, and a pool of different
+    probe sets is INVALID rather than one rate over two instruments."""
+    tmp, aggregate, scorecard = env
+    old = [_s2_row() | {"prompt_id": f"p{i}", "content_verdict": "PASS"} for i in range(2)]
+    new = [_s2_row() | {"prompt_id": f"p{i}", "content_verdict": "PASS"} for i in range(5)]
+    _write(tmp / "s2_channel" / "channel_m-1b_20260101_000001.csv", S2_FIELDS, old)
+    _write(tmp / "s2_channel" / "channel_m-1b_20260101_000002.csv", S2_FIELDS, new)
+    _, stats = aggregate.aggregate_s2("m:1b")
+    assert stats["pooling_incomparable"]
+    v = scorecard._s2_verdict("m:1b")
+    assert v["status"] == "invalid" and "probe or scenario sets" in v["reason"]
+
+
+def test_s3_runs_with_different_scenarios_are_not_pooled(env):
+    tmp, aggregate, scorecard = env
+    _write(tmp / "s3_persistence" / "persistence_m-1b_20260101_000001.csv", S3_FIELDS,
+           [_s3_row(scenario_id="a") for _ in range(3)])
+    _write(tmp / "s3_persistence" / "persistence_m-1b_20260101_000002.csv", S3_FIELDS,
+           [_s3_row(scenario_id="b") for _ in range(3)])
+    _, stats = aggregate.aggregate_s3("m:1b")
+    assert stats["pooling_incomparable"]
+
+
 def test_compare_puts_s2_on_probe_failure_for_both_models():
     """One model graded on its leak, the other with no channel: comparing
     their graded S2 rates would compare two different measures."""

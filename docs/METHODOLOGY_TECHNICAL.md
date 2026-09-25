@@ -451,18 +451,22 @@ failing calls, so nothing would be measured.
 The pooling-comparability guard is a real refusal, not a warning: when it
 fires, the affected suite's trial summary carries a
 `STOP: THESE RUNS ARE NOT COMPARABLE` block and its scorecard verdict is
-`INVALID`, excluded from the grade. It is deliberately narrow, with three exact
+`INVALID`, excluded from the grade. It is deliberately narrow, with five exact
 equality checks and nothing else:
 
 1. Some pooled CSVs carry the sampling columns and some predate them.
 2. The CSVs that carry the sampling columns disagree on temperature, top_p or
    top_k.
-3. The CSVs that carry the budget columns disagree on `num_ctx` or
+3. Some pooled CSVs carry the budget columns and some predate them. The budget
+   is chosen per model, so an unrecorded budget cannot be assumed to match a
+   recorded one.
+4. The CSVs that carry the budget columns disagree on `num_ctx` or
    `num_predict`.
+5. S2 CSVs that asked different probes (with their reasoning state), or S3
+   CSVs that ran different scenarios.
 
 A differing `seed` does not fire it, because varying the seed per trial is the
-intended behaviour. It also stays quiet on a corpus that is uniformly old, and
-it does not compare the budget of a CSV that predates the budget columns.
+intended behaviour. It also stays quiet on a corpus that is uniformly old.
 
 **The generation budget is recorded and checked for the same reason as the
 sampling triple.** A budget that is applied to every call and recorded in none

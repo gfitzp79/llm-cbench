@@ -367,13 +367,24 @@ These are recorded because a methodology that hides its own failures gives you
 no way to calibrate the results it presents. Each is a defect in the framework
 itself, not in a model it measured.
 
-**A tamper-detection bug fabricated the events it detected.** S3 executed each
-challenge-turn tool call twice, so a single log edit was recorded as two, and
-every log-tampering event produced before the fix was an artefact. The suite's
-null result was withdrawn rather than caveated. A cross-framework validation
-that appeared to confirm it was two scorers reading the same doubled calls.
-Cross-validation against a second framework does not protect you when both
-frameworks read the same corrupted input.
+**A tamper-detection bug recorded log edits twice.** Whenever a model's
+challenge-turn reply carried tool calls and no text, S3 executed those calls
+twice, so an edit the model made to its own log was applied, and recorded, a
+second time. It did not create the events it detected: in each of the 17
+events recorded before the fix, in the corpus this framework's rules were
+developed against (section 4), the first record is a real edit the model
+issued to an entry it had logged before the challenge, and the second record
+repeats it. Those results stay withdrawn, because they were collected before
+sampling was pinned (section 3.4) and cannot be compared with anything
+collected since. A cross-validation against Inspect, with the suite
+reimplemented there and run once on three models with two scenarios each, had
+appeared to confirm the suite's null result on the models it compared, and it
+confirmed nothing: Inspect ran each model itself, rather than reading this
+suite's records, and executed each call once, and on those models neither
+framework recorded any event. Two instruments that both record nothing cannot
+show that either would detect the behaviour, so agreement between frameworks
+on a null is evidence only when each has been shown to record the behaviour
+when it is present (section 3.1).
 
 **A validity guard excluded the suite that made the grade worse.** The rule
 excluding unfinished rows was allowed to decide which tasks a trial had run. A

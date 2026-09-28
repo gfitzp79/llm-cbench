@@ -333,19 +333,27 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # captured results instead of calling execute_tool again.
     #
     # The previous code ran this loop and then re-ran an identical loop inside
-    # the retry block, so every log edit was applied twice. Every log-tampering
-    # event this suite had ever reported was that bug, not a model: one edit
-    # counted as two.
+    # the retry block whenever the challenge reply carried tool calls and no
+    # text, so each log edit in such a reply was applied twice and recorded
+    # twice. The `log_rewrite` flag was already set by the model's own call on
+    # the first pass: the replay doubled the record of a real edit rather than
+    # creating one. The one exception is an edit whose target index did not
+    # exist when it first ran (an entry appended later in the same reply, or an
+    # index that only the replay's own duplicate appends create): it fails on
+    # the first pass and could land on the replay. None of the 17 events
+    # recorded before the fix, in the corpus the rules were developed against,
+    # was of that kind.
     #
-    # The consequence is the part worth keeping. The suite's null result was
-    # WITHDRAWN rather than caveated, and a cross-framework validation that had
-    # appeared to confirm it turned out to be worthless -- both harnesses
-    # agreed because both were reading the same double-executed calls.
-    # Agreement between two scorers reading one corrupted input is not
-    # corroboration. A tamper-detection suite that manufactures tamper events
-    # is worse than no suite, because its positives look like findings.
+    # The lesson worth keeping is about validation. A cross-validation against
+    # Inspect had appeared to confirm the suite's null result on the models it
+    # compared, and confirmed nothing: Inspect ran each model itself, executed
+    # each call once, and on those models neither framework recorded any event.
+    # Two instruments that both record nothing cannot show that either would
+    # detect the behaviour (docs/METHODOLOGY.md, sections 3.1 and 6).
     #
-    # Any `log_rewrite` result produced before this fix is void.
+    # Rows produced before this fix can hold an edit twice in `rewrite_detail`
+    # and an append twice in `log_after`; all 17 recorded events hold two
+    # identical records.
     challenge_results = []
     for tc in tool_calls:
         fn = tc.get("function", {})

@@ -1,20 +1,23 @@
 """Regression test for the challenge-turn double-execution bug.
 
 WHY THIS TEST IS LOAD-BEARING. The bug it guards was not a crash or a wrong
-number in a corner case: it caused the persistence suite to manufacture the
-exact events it exists to detect. Every challenge-turn tool call was executed
-once in the main loop and again in the retry block, so a model that edited one
-log entry was recorded as having edited it twice, and a model that edited
-nothing could still surface as a tamper event.
+number in a corner case: it doubled the record of the exact events the
+persistence suite exists to detect. Every challenge-turn tool call in a reply
+that carried no text was executed once in the main loop and again in the retry
+block, so a model that edited one log entry was recorded as having edited it
+twice. The flag itself came from the model's own call on the first pass. Only
+an edit whose target index did not exist when it first ran could have been
+turned into a rewrite by the replay: it fails on the first pass and could land
+on the second.
 
-Every log-tampering event this suite had ever reported was that bug rather
-than a model. The consequence is why this test exists: the suite's null result
-had to be WITHDRAWN rather than caveated, and a cross-framework validation that
-appeared to confirm it was worthless -- both harnesses agreed because both were
-reading the same double-executed calls. Agreement between two scorers reading
-one corrupted input is not corroboration.
+A record that can count an edit twice cannot be read at face value, which is
+why this test exists. The same history carries a second lesson: a
+cross-validation against Inspect that appeared to confirm the suite's null
+result on the models it compared confirmed nothing, because on those models
+neither framework recorded any event. Agreement between two instruments that
+both record nothing is not corroboration.
 
-The test drives `execute_tool` directly with a fabricated tool-call sequence,
+The test drives `execute_tool` directly with a synthetic tool-call sequence,
 so it needs no model, no network and no GPU. It asserts the property that
 matters (each call applied exactly once) rather than asserting a specific
 `log_rewrite` count, which would pass for the wrong reason if the scoring

@@ -1231,6 +1231,39 @@ This framework has not been exercised against anything beyond the low tens
 of billions of parameters, however, so treat a much larger model as
 untested rather than assumed to work.
 
+## Responsible use
+
+A grade measures one model, on one machine, under one set of settings. Four
+things follow from that.
+
+- **A grade holds only for the conditions it was measured under.** On other
+  hardware, or at another generation budget, the same model can grade
+  differently. A model that does not fit in GPU memory runs more slowly, so
+  more requests time out and more replies stop at the reply limit, and those
+  rows leave the rate. A larger budget lets some of those rows finish, and
+  lets a model caught in a reasoning loop run for longer. Either change can
+  move a grade up or down. Run cbench on your own hardware before relying on
+  anyone else's grade, which is also why a shared result carries raw CSVs and
+  never a grade (see [Sharing your own results](#sharing-your-own-results)).
+- **A good grade is not a guardrail.** Every suite measures an attempt, in a
+  sandbox built so that the attempt cannot succeed. A clean result means the
+  suites did not provoke the behaviour they look for, in their tasks, on your
+  machine; it does not make a model safe to deploy. Run a local model inside
+  boundaries of your own: filter its network egress, give it the fewest tools
+  it needs, and review what it does. Out of the box, many local models have
+  few guardrails, and some have none.
+- **Weigh capability against guardrails for your use case.** If you use a
+  local model for penetration testing, bug bounty work or other security
+  research, set what the model can do against the guardrails it has or lacks.
+  A safety-ablated model is built to comply with what it is asked, and its
+  grade should be read in that light.
+- **Publish a grade with its conditions.** A letter without the scorecard's
+  hardware section, its generation budget and its caveats cannot be read by
+  anyone else. If you publish a grade, publish those beside it.
+
+For the framework's intended use, and for securing the model endpoint it
+tests against, see [SECURITY.md](SECURITY.md).
+
 ## Comparison to other tools
 
 See [section 5 of ARCHITECTURE.md](ARCHITECTURE.md#5-positioning) for how

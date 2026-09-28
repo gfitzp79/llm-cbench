@@ -174,7 +174,6 @@ class DashboardScreen(Screen):
                 yield Button("Local models", id="goto-models")
             with Horizontal(id="dashboard-buttons-2"):
                 yield Button("Browse reports", id="goto-reports")
-                yield Button("Share / validate results", id="goto-community")
                 yield Button("Check environment", id="run-doctor")
                 yield Button("Settings", id="goto-settings")
                 yield Button("About / extend this", id="goto-about")
@@ -294,8 +293,6 @@ class DashboardScreen(Screen):
             self.app.push_screen(ModelsScreen())
         elif event.button.id == "goto-reports":
             self.app.push_screen(ReportsScreen())
-        elif event.button.id == "goto-community":
-            self.app.push_screen(CommunityScreen())
         elif event.button.id == "run-doctor":
             self.run_doctor()
         elif event.button.id == "goto-settings":
@@ -1263,9 +1260,8 @@ class ScoreScreen(Screen):
         JSON files off disk doesn't need a worker the way a live endpoint
         call does. Shows catalogue status BEFORE a run starts, not just in
         the log after one is already underway -- a model this catalogue
-        has never seen is going to be the NORM as community-submitted
-        results bring in models nobody here has gated yet, not an edge
-        case worth discovering only mid-run.
+        has never seen is the common case for anyone testing a new model,
+        not an edge case worth discovering only mid-run.
 
         Tolerates the screen being gone. Two separate workers call this
         after an await (_probe_hardware after timing an nvidia-smi call,
@@ -1503,274 +1499,6 @@ class ScoreScreen(Screen):
         _report_job_result(log, result,
                             "Check \"Local models\" for the updated Score column, or "
                             "\"Browse reports\" for the full scorecard.")
-
-
-class CommunityScreen(Screen):
-    """The three community-submission actions -- package, validate,
-    submit -- each a real `cbench community-*` subprocess, same as every
-    other action-taking screen. All the actual logic (what a submission
-    is shaped like, what gets checksummed, how a PR is opened) lives in
-    core/community.py and core/community_submit.py; this screen is a
-    folder picker, a form, and a log.
-
-    Submit deliberately mirrors the CLI's own two-step: pressing it
-    previews the exact command sequence and sends nothing, and only the
-    explicit "confirm" checkbox adds --confirm. This is the one action in
-    the app that creates public content under the user's own name, so a
-    single misplaced click must not be able to do it."""
-
-    BINDINGS = [("escape", "app.pop_screen", "Back")]
-
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield InvariantBar()
-        with Vertical(id="community-form"):
-            yield Static(
-                "Share results for a model, or check someone else's submission.\n"
-                "[bold]Package[/bold] (`cbench community-package`) bundles the CSVs already "
-                "on disk for a model tag into a submittable folder, fills in submission.json, "
-                "and records a SHA-256 per file. Uploads nothing.\n"
-                "[bold]Validate[/bold] (`cbench community-validate`) checks a folder is shaped "
-                "correctly. Read-only.\n"
-                "[bold]Submit[/bold] (`cbench community-submit`) opens it as a pull request via "
-                "your own authenticated `gh`. Previews only, until \"confirm\" below is "
-                "checked.\n"
-                "[bold]Raw data only:[/bold] a submission carries CSVs, never a grade. Anyone who "
-                "wants a score runs `cbench score --from-existing` against the rows themselves. "
-                "See community-results/README.md."
-            )
-            root = Path.cwd() / "community-results"
-            with Horizontal(id="community-body"):
-                if root.exists():
-                    yield DirectoryTree(str(root), id="community-tree")
-                else:
-                    yield Static(
-                        f"No community-results/ directory at {root}.\n\n"
-                        f"This is created the first time you package a submission. If you "
-                        f"have packaged one before, you are probably in a different working "
-                        f"directory than when you did: this path is resolved relative to "
-                        f"where you launched cbench.",
-                        id="community-tree-empty",
-                    )
-                with Vertical(id="community-form-inner"):
-                    yield Select([], id="community-model-select", allow_blank=True,
-                                  prompt="Model to package (scanning results...)")
-                    yield Select([], id="community-submission-select", allow_blank=True,
-                                  prompt="Packaged submission to validate/submit (scanning...)")
-                    yield Input(
-                        placeholder="(or type a model tag)",
-                        id="community-model-input",
-                    )
-                    yield Input(
-                        placeholder="(or type a submission folder path)",
-                        id="community-path-input",
-                    )
-                    # `community-package --notes` is how a contributor
-                    # says what was unusual about their run -- a spilled
-                    # model, a non-default endpoint, a known-flaky pull.
-                    # It reaches the reviewer inside submission.json, and
-                    # having no field for it here meant the TUI path
-                    # silently produced less useful submissions than the
-                    # CLI one.
-                    yield Input(
-                        placeholder="Notes for the reviewer (optional): anything unusual "
-                                    "about this run",
-                        id="community-notes-input",
-                    )
-                    # Without this, a machine with no `git config user.name`
-                    # produced a package that failed validation, and nothing
-                    # on this screen could fix it.
-                    yield Input(
-                        placeholder="Your GitHub handle (blank = your git config user.name)",
-                        id="community-contributor-input",
-                    )
-                    yield Checkbox(
-                        "Also make a .zip (to attach to a GitHub issue without using git)",
-                        id="community-zip", value=False,
-                    )
-                    yield Checkbox(
-                        "Accept contributor terms (right to share, no confidential data, "
-                        "accurate hardware, Apache-2.0 licence grant, published permanently). "
-                        "Required before a package can be submitted",
-                        id="community-terms", value=False,
-                    )
-                    yield Checkbox(
-                        "Confirm submit: actually fork, push and open a PUBLIC pull "
-                        "request as you (unchecked = preview the commands only)",
-                        id="community-confirm", value=False,
-                    )
-                    with Horizontal():
-                        yield Button("Package", id="community-package", variant="primary")
-                        yield Button("Validate", id="community-start", variant="primary")
-                        yield Button("Submit", id="community-submit")
-                        yield Button("Back", id="community-back")
-                    yield Static("", id="community-preview")
-                    yield RichLog(id="community-log", wrap=True, highlight=True, markup=True)
-        yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh_pickers()
-
-    @work(exclusive=True)
-    async def _refresh_pickers(self) -> None:
-        """Fills both pickers from what actually exists: models that have
-        CSVs on disk, and submissions already packaged. A user should be
-        choosing from real options, not recalling a path."""
-        import asyncio
-
-        from textual.css.query import NoMatches
-
-        from openllm_cbench.core.community import (
-            list_packaged_submissions, models_with_local_results,
-        )
-        from openllm_cbench.core.discover import list_local_models
-
-        def gather():
-            try:
-                tags = [m["name"] for m in list_local_models()]
-            except Exception:
-                tags = []
-            return models_with_local_results(known_tags=tags), list_packaged_submissions()
-
-        try:
-            models, submissions = await asyncio.to_thread(gather)
-        except Exception:
-            models, submissions = [], []
-
-        try:
-            model_select = self.query_one("#community-model-select", Select)
-            sub_select = self.query_one("#community-submission-select", Select)
-        except NoMatches:
-            return
-
-        opts = []
-        for tag, suites in models:
-            n = sum(suites.values())
-            opts.append((f"{tag}  ({n} CSV(s) across {len(suites)} suite(s))", tag))
-
-        sub_opts = [
-            (f"{d['model']}  {d['date']}  ({'terms accepted' if d['accepted'] else 'terms NOT accepted'})",
-             str(d["path"]))
-            for d in submissions
-        ]
-
-        # Same teardown hazard as _populate_model_select: set_options()
-        # queries the Select's own children, which are gone if the screen
-        # closed while the scan above was running.
-        try:
-            model_select.set_options(opts)
-            model_select.prompt = ("Model to package" if opts else
-                                    "No model has results on disk yet: score one first")
-            sub_select.set_options(sub_opts)
-            sub_select.prompt = ("Packaged submission to validate/submit" if sub_opts else
-                                  "Nothing packaged yet: use Package first")
-        except NoMatches:
-            return
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.value is Select.BLANK:
-            return
-        if event.select.id == "community-model-select":
-            self.query_one("#community-model-input", Input).value = str(event.value)
-        elif event.select.id == "community-submission-select":
-            self.query_one("#community-path-input", Input).value = str(event.value)
-
-    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
-        if event.control.id == "community-tree":
-            self.query_one("#community-path-input", Input).value = str(event.path)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "community-back":
-            self.app.pop_screen()
-        elif event.button.id == "community-start":
-            self._start_validate()
-        elif event.button.id == "community-package":
-            self._start_package()
-        elif event.button.id == "community-submit":
-            self._start_submit()
-
-    def _launch(self, subcommand, args, log, preview):
-        argv = cbench_command(subcommand, args)
-        preview.update(f"[dim]$ {' '.join(argv)}[/dim]")
-        log.write(f"[dim]$ {' '.join(argv)}[/dim]")
-        self._run_worker(argv, log)
-
-    def _start_validate(self) -> None:
-        path = self.query_one("#community-path-input", Input).value.strip()
-        log = self.query_one("#community-log", RichLog)
-        preview = self.query_one("#community-preview", Static)
-        log.clear()
-
-        if not path:
-            log.write("[bold red]A submission folder path is required: click one in the "
-                       "tree on the left, or type it.[/bold red]")
-            return
-
-        self._launch("community-validate", [path], log, preview)
-
-    def _start_package(self) -> None:
-        model = self.query_one("#community-model-input", Input).value.strip()
-        log = self.query_one("#community-log", RichLog)
-        preview = self.query_one("#community-preview", Static)
-        log.clear()
-
-        if not model:
-            log.write("[bold red]A model tag is required to package: type the tag whose "
-                       "results you want to bundle.[/bold red]")
-            return
-
-        # --zip is off by default, as on the CLI; it was always on here.
-        args = ["--model", model]
-        if self.query_one("#community-zip", Checkbox).value:
-            args.append("--zip")
-        contributor = self.query_one("#community-contributor-input", Input).value.strip()
-        if contributor:
-            args += ["--contributor", contributor]
-        notes = self.query_one("#community-notes-input", Input).value.strip()
-        if notes:
-            args += ["--notes", notes]
-        if self.query_one("#community-terms", Checkbox).value:
-            args.append("--accept-terms")
-        else:
-            log.write("[dim]Contributor terms not accepted: the folder will be built so you "
-                       "can read it, but it won't validate until you tick the terms box and "
-                       "package again.[/dim]")
-        self._launch("community-package", args, log, preview)
-
-    def _start_submit(self) -> None:
-        path = self.query_one("#community-path-input", Input).value.strip()
-        confirm = self.query_one("#community-confirm", Checkbox).value
-        log = self.query_one("#community-log", RichLog)
-        preview = self.query_one("#community-preview", Static)
-        log.clear()
-
-        if not path:
-            log.write("[bold red]A submission folder path is required: package one first, "
-                       "then click it in the tree on the left.[/bold red]")
-            return
-
-        args = [path]
-        if confirm:
-            args.append("--confirm")
-            log.write("[bold yellow]\"Confirm submit\" is checked: this will open a PUBLIC "
-                       "pull request under your own GitHub account.[/bold yellow]")
-        else:
-            log.write("[dim]Preview only: nothing will be sent. Check \"Confirm submit\" "
-                       "above to actually open the pull request.[/dim]")
-        self._launch("community-submit", args, log, preview)
-
-    @work(exclusive=True)
-    async def _run_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
-        ok = _report_job_result(log, result)
-        # A submission that was just packaged should be selectable without
-        # leaving and re-entering the screen. This block spent a while on
-        # RunScreen by mistake, where the condition could never be true and
-        # the method did not exist -- so packaging appeared to succeed
-        # (exit 0, folder written) while the picker still read "Nothing
-        # packaged yet".
-        if ok and "community-package" in argv:
-            self._refresh_pickers()
 
 
 _ABOUT_TEXT = """\
@@ -2229,7 +1957,7 @@ class CBenchTUI(App):
     #dashboard-buttons, #dashboard-buttons-2 { height: auto; }
     #dashboard-buttons Button, #dashboard-buttons-2 Button { margin: 0 1 1 0; }
     #doctor-caption { color: $text-muted; padding: 0 0 1 0; }
-    #run-form, #gate-form, #models-body, #pull-form, #score-form, #community-form { padding: 1; }
+    #run-form, #gate-form, #models-body, #pull-form, #score-form { padding: 1; }
     RichLog { height: 1fr; border: solid $accent; }
     #reports-body { height: 1fr; }
     #reports-tree { width: 40%; }
@@ -2251,13 +1979,6 @@ class CBenchTUI(App):
     #models-limit-suffix { width: auto; padding: 1 0 0 1; }
     #models-limit-input { width: 12; }
     #models-table { height: 12; border: solid $accent; }
-    /* Both the tree and its empty-state placeholder need the same width.
-       Without this the placeholder (shown whenever community-results/
-       doesn't exist yet -- i.e. on a fresh install, the common case)
-       expands to fill the row and pushes the action buttons off the right
-       edge of the terminal, where they cannot be clicked at all. */
-    #community-tree, #community-tree-empty { width: 40%; }
-    #community-form-inner { width: 60%; }
     #score-form { height: 1fr; padding: 0 1; }
     .score-heading { margin: 1 0 0 0; }
     #score-suite-checks { height: auto; }

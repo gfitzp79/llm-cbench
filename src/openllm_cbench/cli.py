@@ -21,9 +21,6 @@ Usage:
     cbench score --model <model-tag> --depth standard   # assess + a per-suite scorecard
     cbench compare --model <tag-a> --model <tag-b>      # is the difference between two models real?
     cbench catalogue                              # every local model + catalogue/score status
-    cbench community-package --model <model-tag> --accept-terms   # bundle your CSVs
-    cbench community-submit <folder>              # open it as a PR (needs `gh`; --confirm to send)
-    cbench community-validate community-results/<model-tag>/<contributor>_<date>
     cbench containment --model <model-tag> --boundary both
     cbench channel --model <model-tag> --think both
     cbench persistence --model <model-tag>
@@ -550,21 +547,21 @@ def _cmd_score(argv):
                                 EXTEND target.
 
     `--from-existing` skips running anything and scores whatever S1/S2/S3
-    CSVs already exist on disk for this model tag -- the same real CSVs a
-    community submission is, once its s1_containment/s2_channel/
-    s3_persistence folders are pointed at via $OPENLLM_CBENCH_RESULTS_DIR
-    (see community-results/README.md). That has to be a real environment
+    CSVs already exist on disk for this model tag, including CSVs copied
+    from another machine, once their s1_containment/s2_channel/
+    s3_persistence folders are pointed at via $OPENLLM_CBENCH_RESULTS_DIR.
+    That has to be a real environment
     variable set before this process starts, not a CLI flag on this
     command: aggregate_s1/s2/s3 resolve their results directory once, at
     import time (scoring/aggregate.py's own S1_DIR/S2_DIR/S3_DIR module
     constants) -- setting it after this function starts running would be
     too late to change anything, so this deliberately does not offer a
     same-process --results-dir that would silently no-op. This is how a
-    scorecard ever gets produced for a model too large to run on this
-    machine: someone else runs the suites on their own hardware, submits
-    the raw CSVs, and scoring them is this same command with
-    --from-existing and the env var pointed at that submission -- not a
-    second implementation of anything above."""
+    scorecard gets produced for a model too large to run on this machine:
+    the suites run on hardware that can hold it, the raw CSVs are copied
+    here, and scoring them is this same command with --from-existing and
+    the env var pointed at them -- not a second implementation of anything
+    above."""
     import argparse
 
     from openllm_cbench.core.invariant import epilog as safety_epilog
@@ -598,11 +595,11 @@ def _cmd_score(argv):
                     help="Comma-separated subset of s1,s2,s3 (default: all three).")
     p.add_argument("--from-existing", action="store_true",
                     help="Score whatever S1/S2/S3 CSVs already exist for this model tag: "
-                         "runs nothing, makes no model call. To score a specific submission "
-                         "rather than your own results/ directory, set $OPENLLM_CBENCH_RESULTS_DIR "
-                         "in the shell BEFORE running this command (see community-results/README.md). "
-                         "There is no --results-dir flag here; the env var has to be set before "
-                         "this process starts, not after.")
+                         "runs nothing, makes no model call. To score CSVs in another folder "
+                         "(for example, copied from another machine) rather than your own "
+                         "results/ directory, set $OPENLLM_CBENCH_RESULTS_DIR in the shell "
+                         "BEFORE running this command. There is no --results-dir flag here; "
+                         "the env var has to be set before this process starts, not after.")
     p.add_argument("--dry-run", action="store_true",
                     help="Pass --dry-run through to every suite invocation and skip scoring "
                          "entirely: previews payloads, calls no model. Ignored with "
@@ -1287,230 +1284,6 @@ def _cmd_catalogue(argv):
     return 0
 
 
-def _cmd_community_validate(argv):
-    """Checks a community-results/ submission folder is shaped correctly
-    (submission.json present with its required fields, CSVs present and
-    tagged for the claimed model) before a maintainer spends any time
-    scoring or merging it -- see community-results/README.md for the
-    submission convention this checks against, and core/community.py for
-    what "shaped correctly" actually means. Makes no model or network
-    call; does not itself score anything -- see this command's own
-    printed next-step for that."""
-    import argparse
-
-    from openllm_cbench.core.community import validate_submission
-    from openllm_cbench.core.invariant import epilog as safety_epilog
-
-    p = argparse.ArgumentParser(
-        prog="cbench community-validate",
-        description="Validate a community-results/ submission folder's shape before "
-                     "scoring or merging it. Read-only.",
-        epilog=safety_epilog(),
-    )
-    p.add_argument("path", help="Path to the submission folder, e.g. "
-                                 "community-results/gemma3-12b/alice_20260912")
-    args = p.parse_args(argv)
-
-    problems = validate_submission(args.path)
-    if not problems:
-        print(f"OK: {args.path} looks like a valid submission.")
-        print("\nNext: review submission.json's claims against the actual CSVs by hand, then "
-              "score it: set $OPENLLM_CBENCH_RESULTS_DIR to this folder BEFORE running "
-              "`cbench score` (has to be set before the process starts, not after; see "
-              "`cbench score --help`):\n"
-              f"    bash/zsh:    OPENLLM_CBENCH_RESULTS_DIR={args.path} cbench score --model <tag> --from-existing\n"
-              f"    PowerShell:  $env:OPENLLM_CBENCH_RESULTS_DIR=\"{args.path}\"; "
-              f"cbench score --model <tag> --from-existing\n"
-              "(<tag> is the \"model\" field from this submission's own submission.json) "
-              "before trusting or citing anything from it.")
-        return 0
-
-    print(f"[!] {len(problems)} problem(s) with {args.path}:\n")
-    for p_ in problems:
-        print(f"  - {p_}")
-    return 1
-
-
-def _cmd_community_package(argv):
-    """Builds a ready-to-submit community-results/ folder from CSVs this
-    machine already produced for one model: copies the raw CSVs, fills in
-    submission.json from what it can detect (hardware, runtime version,
-    quant, harness version), records a SHA-256 per CSV so corruption or
-    later tampering is detectable, and validates the result.
-
-    Makes no upload and no outbound network call other than an optional,
-    best-effort read of the local endpoint's own /api/version for the
-    runtime field. Sending is a separate, explicit command
-    (`cbench community-submit`) -- see core/community.py's own module
-    comments for why those two are deliberately not one step."""
-    import argparse
-
-    from openllm_cbench.core.community import (
-        ATTESTATION_TEXT, PRIVACY_NOTICE, package_submission, zip_submission,
-    )
-    from openllm_cbench.core.invariant import epilog as safety_epilog
-
-    p = argparse.ArgumentParser(
-        prog="cbench community-package",
-        description="Package this machine's existing CSVs for one model into a "
-                     "submittable community-results/ folder. Uploads nothing.",
-        epilog=safety_epilog(),
-    )
-    p.add_argument("--model", required=True)
-    p.add_argument("--contributor", default=None,
-                    help="Your GitHub handle or name (default: git config user.name).")
-    p.add_argument("--notes", default="",
-                    help="Anything unusual about the run: a config_overrides you needed, "
-                         "trials you excluded and why.")
-    p.add_argument("--out", default=None,
-                    help="Root to write the submission under (default ./community-results).")
-    p.add_argument("--zip", action="store_true",
-                    help="Also produce a .zip of the folder, for attaching to a GitHub "
-                         "issue without needing git at all.")
-    p.add_argument("--accept-terms", action="store_true",
-                    help="Record acceptance of the contributor terms this command prints. "
-                         "Without it the folder is still built so you can inspect it, but it "
-                         "will not validate and cannot be submitted.")
-    args = p.parse_args(argv)
-
-    folder, info = package_submission(args.model, args.contributor, args.notes,
-                                       args.out, accept_terms=args.accept_terms)
-    copied = info["copied"]
-    total = sum(len(v) for v in copied.values())
-    print(f"Packaged {total} CSV(s) for '{args.model}' into {folder}")
-    for suite_dir in sorted(copied):
-        print(f"  {suite_dir}: {len(copied[suite_dir])} file(s)")
-    if not total:
-        print(f"\n[!] No CSVs found on disk for '{args.model}': run the suites first "
-              f"(`cbench score --model {args.model} --depth standard`), then package.")
-
-    if args.zip:
-        print(f"Archive: {zip_submission(folder)}")
-
-    print(f"\n{PRIVACY_NOTICE}\n")
-
-    gate = info["metadata"].get("gate_check") or {}
-    if gate.get("unverified"):
-        print()
-        print("[!] The gate check did not complete on this machine:")
-        for u in gate["unverified"]:
-            print(f"      - {u}")
-        print("    That usually means the model is too large for the available VRAM, NOT")
-        print("    that it failed the check. Rows produced that way can measure the machine")
-        print("    rather than the model, so they cannot be submitted. Re-run")
-        print(f"    `cbench gate --model {args.model} --save` somewhere it completes.")
-    elif not gate:
-        print()
-        print(f"[!] '{args.model}' has no gate check on file. Run")
-        print(f"    `cbench gate --model {args.model} --save` first: without one there is no")
-        print("    way to tell a model that failed a check from a machine that could not run one.")
-
-    print()
-    print("Contributor terms:")
-    print(f"  {ATTESTATION_TEXT}")
-    print("  ACCEPTED, recorded in submission.json (--accept-terms)." if args.accept_terms
-          else "  NOT accepted: read the CSVs, then re-run with --accept-terms.")
-    print()
-    print("This submission carries raw CSVs only. No grade or score travels with it:")
-    print("anyone who wants one runs `cbench score --from-existing` against these rows")
-    print("themselves, on their own machine. See community-results/README.md.")
-    print()
-
-    problems = info["problems"]
-    if problems:
-        print(f"[!] {len(problems)} thing(s) to fix before submitting:\n")
-        for p_ in problems:
-            print(f"  - {p_}")
-        print(f"\nEdit {folder / 'submission.json'} and re-run "
-              f"`cbench community-validate {folder}` until it's clean.")
-        return 1
-
-    print(f"Valid. Submit it with:\n    cbench community-submit {folder}")
-    return 0
-
-
-def _cmd_community_submit(argv):
-    """Opens a packaged submission as a real pull request, via the GitHub
-    CLI (`gh`) the contributor has already authenticated themselves.
-
-    This framework never sees, stores, or transmits a credential -- see
-    core/community_submit.py's module docstring for why `gh` rather than a
-    token or a hosted endpoint of our own. Prints the exact command
-    sequence and does NOTHING without --confirm: this is the one action in
-    this project that creates public content under someone's own name."""
-    import argparse
-
-    from pathlib import Path
-
-    from openllm_cbench.core.community import PRIVACY_NOTICE, validate_submission
-    from openllm_cbench.core.community_submit import (
-        UPSTREAM_REPO, build_submit_plan, detect_gh, execute_plan,
-        load_submission_metadata, manual_instructions, suites_in_folder,
-    )
-    from openllm_cbench.core.invariant import epilog as safety_epilog
-
-    p = argparse.ArgumentParser(
-        prog="cbench community-submit",
-        description="Open a packaged community submission as a pull request via `gh`. "
-                     "Previews by default; only sends with --confirm.",
-        epilog=safety_epilog(),
-    )
-    p.add_argument("path", help="A folder produced by `cbench community-package`.")
-    p.add_argument("--repo", default=UPSTREAM_REPO,
-                    help=f"Upstream repo to submit to (default {UPSTREAM_REPO}).")
-    p.add_argument("--confirm", action="store_true",
-                    help="Actually fork, push and open the PR. Without this, prints the "
-                         "plan and pushes nothing (it still runs `gh auth status`, which asks "
-                         "GitHub whether you are logged in).")
-    args = p.parse_args(argv)
-
-    problems = validate_submission(args.path)
-    if problems:
-        print(f"[!] Not submitting. {len(problems)} problem(s) with {args.path}:\n")
-        for p_ in problems:
-            print(f"  - {p_}")
-        print("\nFix these first (`cbench community-validate` re-checks), or re-run "
-              "`cbench community-package`.")
-        return 1
-
-    meta = load_submission_metadata(args.path)
-    # Read from the folder, not from a caller: this command is handed a
-    # path, and describing a 39-CSV submission as "(none)" in the PR body
-    # is the wrong-but-plausible metadata a reviewer would have to catch
-    # by hand.
-    copied = suites_in_folder(args.path)
-
-    print("This submits raw CSVs only: no grade or score travels with them. Whoever")
-    print("reads them computes their own verdict with `cbench score --from-existing`.")
-    print("See community-results/README.md.")
-    print()
-    available, detail = detect_gh()
-
-    if not available:
-        print(f"Can't submit automatically: {detail}.\n")
-        print(manual_instructions(args.path, meta, args.repo, copied=copied))
-        return 1
-
-    print(f"{detail}.\n")
-    print(f"This will open a pull request against {args.repo}, publicly, as you:\n")
-    for step in build_submit_plan(args.path, meta, copied, args.repo):
-        print(f"  $ {' '.join(step['argv'][:8])}")
-        print(f"      {step['why']}")
-
-    print(f"\n{PRIVACY_NOTICE}\n")
-
-    if not args.confirm:
-        print("Nothing sent. Re-run with --confirm to actually submit.")
-        return 0
-
-    ok, message = execute_plan(args.path, meta, copied, args.repo)
-    if not ok:
-        print(f"\n[!] Submission failed:\n{message}")
-        return 1
-    print(f"\nOpened: {message}")
-    return 0
-
-
 def _cmd_tui(argv):
     """Launches the Textual control panel. Every action it takes is a real
     `cbench` subcommand run as a subprocess -- see tui/jobs.py's module
@@ -1575,9 +1348,6 @@ _NATIVE = {
     "score": _cmd_score,
     "compare": _cmd_compare,
     "catalogue": _cmd_catalogue,
-    "community-validate": _cmd_community_validate,
-    "community-package": _cmd_community_package,
-    "community-submit": _cmd_community_submit,
     "tui": _cmd_tui,
 }
 

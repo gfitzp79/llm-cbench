@@ -74,21 +74,6 @@ def isolate_results_and_catalogue(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def isolate_endpoint_runtime(monkeypatch):
-    """Keeps community packaging off the live endpoint.
-
-    Packaging records the endpoint's runtime version, read from its
-    /api/version, and leaves the field empty when nothing answers -- which
-    validation then refuses, as designed. Six tests passed only on a machine
-    with Ollama running and failed on every CI runner, which has none.
-
-    A test about the undetectable case still overrides this with None."""
-    import openllm_cbench.core.community as community
-    monkeypatch.setattr(community, "detect_endpoint_runtime",
-                        lambda *a, **k: "ollama 0.0.0-test")
-
-
-@pytest.fixture(autouse=True)
 def isolate_budget_lookup(monkeypatch):
     """Keeps the automatic generation budget off the live endpoint.
 

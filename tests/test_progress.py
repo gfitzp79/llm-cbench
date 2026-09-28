@@ -87,8 +87,7 @@ def _progress(tmp_path, cards, tags, local=None):
     _write_cards(tmp_path / "scorecards", cards)
     models = [{"name": t} for t in (local if local is not None else tags)]
     return compute_progress(local_models=models, registry=_registry(*tags),
-                            scorecards_root=tmp_path / "scorecards",
-                            submissions_root=tmp_path / "none")
+                            scorecards_root=tmp_path / "scorecards")
 
 
 def test_nothing_done_is_newcomer(tmp_path):
@@ -138,8 +137,7 @@ def test_an_unreachable_endpoint_is_not_reported_as_zero(tmp_path):
     endpoint was stopped."""
     _write_cards(tmp_path / "scorecards", [_card("m:1b")])
     p = compute_progress(local_models=None, registry=_registry("m:1b"),
-                         scorecards_root=tmp_path / "scorecards",
-                         submissions_root=tmp_path / "none")
+                         scorecards_root=tmp_path / "scorecards")
     assert p["local"] is None
     assert "unreachable" in render_line(p)
 

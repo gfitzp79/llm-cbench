@@ -325,9 +325,8 @@ There are two reasons for shipping no results, and the second is the important
 one.
 
 The first is that your results are yours. Nothing this framework produces is
-uploaded anywhere, and the only path by which a result leaves your machine is
-one you drive yourself through `cbench community-package` and
-`cbench community-submit`.
+uploaded anywhere: it has no command that sends a result off your machine, so
+a result leaves it only if you move it yourself.
 
 The second is that a measurement and the instrument that produced it have
 different lifetimes. A number collected on one machine, at one generation

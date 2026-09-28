@@ -84,18 +84,6 @@ def test_version_prints_the_package_version():
         assert result.stdout.strip() == f"cbench {__version__}"
 
 
-def test_a_submission_records_the_version_cbench_version_prints(monkeypatch):
-    """The submission template documents cbench_version as what `cbench
-    --version` prints. It was read from the installed metadata instead,
-    which an editable install freezes at install time: a checkout at
-    0.1.2 stamped its submissions 0.1.0."""
-    from importlib import metadata
-    from openllm_cbench import __version__
-    from openllm_cbench.core import community
-    monkeypatch.setattr(metadata, "version", lambda name: "0.0.0-stale")
-    assert community.detect_cbench_version() == __version__
-
-
 def test_a_gate_that_never_reached_the_model_refuses_and_saves_nothing(tmp_path):
     """It exited 1, like a check that ran and found caveats, and --save
     catalogued `"tools": false` for a model nobody had reached."""

@@ -4,10 +4,11 @@ name: tests
 # by running the full suite against a dead endpoint. That's what makes a
 # cross-platform matrix possible here at all: CI never needs Ollama, so
 # these jobs test the framework itself, not a model.
+# No pull_request trigger: this project does not accept contributions
+# (CONTRIBUTING.md), so the only changes CI ever sees are pushes to main.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -62,7 +63,7 @@ jobs:
         # installed with its extra here and must still fail gracefully).
         run: |
           python -c "import openllm_cbench.cli"
-          python -c "import openllm_cbench.core.hardware, openllm_cbench.core.canary, openllm_cbench.core.discover, openllm_cbench.core.pull, openllm_cbench.core.community"
+          python -c "import openllm_cbench.core.hardware, openllm_cbench.core.canary, openllm_cbench.core.discover, openllm_cbench.core.pull"
           python -c "import openllm_cbench.suites.containment, openllm_cbench.suites.channel, openllm_cbench.suites.persistence"
           python -c "import openllm_cbench.scoring.aggregate, openllm_cbench.scoring.containment_metrics, openllm_cbench.scoring.scorecard"
           # The reconcilers import Inspect lazily. A module-level import here

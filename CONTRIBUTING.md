@@ -1,9 +1,16 @@
 # Contributing
 
-Thank you for considering a contribution. This document covers what the
-project is, the two rules that are not negotiable, how the code is laid
-out, how to add to it, and the conventions to keep. It assumes no
-particular editor, IDE or AI assistant.
+**This project does not accept contributions.** Pull requests and result
+submissions are not accepted, and the repository has no issue tracker. To
+report a security vulnerability, use the private route in
+[SECURITY.md](SECURITY.md).
+
+The licence (Apache-2.0) permits you to fork the code and change it for
+your own use. The rest of this document is for anyone reading the code or
+extending their own copy: what the project is, the rule that is not
+negotiable, how the code is laid out, how to add to it, and the
+conventions it keeps. It assumes no particular editor, IDE or AI
+assistant.
 
 ## What this project is
 
@@ -21,8 +28,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
 
 ## The non-negotiable invariant
 
-**Every suite measures attempt, never success.** No contribution may add
-a code path through which a model's tool call reaches any real
+**Every suite measures attempt, never success.** No change may add a
+code path through which a model's tool call reaches any real
 destination other than the suite's own loopback canary, or through which
 a suite sends a request anywhere other than the configured chat endpoint
 and that canary. `run_shell` never executes anything, under any flag, for
@@ -31,8 +38,8 @@ any task set.
 If a change touches `core/canary.py`, `core/sandbox.py` or any suite's
 tool-execution code (`execute_tool()` or its equivalent), run
 `tests/test_safety_invariant.py` before and after the change, and say so
-in the pull request description. The test needs no model and no network,
-so it can always be run.
+in the commit message. The test needs no model and no network, so it can
+always be run.
 
 ## Setting up
 
@@ -54,7 +61,7 @@ extra is needed only for the Inspect cross-validation under
 `integrations/`.
 
 CI runs the tests on Linux with Python 3.10 and 3.13 for every push to
-`main` and every pull request. Started by hand, it runs the full matrix:
+`main`. Started by hand, it runs the full matrix:
 Linux, macOS and Windows, each with both Python versions. Every job also
 runs the safety-invariant test as a separate step, checks that the
 modules import cleanly, and runs `cbench doctor` with no endpoint
@@ -67,9 +74,8 @@ matrix.
 src/openllm_cbench/
   cli.py                    the `cbench` entry point: native subcommands
                             (doctor, gate, discover, search, pull, remove,
-                            config, assess, score, compare, catalogue,
-                            community-validate, community-package,
-                            community-submit, tui) and passthroughs to a
+                            config, assess, score, compare, catalogue, tui)
+                            and passthroughs to a
                             module's own main() (containment, channel,
                             persistence, aggregate, guardrail, extension-rule,
                             score-containment)
@@ -161,16 +167,6 @@ src/openllm_cbench/
                             trials per suite), and a level earned on rigour
                             rather than volume; reads local files only and
                             transmits nothing
-    community.py            community submissions: validate_submission()
-                            checks a folder's shape, checksums and publication
-                            rules; package_submission() builds one from local
-                            CSVs; PRIVACY_NOTICE is shown when packaging and
-                            again when submitting
-    community_submit.py     opens a packaged submission as a pull request
-                            through the contributor's own authenticated `gh`,
-                            or prints manual instructions when `gh` is missing
-                            or logged out; its docstring explains why `gh`
-                            rather than a token or a hosted upload service
     invariant.py            the safety-invariant string, printed by
                             `cbench --help`, shown as the `--help` epilog of
                             each suite and native subcommand, and shown in the
@@ -244,12 +240,6 @@ src/openllm_cbench/
     models/verified.json    packaged catalogue seed: configuration only, no
                             verdicts; its `_schema` key documents every
                             catalogue field
-community-results/
-  README.md                 the submission convention for sharing raw trial
-                            CSVs; read it before changing anything in this
-                            area
-  SUBMISSION_TEMPLATE.json  submission.json template for a hand-assembled
-                            submission
 tests/                      every test runs with no model and no network
   test_safety_invariant.py  the core safety claim, executable
   test_scoring_parity.py    golden fixtures pinning every scoring threshold
@@ -314,32 +304,6 @@ heuristic without updating the parity fixtures in the same commit. A
 silent threshold change is worse than a bug, because it changes what
 earlier results meant without anyone noticing.
 
-### Community results
-
-[`community-results/README.md`](community-results/README.md) is the home
-of the submission convention. In outline: a submission is raw trial CSVs
-plus a `submission.json`. `cbench community-package` builds it from CSVs
-already on disk, copying them without rewriting them and recording a
-checksum per file. `cbench community-submit` opens it as a pull request
-through the contributor's own authenticated `gh`; it previews by default
-and pushes nothing without `--confirm`. A maintainer checks it with
-`cbench community-validate`, and each reader scores it with
-`cbench score --from-existing`. For anyone without `gh`, the fallback is
-a pull request assembled by hand, or a `--zip` archive attached to a
-GitHub issue.
-
-**The publication rule, which is not negotiable either:** raw
-measurements travel, verdicts do not. A submission carries per-row CSVs
-and nothing else. `validate_submission()` refuses any file whose path
-(folder or file name) marks it as a scorecard or trial summary, any
-`submission.json` that claims a grade, score, band or rate, and any
-submission without a completed gate check or without accepted
-contributor terms. The community-results README
-gives the reasons. This repository is not a leaderboard and must not
-become one by accident. Before changing anything in this area, read the
-publication-rule comment at the top of `core/community.py`; it explains
-what each guard prevents.
-
 ## Conventions to keep
 
 - **Keep suite logic out of the TUI.** New suite or scoring functionality
@@ -369,11 +333,11 @@ what each guard prevents.
   `cbench discover --gate-all` rather than looping over single gate
   checks inside the TUI. The only file the TUI writes itself is a copy of
   each job's output, under `tui-logs/` in the results folder.
-- **Smoke-test before opening a pull request, and say what you did.** A
+- **Smoke-test before calling a change done, and say what you did.** A
   compile or syntax check is necessary but not sufficient: some defects
   appear only at run time, such as a name that resolves only when it is
   called, or one endpoint parameter reused for two different URL shapes.
-  State in the pull request whether you validated against a live model,
+  State in the commit message whether you validated against a live model,
   against `--dry-run` output only, or against fabricated data only. Do
   not imply more verification than took place.
 - **Gate-check a channel-splitting change at both `think=true` and
@@ -400,7 +364,7 @@ what each guard prevents.
   model, and `presence_penalty` to 0, so they cannot confound a
   comparison unless you override one for one model's run. A parameter set
   in a model's Modelfile outside that list, such as a repetition penalty
-  or a `stop` sequence, is not pinned. If your contribution runs two
+  or a `stop` sequence, is not pinned. If your change runs two
   models against each other (a base and fork pair, an A/B test), first
   compare the Modelfile sampling parameters that `cbench gate` reports
   for each model. An unmatched parameter invalidates the comparison
@@ -412,5 +376,7 @@ what each guard prevents.
 
 ## Questions
 
-Open an issue. For anything that touches the safety invariant, see
-[SECURITY.md](SECURITY.md) instead.
+There is no issue tracker, so questions about the code are answered by
+the code and these documents. For anything that touches the safety
+invariant, or any other security concern, use the private route in
+[SECURITY.md](SECURITY.md).

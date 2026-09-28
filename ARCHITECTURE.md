@@ -5,8 +5,8 @@ stops it going further, without reading every line of source first. It
 also records the measurement pitfalls the tool is built to avoid, so that
 you get the benefit of that experience without repeating it.
 
-If your reading of the code contradicts this document, trust the code and
-open an issue. This file is a map, not the territory.
+If your reading of the code contradicts this document, trust the code.
+This file is a map, not the territory.
 
 ## 1. What is measured
 
@@ -83,13 +83,10 @@ directly rather than take it on faith.
   canary it starts for itself, and nothing else. The same holds when
   `cbench assess` or `cbench score` runs the suites. `cbench doctor`
   checks both: it queries the endpoint and runs a canary self-check. Every
-  other command contacts the endpoint at most. Three commands cause
-  traffic beyond the endpoint, each only when you run it: `cbench pull`
-  and `cbench search`, which make the endpoint's Ollama daemon contact
-  Ollama's registry, and `cbench community-submit`, which asks GitHub
-  through `gh auth status` whether you are logged in and, with
-  `--confirm`, runs `gh` and `git` against GitHub. The entries below
-  describe each.
+  other command contacts the endpoint at most. Two commands cause traffic
+  beyond the endpoint, each only when you run it: `cbench pull` and
+  `cbench search`, which make the endpoint's Ollama daemon contact
+  Ollama's registry. The entries below describe each.
 - **Harmful-intent task set behind two explicit flags.** S1's optional
   harmful-intent task file (`data/tasks/containment_tasks_harmful.json`)
   runs only with `--tasks-file` pointed at it *and* `--sandbox extended`,
@@ -137,16 +134,6 @@ directly rather than take it on faith.
   nothing without `--yes`; the TUI requires a checkbox ticked in the same
   interaction. It sends the exact tag it was given, never a partial
   match, and it leaves that model's results in place.
-- **`cbench community-submit` pushes nothing without `--confirm`.** It
-  validates the submission folder first and refuses one with problems.
-  Without `--confirm` it runs only `gh auth status` and prints the exact
-  `gh` and `git` commands it would run. With it, it runs them as the
-  contributor, through the GitHub CLI they authenticated themselves: a
-  fork if needed, a shallow clone into a temporary folder, a commit of
-  the submission folder alone, a push to the fork and a pull request. The framework never sees or stores a
-  credential (`core/community_submit.py`). A submission carries raw CSVs
-  only, never a grade; `community-results/README.md` sets out the
-  convention.
 - **`cbench assess` and `cbench score` add orchestration, not reach.**
   Each trial is a real call to the suite's own `main()`, through the same
   `_dispatch_passthrough()` path every passthrough subcommand uses,
@@ -514,10 +501,7 @@ Most of them apply to any evaluation of agentic or reasoning models.
   pre-flight treats it as `UNVERIFIED`, never as a reason to refuse.
   Slowness alone invalidates nothing: a model that spills into system RAM
   still produces valid rows, only more slowly. The failure is specifically
-  a check that never finished. `core/community.py:gate_evidence()` keeps
-  unverified checks separate from genuine caveats for this reason, and
-  `cbench community-validate` rejects a submission in which any gate
-  check is unverified. Apply the same care before citing your own gate
+  a check that never finished. Apply the same care before citing a gate
   report: check whether a caveat means the model was tried and found
   wanting, or the check ran out of time on your hardware.
 - **A tool schema with more than one route to the network creates a

@@ -126,13 +126,11 @@ before a socket is opened.
   model. Neither adds a capability the daemon does not already have, and
   pulling a tag you do not recognise or trust is the same decision either
   way.
-- **`cbench community-submit` is the only command that talks to a service
-  other than the endpoint**, and it does so only through your own `gh`
-  and `git`. Without `--confirm` it checks that `gh` is installed and
-  logged in and prints the commands it would run. With `--confirm` it
-  forks the repository, pushes a branch and opens a public pull request
-  under your name. The framework never sees, stores or transmits your
-  credentials.
+- **No command sends anything to a service other than the endpoint.**
+  Every request cbench makes goes to the chat endpoint you configure or,
+  inside a suite, to its own loopback canary. It has no upload, submission
+  or telemetry path: results, CSVs and scorecards stay in your results
+  folder until you move them yourself.
 - **Reports and CSVs contain model text verbatim and unsanitised**,
   written to your results folder (`cbench config` shows where it is).
   Before you share one, treat it as you would raw model output from any
@@ -150,11 +148,10 @@ as a security issue, not a regular bug:
   endpoint and that canary;
 - `run_shell` executing a command.
 
-**Report it privately through GitHub's vulnerability reporting, not in a
-public issue:** open this repository's **Security** tab and choose
-**Report a vulnerability**. The report goes to the maintainer only, stays
-out of the public issue tracker until there is a fix, and needs no email
-address published in this file.
+**Report it privately through GitHub's vulnerability reporting:** open
+this repository's **Security** tab and choose
+**Report a vulnerability**. The report goes to the maintainer only and
+needs no email address published in this file.
 
 > **Maintainer note.** The **Report a vulnerability** button works only
 > when private vulnerability reporting is enabled for this repository
@@ -163,6 +160,6 @@ address published in this file.
 > email instead, replace this section with a security contact address.
 > Remove this note at publication.
 
-For anything else, such as a scoring bug, a documentation gap or a
-feature request, use the regular issue tracker; it does not need private
-handling.
+This project does not accept contributions and has no issue tracker
+([CONTRIBUTING.md](CONTRIBUTING.md)), so the private route above is for
+security reports only.

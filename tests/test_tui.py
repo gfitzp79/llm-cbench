@@ -28,7 +28,7 @@ from openllm_cbench.tui.jobs import (  # noqa: E402
 from openllm_cbench.tui.app import (  # noqa: E402
     CBenchTUI, DashboardScreen, RunScreen, GateScreen, ReportsScreen,
     ModelsScreen, PullScreen, ScoreScreen,
-    CommunityScreen, AboutScreen,
+    AboutScreen,
 )
 
 
@@ -83,12 +83,11 @@ def isolated_results_dir(tmp_path, monkeypatch):
     file's tests at an isolated tmp directory instead, autouse so no
     individual test has to remember to opt in.
 
-    The chdir matters as much as the env var: `cbench community-package`
-    writes to ./community-results/ relative to the CWD it inherits, which
-    $OPENLLM_CBENCH_RESULTS_DIR does not cover -- so a TUI test pressing
-    "Package" landed a real submission folder in this repo. Spawned
-    subprocesses inherit the CWD, so moving it moves everything
-    cwd-relative with it."""
+    The chdir matters as much as the env var: anything a spawned
+    subprocess writes relative to the CWD it inherits is outside what
+    $OPENLLM_CBENCH_RESULTS_DIR covers, and once landed a real folder in
+    this repo. Spawned subprocesses inherit the CWD, so moving it moves
+    everything cwd-relative with it."""
     monkeypatch.setenv("OPENLLM_CBENCH_RESULTS_DIR", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -488,9 +487,9 @@ def test_dashboard_navigates_to_score_screen():
 def test_score_screen_shows_uncatalogued_warning_before_running():
     # Regression: catalogue status ("UNGATED") was only ever visible in
     # the log AFTER a run was already underway -- a real user had no way
-    # to know before committing to a run. This is going to be the NORM,
-    # not the exception, as community-submitted results bring in models
-    # this catalogue has never gated.
+    # to know before committing to a run. A model this catalogue has never
+    # gated is the common case for anyone testing a new model, not the
+    # exception.
     async def scenario():
         app = CBenchTUI()
         async with app.run_test(size=(120, 50)) as pilot:
@@ -826,204 +825,6 @@ def test_score_screen_shows_no_hardware_warning_when_model_fits(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_dashboard_navigates_to_community_validate_screen():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            assert isinstance(app.screen, CommunityScreen)
-    asyncio.run(scenario())
-
-
-def test_community_validate_screen_requires_a_path_before_starting():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            await _click(pilot, "#community-start")
-            await pilot.pause()
-            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
-            assert any("path is required" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
-
-
-def test_community_validate_screen_builds_the_correct_command():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(120, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            path_input = app.screen.query_one("#community-path-input")
-            path_input.value = "community-results/gemma3-12b/alice_20260912"
-            await _click(pilot, "#community-start")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "community-validate" in preview
-            assert "community-results/gemma3-12b/alice_20260912" in preview
-    asyncio.run(scenario())
-
-
-def test_community_screen_buttons_are_clickable_with_no_community_results_dir():
-    # Found live: with no community-results/ directory (a fresh install --
-    # the common case) the empty-state placeholder replaces the
-    # DirectoryTree, expands to fill the row, and pushes the action
-    # buttons past the right edge of the terminal, where pilot.click()
-    # misses them and so does a real mouse. The isolated_results_dir
-    # fixture chdirs to an empty tmp dir, so this is that exact state.
-    from textual.widgets import Button
-
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            assert app.screen.query_one("#community-tree-empty") is not None
-            for btn_id in ("#community-package", "#community-start", "#community-submit"):
-                btn = app.screen.query_one(btn_id, Button)
-                assert btn.region.right <= 140, f"{btn_id} is off-screen at {btn.region}"
-    asyncio.run(scenario())
-
-
-def test_community_screen_packages_by_model_tag():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            app.screen.query_one("#community-model-input").value = "x:1b"
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "community-package" in preview
-            assert "--model x:1b" in preview
-    asyncio.run(scenario())
-
-
-def test_community_screen_package_requires_a_model_tag():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
-            assert any("model tag is required" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
-
-
-def test_community_screen_terms_checkbox_gates_accept_terms():
-    # Raw data travels, verdicts do not -- and a contributor accepts the
-    # terms deliberately or not at all. The box defaults off, and only
-    # ticking it may add --accept-terms to the real argv.
-    from textual.widgets import Checkbox
-
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            assert app.screen.query_one("#community-terms", Checkbox).value is False
-
-            app.screen.query_one("#community-model-input").value = "x:1b"
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            assert "--accept-terms" not in str(app.screen.query_one("#community-preview").content)
-            log_lines = [x.text for x in app.screen.query_one("#community-log").lines]
-            assert any("terms not accepted" in l.lower() for l in log_lines)
-
-            await _click(pilot, "#community-terms")
-            await pilot.pause()
-            assert app.screen.query_one("#community-terms", Checkbox).value is True
-            # Textual debounces a Button: Button._on_click ignores a click
-            # while the widget still carries `-active`, which a timer clears
-            # `active_effect_duration` (0.2s) after the previous press. This
-            # is the ONLY test that clicks one button twice, and without this
-            # settle the second click is silently swallowed on a fast run --
-            # roughly 1 run in 15, which looked like the worker race and
-            # was not. A human double-tapping inside 200ms is debounced by
-            # design, so this is test fragility, not a product defect.
-            await asyncio.sleep(0.25)
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            assert "--accept-terms" in str(app.screen.query_one("#community-preview").content)
-    asyncio.run(scenario())
-
-
-def test_community_screen_submit_previews_without_confirm():
-    # Submitting opens a PUBLIC pull request under the user's own account.
-    # The confirm checkbox defaults off, and without it --confirm must not
-    # appear in the argv -- a single misplaced click cannot publish.
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            from textual.widgets import Checkbox
-            assert app.screen.query_one("#community-confirm", Checkbox).value is False
-            app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
-            await _click(pilot, "#community-submit")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "community-submit" in preview
-            assert "--confirm" not in preview
-    asyncio.run(scenario())
-
-
-def test_community_screen_submit_passes_confirm_only_when_checked():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            app.screen.query_one("#community-path-input").value = "community-results/x-1b/a_1"
-            await _click(pilot, "#community-confirm")
-            await _click(pilot, "#community-submit")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "--confirm" in preview
-            log_lines = [str(x) for x in app.screen.query_one("#community-log").lines]
-            assert any("public" in line.lower() for line in log_lines)
-    asyncio.run(scenario())
-
-
-
-
-def test_package_refreshes_the_submission_picker_on_the_right_screen():
-    """The refresh-after-package must live on CommunityScreen.
-
-    It spent a while on RunScreen by mistake, where `"community-package"
-    in argv` could never be true and `_refresh_pickers` did not even
-    exist -- so packaging appeared to work (exit 0, folder written on
-    disk) while the picker on that very screen still read "Nothing
-    packaged yet", and only leaving and re-entering showed it. Asserted
-    structurally because reproducing it needs a real subprocess.
-    """
-    import inspect as _inspect
-
-    run_src = _inspect.getsource(RunScreen)
-    community_src = _inspect.getsource(CommunityScreen)
-
-    assert "_refresh_pickers" not in run_src, \
-        "RunScreen cannot refresh community pickers -- it has no such method"
-    assert "_refresh_pickers" in community_src
-    # The refresh has to be chained off a SUCCESSFUL package, not fired
-    # unconditionally: a failed package leaves nothing new to select.
-    assert 'if ok and "community-package" in argv' in community_src
-
-
-
 def test_gate_all_passes_the_limit_from_the_form(monkeypatch):
     """--limit has existed on `cbench discover --gate-all` since it was
     written and had no interactive route. Gating every uncatalogued model
@@ -1081,41 +882,6 @@ def test_gate_all_without_a_limit_stays_unbounded(monkeypatch):
 
     asyncio.run(scenario())
     assert "--limit" not in captured.get("argv", [])
-
-
-def test_package_forwards_reviewer_notes():
-    """`community-package --notes` is how a contributor flags anything
-    unusual about their run to a reviewer. With no field here, the TUI
-    path silently produced less useful submissions than the CLI one."""
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            app.screen.query_one("#community-model-input").value = "x:1b"
-            app.screen.query_one("#community-notes-input").value = "spilled to system RAM"
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "--notes" in preview
-            assert "spilled to system RAM" in preview
-    asyncio.run(scenario())
-
-
-def test_package_omits_notes_when_left_blank():
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 50)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            app.screen.query_one("#community-model-input").value = "x:1b"
-            await _click(pilot, "#community-package")
-            await pilot.pause()
-            preview = str(app.screen.query_one("#community-preview").content)
-            assert "--notes" not in preview
-    asyncio.run(scenario())
 
 
 def test_models_table_has_an_added_column_and_sorts_by_value(monkeypatch):
@@ -1598,36 +1364,6 @@ def test_a_refusal_keeps_its_reasons_on_screen():
     assert show("[!] NOT STARTING: S1 containment cannot produce a gradeable result.")
     assert show("    What you CAN run:")
     assert show("      cbench assess --model x:1b --suites s2 --trials 3")
-
-
-def test_package_zips_only_when_asked_and_passes_the_contributor(monkeypatch):
-    captured = {}
-
-    async def fake_run_job(argv, on_line, cwd=None):
-        captured["argv"] = argv
-        from openllm_cbench.tui.jobs import JobResult
-        return JobResult(argv=list(argv), returncode=0, lines=[])
-
-    import openllm_cbench.tui.app as app_mod
-    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
-
-    async def scenario():
-        app = CBenchTUI()
-        async with app.run_test(size=(140, 60)) as pilot:
-            await pilot.pause()
-            await _click(pilot, "#goto-community")
-            await pilot.pause()
-            app.screen.query_one("#community-model-input").value = "x:1b"
-            app.screen.query_one("#community-contributor-input").value = "someone"
-            app.screen.query_one("#community-terms").value = True
-            await _click(pilot, "#community-package")
-            for _ in range(5):
-                await pilot.pause()
-
-    asyncio.run(scenario())
-    argv = captured.get("argv", [])
-    assert "--zip" not in argv                      # off by default, as on the CLI
-    assert argv[argv.index("--contributor") + 1] == "someone"
 
 
 def test_a_zero_limit_refuses_instead_of_gating_everything(monkeypatch):

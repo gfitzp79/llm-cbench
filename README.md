@@ -56,7 +56,6 @@ The other commands:
 | `cbench extension-rule` | Applies the pre-registered 3-trial extension rule to a base/variant pair. |
 | `cbench score-containment` | Re-scores S1 CSVs with more detailed egress metrics. |
 | `cbench guardrail` | Scores the tool calls recorded in S1 CSVs against a guardrail classifier model, offline: detection rate and over-refusal cost. It measures detection, not prevention. |
-| `cbench community-package`, `cbench community-validate`, `cbench community-submit` | Packages, checks and submits your raw CSVs as a community result. |
 | `cbench tui` | Opens the terminal UI, a control panel over the commands above. |
 
 `cbench --version` prints the installed version. Each suite and scoring
@@ -77,7 +76,7 @@ native API (default endpoint `http://localhost:11434`); section 4 of
 another endpoint, set `$OPENLLM_CBENCH_ENDPOINT`, which every command that
 talks to the endpoint reads. `--endpoint` overrides it on `doctor`, `gate`,
 `discover`, `catalogue`, `search`, `pull`, `remove` and the three suites;
-`score`, `assess`, `guardrail` and `community-package` take no `--endpoint`
+`score`, `assess` and `guardrail` take no `--endpoint`
 and read the environment variable only. The package is not on PyPI, so
 install it from GitHub.
 
@@ -657,13 +656,13 @@ The terminal UI is a thin control panel over the CLI. Every action it takes
 runs a real `cbench` subcommand as a subprocess, and the exact command line
 appears on screen before it starts; there is no second implementation of
 any suite. No command runs until you click. The safety invariant is shown on
-every screen, and suite, score, gate, search, pull, doctor and community
-actions save their full output as a log under `tui-logs/` in the results
+every screen, and suite, score, gate, search, pull and doctor actions save
+their full output as a log under `tui-logs/` in the results
 folder.
 
 The dashboard shows the active results location and a short progress panel:
-how many models are pulled, catalogued, scored, **citable** and submitted,
-plus a level and a suggested next action. Its buttons open these screens:
+how many models are pulled, catalogued, scored and **citable**, plus a
+level and a suggested next action. Its buttons open these screens:
 
 | Button | What it does |
 |---|---|
@@ -672,7 +671,6 @@ plus a level and a suggested next action. Its buttons open these screens:
 | Gate a model | `cbench gate`, with a tick box that adds `--save` (off by default). |
 | Local models | Every pulled model, with gate, delete, search and pull actions; see [Local models](#local-models). |
 | Browse reports | The reports in the results folder; see [Browse reports](#browse-reports). |
-| Share / validate results | `cbench community-package`, `community-validate` and `community-submit`; see [Sharing results from the TUI](#sharing-results-from-the-tui). |
 | Check environment | `cbench doctor`, with its output shown on the dashboard. |
 | Settings | `cbench config`: Save results location, Save catalogue location, Clear results location (back to ./results), Find existing results. |
 | About / extend this | The short version of [Extending this framework with an AI coding assistant](#extending-this-framework-with-an-ai-coding-assistant). |
@@ -684,7 +682,7 @@ wherever it appears, matching the CLI.
 
 The progress counts and the level are deliberately different things. The
 counts are neutral inventory. The **level** (newcomer, novice, intermediate,
-advanced, contributor) is earned on rigour, not volume, because a raw count
+advanced) is earned on rigour, not volume, because a raw count
 of scored models overstates what has been measured: in a real results
 folder, "scored" models include test artefacts, models that never ran,
 models that are invalid on every suite, and an A that means "this model
@@ -774,21 +772,6 @@ fixed filename and are overwritten in place, so their date, like that of
 any report without a timestamp in its name, comes from the modification
 time and is marked with a trailing `~` so that it is not mistaken for the
 time of the run.
-
-### Sharing results from the TUI
-
-**Share / validate results** runs the three community commands (see
-[Sharing your own results](#sharing-your-own-results)). It offers the
-models that have CSVs on disk and the submissions already packaged as
-choices, because a typed path is a source of errors with no benefit when
-both sets are known; two text fields take a tag or a path that the pickers
-do not list. Optional fields
-set the notes for the reviewer (`--notes`: anything unusual about the run)
-and your GitHub handle (`--contributor`; left blank, it uses
-`git config user.name`). "Also make a .zip" is off by default, as on the
-CLI. "Accept contributor terms" adds `--accept-terms`, and "Confirm submit"
-is the only thing that adds `--confirm`; without it, Submit previews the
-commands and pushes nothing.
 
 ### The Score screen
 
@@ -939,9 +922,8 @@ different budget or a longer timeout, add that yourself (schema below).
 Nothing is saved if the check never reached the model (an unreachable
 endpoint or an unknown tag), since nothing about it was measured.
 
-**2. Manual: edit `models.json` (your overlay) or, if you are contributing
-a worked example back to the project,
-`src/openllm_cbench/data/models/verified.json`** (the packaged, read-only
+**2. Manual: edit `models.json`** (your overlay), never
+`src/openllm_cbench/data/models/verified.json` (the packaged, read-only
 seed). An overlay entry for a tag replaces the seed entry for that tag
 outright; the two are not merged. The full field-by-field schema, with the
 reasoning behind each field, is in the `_schema` key of `verified.json`;
@@ -1129,76 +1111,12 @@ ceiling that no trial count passes.
 `cbench score --model <tag> --from-existing` scores whatever S1, S2 and S3
 CSVs already exist in the results folder, without running anything or
 calling a model. That is also how a model too large for your own hardware
-gets a scorecard at all: someone else runs it on theirs and shares the raw
-CSVs, and you set `$OPENLLM_CBENCH_RESULTS_DIR` to their submission folder
-before running the command (it must be set before the process starts;
-`cbench score` has no `--results-dir`). See
-[community-results/README.md](community-results/README.md) for the
-submission convention: why raw CSVs rather than a submitted score, the
-folder layout, and `cbench community-validate` before merging.
-
-### Sharing your own results
-
-```bash
-cbench gate --model <model-tag> --save          # prerequisite; see below
-cbench community-package --model <model-tag> --accept-terms
-cbench community-submit community-results/<model-tag>/<contributor>_<date>
-```
-
-**Raw measurements travel; verdicts do not.** A submission carries per-row
-CSVs and a `submission.json` describing how they were produced, never a
-scorecard, a grade or a claimed rate, and validation refuses all three. This
-repository is not a leaderboard and will not become one: anyone who wants a
-grade computes it from the submitted rows with `cbench score --from-existing`.
-There are two reasons. A grade is an editorial *conclusion* about a named
-commercial product, whereas a CSV row is a *measurement*, permanently
-qualified by the configuration recorded beside it. And results are
-hardware-dependent enough to invert a verdict: a model too large for the
-card can time out on every gate check, which reads as "cannot call tools"
-when the model could and the machine was too small. See
-[community-results/README.md](community-results/README.md) for the full
-rule.
-
-That failure mode is why `cbench gate --model <tag> --save` is a
-**prerequisite**: a package whose gate check is missing or did not complete
-does not validate, and so cannot be submitted, because a check that timed
-out is an absent check rather than a failed one. Slowness alone is fine: a
-model that spills into system RAM still produces valid rows.
-
-`--accept-terms` records your acceptance of the contributor terms: the right
-to share the files, no confidential or personal material, accurate hardware
-details, an Apache-2.0 licence grant, and acknowledgement that publication
-in public git history is permanent. Run the command without the flag first:
-it still builds the folder and prints the terms, and the folder does not
-validate until you have read them and the CSVs and packaged again with the
-flag.
-
-`cbench community-package` bundles whatever S1, S2 and S3 CSVs this machine
-has already produced for a model into a submittable
-`community-results/<model-tag>/<contributor>_<date>/` folder. It copies the
-CSVs (it never rewrites or moves them), fills in `submission.json` from what
-it can detect (hardware, the local endpoint's runtime version, quantisation,
-this harness's version), records a SHA-256 hash per CSV so that later
-corruption or tampering is detectable, and validates the result. It does not
-refuse an invalid package: it builds the folder anyway, lists what to fix
-and exits `1`. It uploads nothing. `--zip` also produces an archive, for
-anyone who would rather attach it to a GitHub issue than use git;
-`--contributor` sets your GitHub handle or name (by default
-`git config user.name`), and `--notes` records anything unusual about the
-run for the reviewer.
-
-`cbench community-submit` opens a packaged folder as a pull request through
-your own authenticated `gh` (the GitHub CLI); this framework never sees,
-stores or transmits a credential. It re-validates the folder (exiting `1`
-if anything is wrong), checks with `gh auth status` that you are logged in,
-previews the exact command sequence and a reminder that the CSVs contain
-the model's raw output (see `PRIVACY_NOTICE` in
-[`core/community.py`](src/openllm_cbench/core/community.py)), and pushes
-nothing until you pass `--confirm`. Without `gh` installed and logged
-in, it prints manual instructions instead: a fork and pull request for
-anyone comfortable with git, or a prefilled GitHub issue for anyone who is
-not. The TUI does the same three things without a terminal (see
-[Sharing results from the TUI](#sharing-results-from-the-tui)).
+gets a scorecard at all: the suites run on hardware that can hold it, the
+raw CSVs are copied to your machine, and you set
+`$OPENLLM_CBENCH_RESULTS_DIR` to the folder holding them before running the
+command (it must be set before the process starts; `cbench score` has no
+`--results-dir`). The folder needs the same `s1_containment/`,
+`s2_channel/` and `s3_persistence/` layout as your own results folder.
 
 ## Scale and applicability
 
@@ -1236,16 +1154,16 @@ untested rather than assumed to work.
 A grade measures one model, on one machine, under one set of settings. Four
 things follow from that.
 
-- **A grade holds only for the conditions it was measured under.** On other
-  hardware, or at another generation budget, the same model can grade
-  differently. A model that does not fit in GPU memory runs more slowly, so
-  more requests time out and more replies stop at the reply limit, and those
-  rows leave the denominator (see [Scoring a model](#scoring-a-model)). A
-  larger budget lets some of those rows finish, and lets a model caught in a
-  reasoning loop run for longer. Either change can move a grade up or down.
-  Run cbench on your own hardware before relying on anyone else's grade,
-  which is also why a shared result carries raw CSVs and never a grade (see
-  [Sharing your own results](#sharing-your-own-results)).
+- **A grade holds only for the conditions it was measured under.** The same
+  model can grade differently on other hardware, with more or less memory
+  available, or at other settings: the generation budget, the time limit on
+  each request, or the sampling. A model that does not fit in GPU memory
+  runs more slowly, so more requests time out and more replies stop at the
+  reply limit, and those rows leave the denominator (see
+  [Scoring a model](#scoring-a-model)). A larger budget lets some of those
+  rows finish, and lets a model caught in a reasoning loop run for longer.
+  Any of these can move a grade up or down. Run cbench on your own hardware
+  before relying on anyone else's grade.
 - **A good grade is not a guardrail.** Every suite measures attempt, never
   success, in a sandbox built so that the attempt cannot succeed. A clean
   result means the suites did not provoke the behaviour they look for, in
@@ -1287,7 +1205,8 @@ does.
 The project is deliberately not tied to that one tool, which is why it has
 a [CONTRIBUTING.md](CONTRIBUTING.md) rather than a tool-specific
 configuration file. Extending a suite, adding a model to the catalogue or
-building a new scoring metric works the same way whether you use
+building a new scoring metric in your own copy works the same way whether
+you use
 **Claude Code**, **Claude Cowork**, **Codex CLI** or **ChatGPT Cowork**:
 open the repository and point your tool at [ARCHITECTURE.md](ARCHITECTURE.md)
 (what is measured, the control inventory, and how not to fool yourself with
@@ -1314,9 +1233,13 @@ Neither document publishes results. This repository ships a tool, not
 anyone's results, and section 4 of METHODOLOGY.md explains why that
 distinction is substantive rather than a matter of tidiness.
 
-## Contributing
+## Contributions
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+This project does not accept contributions: no pull requests and no result
+submissions. To report a security vulnerability, see
+[SECURITY.md](SECURITY.md). The licence permits forks, and
+[CONTRIBUTING.md](CONTRIBUTING.md) documents the code for anyone reading it
+or extending their own copy.
 
 ## Licence
 

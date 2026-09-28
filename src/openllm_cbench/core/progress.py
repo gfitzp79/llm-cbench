@@ -5,8 +5,8 @@ next.
 WHAT THIS COUNTS, AND WHY IT MATTERS THAT IT IS NOT VOLUME. The obvious
 version of this panel counts models pulled, models gated and models
 scored, and awards a tier for accumulating them. That version rewards
-running many shallow scans, which is the opposite of what a crowd-sourced
-security benchmark needs: a corpus full of single-trial results that the
+running many shallow scans, which is the opposite of what a security
+benchmark needs: a corpus full of single-trial results that the
 framework's own rules say are below its minimum for a citable rate is not
 a bigger corpus, it is a noisier one that looks like data.
 
@@ -57,7 +57,7 @@ from openllm_cbench.scoring.scorecard import DEPTH_TRIALS
 MIN_CITABLE_TRIALS = DEPTH_TRIALS["standard"]
 
 # Ordered worst to best. A tier is the highest one whose rule is met.
-TIERS = ("newcomer", "novice", "intermediate", "advanced", "contributor")
+TIERS = ("newcomer", "novice", "intermediate", "advanced")
 
 ADVANCED_CITABLE = 3
 
@@ -101,9 +101,7 @@ def is_citable(card, catalogued_tags):
     return True
 
 
-def _tier(catalogued, citable, validated_submissions):
-    if validated_submissions:
-        return "contributor"
+def _tier(catalogued, citable):
     if citable >= ADVANCED_CITABLE:
         return "advanced"
     if citable >= 1:
@@ -141,8 +139,7 @@ def _next_action(local, catalogued, scored, citable, uncitable_scored):
     return None
 
 
-def compute_progress(local_models=None, registry=None, scorecards_root=None,
-                     submissions_root=None):
+def compute_progress(local_models=None, registry=None, scorecards_root=None):
     """The whole panel, as data. Every argument is injectable so this is
     testable without an endpoint, a results tree or a network call.
 
@@ -170,20 +167,6 @@ def compute_progress(local_models=None, registry=None, scorecards_root=None,
     citable_models = sorted(m for m, c in cards.items()
                             if is_citable(c, catalogued_tags))
 
-    validated = []
-    try:
-        from openllm_cbench.core.community import (
-            list_packaged_submissions, validate_submission,
-        )
-        for sub in list_packaged_submissions(submissions_root):
-            try:
-                if not validate_submission(sub["path"]):
-                    validated.append(sub)
-            except Exception:
-                continue
-    except Exception:
-        validated = []
-
     catalogued_local = (len(catalogued_tags & local_tags)
                         if local_tags is not None else len(catalogued_tags))
     scored = len(cards)
@@ -194,9 +177,8 @@ def compute_progress(local_models=None, registry=None, scorecards_root=None,
         "catalogued": catalogued_local,
         "scored": scored,
         "citable": citable,
-        "submissions": len(validated),
         "citable_models": citable_models,
-        "tier": _tier(catalogued_local, citable, validated),
+        "tier": _tier(catalogued_local, citable),
         "next_action": _next_action(
             len(local_tags) if local_tags is not None else 1,
             catalogued_local, scored, citable, scored - citable),
@@ -211,5 +193,4 @@ def render_line(progress):
     local = progress["local"]
     local_txt = "endpoint unreachable" if local is None else f"{local} local"
     return (f"{local_txt} · {progress['catalogued']} catalogued · "
-            f"{progress['scored']} scored · {progress['citable']} citable · "
-            f"{progress['submissions']} submitted")
+            f"{progress['scored']} scored · {progress['citable']} citable")

@@ -13,8 +13,9 @@ their full output as a log under `tui-logs/` in the results
 folder.
 
 The dashboard shows the active results location and a short progress panel:
-how many models are pulled, catalogued, scored and **citable**, plus a
-level and a suggested next action. Its buttons open these screens:
+how many models are local (pulled into your endpoint), catalogued, scored
+and **citable**, plus a level and a suggested next action. Its buttons open
+these screens:
 
 | Button | What it does |
 |---|---|

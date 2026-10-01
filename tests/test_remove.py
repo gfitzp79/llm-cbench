@@ -116,6 +116,35 @@ def test_cli_deletes_with_yes(monkeypatch, capsys):
     assert "results/" in out
 
 
+def test_cli_refuses_a_blank_tag_with_exit_2(monkeypatch, capsys):
+    """A blank tag is bad input that runs nothing, which every command
+    reports with exit 2. This command once printed "Deleting ''" and
+    returned 1, the code for a command that ran and failed, because only
+    core/remove.py caught the blank tag. With or without --yes, nothing is
+    deleted and nothing is reported as attempted."""
+    called = {}
+    monkeypatch.setattr("openllm_cbench.core.remove.remove_model",
+                        lambda *a, **k: called.setdefault("ran", True) or (False, "x"))
+    from openllm_cbench import cli
+    for argv in (["--model", "", "--yes"], ["--model", "   ", "--yes"], ["--model", ""]):
+        monkeypatch.setattr("sys.argv", ["cbench", "remove"] + argv)
+        assert cli.main() == 2, argv
+        captured = capsys.readouterr()
+        assert "NOT STARTING" in captured.err, argv
+        assert "Deleting" not in captured.out, argv
+    assert "ran" not in called, "a blank tag must never reach the delete"
+
+
+def test_cli_sends_the_tag_without_surrounding_spaces(monkeypatch):
+    seen = {}
+    monkeypatch.setattr("openllm_cbench.core.remove.remove_model",
+                        lambda tag, base=None, **k: seen.setdefault("tag", tag) and (True, "deleted"))
+    from openllm_cbench import cli
+    monkeypatch.setattr("sys.argv", ["cbench", "remove", "--model", "  m:1b ", "--yes"])
+    assert cli.main() == 0
+    assert seen["tag"] == "m:1b"
+
+
 def test_cli_reports_failure_as_nonzero(monkeypatch):
     monkeypatch.setattr("openllm_cbench.core.remove.remove_model",
                         lambda *a, **k: (False, "404"))

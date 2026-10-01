@@ -965,17 +965,28 @@ def _cmd_remove(argv):
     p.add_argument("--endpoint", default=None)
     args = p.parse_args(argv)
 
+    # A blank tag is bad input that runs nothing, so it is refused first and
+    # with exit 2, like every other refusal. core/remove.py refuses it as
+    # well, as a second guard, but that path reports a failed delete (exit 1)
+    # after a "Deleting ''" line, which reads as a command that ran.
+    tag = (args.model or "").strip()
+    if not tag:
+        print("[!] NOT STARTING: no model tag given, so there is nothing to delete.\n"
+              "    Pass the exact tag, as `cbench discover` or `ollama list` shows it.",
+              file=sys.stderr)
+        return 2
+
     base_url = resolve_base_url(args.endpoint)
     if not args.yes:
-        print(f"[!] NOT DELETING '{args.model}'.\n"
+        print(f"[!] NOT DELETING '{tag}'.\n"
               f"    This would remove the model from {base_url}, freeing its disk "
               f"space and requiring a re-pull to get it back.\n"
               f"    Re-run with --yes if that is what you want.", file=sys.stderr)
         return 2
 
     # Results are deliberately left alone -- see core/remove.py.
-    print(f"Deleting '{args.model}' from {base_url} ...")
-    ok, detail = remove_model(args.model, base_url)
+    print(f"Deleting '{tag}' from {base_url} ...")
+    ok, detail = remove_model(tag, base_url)
     print(detail if ok else f"[!] {detail}", file=sys.stdout if ok else sys.stderr)
     if ok:
         print("Any CSVs, reports and scorecards for this model are untouched in "

@@ -139,10 +139,11 @@ things follow from that.
   model can grade differently on other hardware, with more or less memory
   available, or at other settings: the generation budget, the time limit on
   each request, or the sampling. A model that does not fit in GPU memory
-  runs more slowly, so more requests time out and more replies stop at the
-  reply limit, and those rows leave the denominator (see
-  [Scoring a model](docs/USER_GUIDE.md#scoring-a-model)). A larger budget lets some of those
-  rows finish, and lets a model caught in a reasoning loop run for longer.
+  runs more slowly, so more requests reach the time limit before they
+  finish, and those rows leave the denominator (see
+  [Scoring a model](docs/USER_GUIDE.md#scoring-a-model)). A larger
+  generation budget lets rows finish that stopped at the reply limit, and
+  lets a model caught in a reasoning loop run for longer.
   Any of these can move a grade up or down. Run cbench on your own hardware
   before relying on anyone else's grade.
 - **A good grade is not a guardrail.** Every suite measures attempt, never

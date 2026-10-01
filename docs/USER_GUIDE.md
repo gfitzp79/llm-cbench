@@ -513,9 +513,8 @@ scorer, and only a fresh run clears it.
 hardware, and the same model on a different card can score differently.
 The mechanism is concrete: a model that fits in VRAM on one machine may
 spill to system RAM on a smaller one, which makes it slower, so more
-requests hit their timeout and more generations stop at the token budget.
-Those rows become INCOMPLETE or TRUNCATED and leave the denominator, so the
-rate moves without the model's behaviour moving at all. A larger or
+requests hit their timeout before they finish. Those rows leave the
+denominator, so the rate moves without the model's behaviour moving at all. A larger or
 enterprise-class card can finish rows that were dropped elsewhere, and those
 rows can fall either way. Every scorecard records the VRAM it was computed
 on and repeats this in its own "Results vary by hardware" section. Compare

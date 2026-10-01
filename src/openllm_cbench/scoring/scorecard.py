@@ -203,9 +203,9 @@ def _hardware_note():
 
     Recorded because a grade is not a property of the model alone. A model
     that fits in VRAM here and spills to system RAM on a smaller card is
-    slower there, and slower means more requests hitting their timeout and
-    more generations cut off at the budget -- both of which change the
-    exclusion rates, and therefore the rate, and therefore the grade.
+    slower there, and slower means more requests hitting their timeout
+    before they finish, which changes the exclusion rates, and therefore the
+    rate, and therefore the grade.
     Without this line a scorecard moved between machines looks like a
     disagreement about the model.
 
@@ -919,9 +919,9 @@ def render_scorecard_markdown(scorecard):
         "",
         "The mechanism is concrete. A model that fits in VRAM here may spill to system "
         "RAM on a smaller card, which makes it slower, which makes more requests hit "
-        "their timeout and more generations stop at the budget. Those rows become "
-        "INCOMPLETE or TRUNCATED and leave the denominator, so the rate changes without "
-        "the model's behaviour changing at all. The same model on a larger or "
+        "their timeout before they finish. Those rows leave the denominator, so the "
+        "rate changes without the model's behaviour changing at all. The same model on "
+        "a larger or "
         "enterprise card can finish rows that were dropped here, and those rows can fall "
         "either way.",
         "",

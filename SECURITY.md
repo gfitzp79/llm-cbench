@@ -153,13 +153,6 @@ this repository's **Security** tab and choose
 **Report a vulnerability**. The report goes to the maintainer only and
 needs no email address published in this file.
 
-> **Maintainer note.** The **Report a vulnerability** button works only
-> when private vulnerability reporting is enabled for this repository
-> (**Settings** → **Security** → **Private vulnerability reporting**).
-> Enable it before the repository is made public. To handle reports by
-> email instead, replace this section with a security contact address.
-> Remove this note at publication.
-
 This project does not accept contributions and has no issue tracker
 ([CONTRIBUTING.md](CONTRIBUTING.md)), so the private route above is for
 security reports only.

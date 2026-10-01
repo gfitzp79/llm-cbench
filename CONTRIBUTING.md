@@ -60,13 +60,11 @@ advisories, and nothing else in this setup updates them. The `inspect`
 extra is needed only for the Inspect cross-validation under
 `integrations/`.
 
-CI runs the tests on Linux with Python 3.10 and 3.13 for every push to
-`main`. Started by hand, it runs the full matrix:
-Linux, macOS and Windows, each with both Python versions. Every job also
-runs the safety-invariant test as a separate step, checks that the
-modules import cleanly, and runs `cbench doctor` with no endpoint
-present. A local pass covers one of the six combinations in the full
-matrix.
+CI runs the tests for every push to `main` on Linux, macOS and Windows,
+each with Python 3.10 and 3.13. Every job also runs the safety-invariant
+test as a separate step, checks that the modules import cleanly, and runs
+`cbench doctor` with no endpoint present. A local pass covers one of the
+six combinations in the matrix.
 
 ## Layout
 

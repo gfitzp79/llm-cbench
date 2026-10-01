@@ -262,7 +262,7 @@ real margin at the same time, or the fix does not take. Raising `num_predict`
 alone can push a run into the *other* budget's failure, which is silent;
 section 6 covers the headroom check that catches it. The automatic budget
 applies this rule to every model that reasons, raising both values together
-(README.md, "Generation budgets"); the advice here is for a model that still
+(docs/USER_GUIDE.md, "Generation budgets"); the advice here is for a model that still
 truncates at that budget.
 
 **An advertised capability is not a delivered one.** The endpoint's reported

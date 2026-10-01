@@ -1300,7 +1300,7 @@ def _cmd_tui(argv):
             "Launches the Textual control panel (requires the 'textual' "
             "package: pip install textual). Takes no arguments: every suite's own "
             "flags are entered through its form inside the TUI, not on this "
-            "command line. See README.md 'Terminal UI'."
+            "command line. See docs/TUI.md."
         )
         return 0
     try:

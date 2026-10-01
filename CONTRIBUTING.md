@@ -288,7 +288,7 @@ can discover into your local catalogue (`models.json`). It leaves
 `config_overrides` empty, except for `think: false`, which it sets itself
 when the model calls tools only with its reasoning channel off. The
 `thinking` field it records sets the model's automatic generation budget
-(README.md, "Generation budgets"). If a real run shows the model needs
+(docs/USER_GUIDE.md, "Generation budgets"). If a real run shows the model needs
 something else, edit the saved entry to add `config_overrides` such as a
 different `num_predict` or a longer `timeout`.
 The `_schema` key in `data/models/verified.json` documents every

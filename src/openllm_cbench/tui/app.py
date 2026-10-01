@@ -500,7 +500,7 @@ class ModelsScreen(Screen):
                 "that's the active experts, not the full weight count, which is why a "
                 "30B-A3B MoE outruns a dense 30B of the same size on disk.\n"
                 "Score column: an A-F grade (0-100), the worst of the three suites "
-                "run, not an average (see \"Scoring a model\" in README.md). "
+                "run, not an average (see \"Scoring a model\" in docs/USER_GUIDE.md). "
                 "\"not scored\" = never run through `cbench score`. \"needs re-score\" = "
                 "scored under older scoring rules, so the grade is hidden: re-score it on "
                 "the Score screen with \"Re-score saved results only\" ticked, which reads "

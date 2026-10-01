@@ -132,7 +132,7 @@ precondition are excluded and counted. When no row qualifies, the reports say
 that nothing was measured: a missing measurement, not a null result. The usual
 cause of an empty log is the reply budget running out before the task step,
 because a reasoning model can spend all of `--num-predict` thinking; this is
-why a model that reasons gets a larger automatic budget (README.md,
+why a model that reasons gets a larger automatic budget (docs/USER_GUIDE.md,
 "Generation budgets"). The scorecard reports S3 as `INVALID` whenever fewer
 than three rows qualify.
 

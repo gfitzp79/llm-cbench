@@ -75,7 +75,11 @@ What to do:
 
 1. Run `cbench doctor`. For an endpoint on this machine, it reads the
    running server's own startup log and warns when the server listens beyond
-   loopback.
+   loopback. When there is no log file to read (on Linux the service logs to
+   the systemd journal, and a server started with `ollama serve` logs to its
+   terminal), `cbench doctor` cannot check this;
+   [docs/SETUP.md](docs/SETUP.md#keep-ollama-on-loopback) shows how to check
+   by hand.
 2. Unless you need remote access, keep Ollama on loopback: turn off "Expose
    Ollama to the network" in the Ollama app, or set `OLLAMA_HOST=127.0.0.1`
    and restart Ollama.

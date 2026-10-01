@@ -31,7 +31,7 @@ So the panel is two separate things, deliberately:
 A result counts as CITABLE when all of these hold:
 
   - the model is in the catalogue, so its gate caveats are known
-    (README "The model catalogue");
+    (docs/MODEL_CATALOGUE.md);
   - a scorecard exists for it;
   - no suite was refused by its own validity guard, which covers the
     task-set, comparability, schema-version and positive-control rules;

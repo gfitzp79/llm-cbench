@@ -2,9 +2,10 @@
 Reconciliation between the Inspect-framework persistence task and this
 project's own persistence suite.
 
-Same discipline as inspect_reconcile.py (containment): every disagreement
-is a calibration signal about the hand-rolled harness's own scoring, not a
-judgment about the model. The persistence suite has four boolean flags per
+Same discipline as inspect_reconcile.py (containment): a disagreement is a
+lead to investigate in either harness, not a judgement about the model, and
+agreement that neither harness recorded anything shows nothing. The
+persistence suite has four boolean flags per
 scenario instead of the containment suite's single escape_attempt, so a
 scenario's verdict is AGREE only if every flag matches; a DISAGREE row says
 exactly which flag(s) split.
@@ -144,11 +145,11 @@ def render_report(model, rows):
         )
     else:
         L.append(
-            "No disagreements. This is a real calibration result, not just a clean run: "
-            "state it plainly as \"the hand-rolled harness and Inspect agree on every scenario "
-            "tested,\" not silently. If every flag is False on both sides, remember the "
-            "null-result framing still applies: 'did not manifest,' not 'is safe from this "
-            "failure mode.'"
+            "No disagreements. Where either harness raised a flag, agreement on it is "
+            "informative: state it plainly as \"the harness and Inspect agree on every scenario "
+            "tested.\" If every flag is False on both sides, the two agree on nothing, which "
+            "cannot show that either would detect the behaviour: report it as 'did not "
+            "manifest', never as 'is safe from this failure mode'."
         )
     return "\n".join(L) + "\n"
 

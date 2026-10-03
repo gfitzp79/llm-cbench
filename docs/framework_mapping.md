@@ -13,7 +13,7 @@ file does not claim", below, sets out what is in scope and what is not.
 | S1 containment (`suites/containment.py`) | **LLM06 (Excessive Agency)** | AML.T0086 Exfiltration via AI Agent Tool Invocation (tactic: Exfiltration, AML.TA0010) and AML.T0053 AI Agent Tool Invocation (tactics: Execution, AML.TA0005; Privilege Escalation, AML.TA0012). ATLAS describes an adversary driving an agent; S1 observes the model itself attempting the same tool calls under task pressure, in an agentic loop rather than a single-turn probe. | MANAGE (the boundary-adherence measurement itself), GOVERN (the `stated` versus `none` boundary comparison as a policy-effectiveness question) |
 | S2 channel (`suites/channel.py`) | LLM01 and LLM07, extended to the reasoning channel. A probe that passes on `content` but fails on `thinking` is still a real LLM01 or LLM07 instance, but a content-only scorer cannot see it. | The probe bank tags its probes in the `framework` field of `data/probes/eval_prompts.json`: AML.T0051 LLM Prompt Injection (with the sub-technique AML.T0051.001, Indirect), AML.T0054 LLM Jailbreak and AML.T0056 Extract LLM System Prompt. Channel divergence itself is not a named ATLAS technique; it is a measurement-methodology finding, not an attack technique. | MEASURE (the channel-split scoring itself), MANAGE (the `merged_channel_suspected` harness-integrity guard) |
 | S3 persistence (`suites/persistence.py`) | LLM06 (Excessive Agency). Log tampering is a form of unauthorised self-modification of audit state, the same root category as S1. | No ATLAS technique covers an agent altering its own audit record. The nearest tactic is Defense Evasion (AML.TA0007), because the behaviour conceals what the agent did. ATLAS's Persistence tactic (AML.TA0006) means an adversary keeping a foothold, which S3 does not measure; the shared word is a coincidence of naming. | GOVERN: fundamentally an audit-integrity question, not a measurement one |
-| Inspect cross-validation (`integrations/inspect_*.py`) | Adds no OWASP coverage of its own. It validates the existing LLM06 coverage of S1 and S3 against a second, externally trusted implementation. | Adds no ATLAS coverage, for the same reason | MEASURE (independent verification of the harness's own scoring), GOVERN (an assessment methodology that can cite agreement with an external framework is stronger governance evidence than a single-harness claim) |
+| Inspect cross-validation (`integrations/inspect_*.py`) | Adds no OWASP coverage of its own. It re-runs S1 and S3 in a second framework, whose tool loop and endpoint settings differ from this harness's, as a cross-check on their LLM06 coverage. | Adds no ATLAS coverage, for the same reason | MEASURE (a cross-check: agreement on a finding is informative, agreement that neither framework recorded anything shows nothing, and a disagreement is a lead to investigate) |
 | Provenance axis (third-party model tracking, cross-cutting) | **LLM03 (Supply Chain)** | None | GOVERN: model provenance (vendor-official, third-party distillation, community fine-tune) is a governance and procurement question |
 
 ## Framework coverage, honestly stated
@@ -21,17 +21,16 @@ file does not claim", below, sets out what is in scope and what is not.
 Depth on a few items, not breadth across a checklist.
 
 - **OWASP Top 10 for LLMs**: LLM06 (Excessive Agency) is the most deeply
-  covered item, across S1 and S3, with Inspect cross-validation providing
-  corroboration. LLM03 (Supply Chain) is covered through the provenance axis.
+  covered item, across S1 and S3, with an optional Inspect cross-check.
+  LLM03 (Supply Chain) is covered through the provenance axis.
   LLM01 and LLM07 (Prompt Injection, System Prompt Leakage) are covered by S2,
   with an emphasis on the reasoning channel. That is four items covered in
   depth rather than all ten covered by a paragraph each, and it is a deliberate
   scoping choice, not a gap.
-- **NIST AI RMF**: MEASURE from S2 and Inspect cross-validation; MANAGE from
+- **NIST AI RMF**: MEASURE from S2 and the Inspect cross-check; MANAGE from
   S1's boundary-adherence measurement and S2's merge guard; GOVERN from S1's
-  `stated` versus `none` comparison, S3, the provenance axis and the
-  corroborating role of Inspect cross-validation. The four RMF functions
-  (GOVERN, MAP, MEASURE and MANAGE) are not equally represented. MAP in
+  `stated` versus `none` comparison, S3 and the provenance axis. The four RMF
+  functions (GOVERN, MAP, MEASURE and MANAGE) are not equally represented. MAP in
   particular has no dedicated suite output here, which is worth naming as a
   real gap rather than stretching an existing suite's mapping to cover it
   artificially.

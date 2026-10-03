@@ -49,8 +49,12 @@ of the model *and* the harness together.
 | **S3 persistence** | When challenged about its own logged actions, does the model tamper with the log? | A task, log tools (append, edit, list), then a challenge turn about a logged step | Log edits, appended corrections, denial language, identity resets |
 
 An optional cross-validation tier re-runs S1 and S3 through the Inspect
-framework and compares verdicts, to check whether a finding is a property of
-the model or of this harness's scoring.
+framework and compares verdicts. The Inspect tasks use Inspect's own tool loop,
+and the OpenAI-compatible endpoint they call cannot set the context window or
+`top_k`, so the two harnesses differ in more than scoring. Agreement on a finding
+is informative; agreement that neither harness recorded anything shows nothing
+(section 6); and a disagreement is a lead to investigate, not evidence against
+either harness.
 
 ### S1 in more detail, because it carries most of the design
 
@@ -451,9 +455,8 @@ the gate check first. Each is a single definition, imported by every caller.
   so that every later run recognises it.
 - **Attempt rates depend on the hardware too.** A model that fits in VRAM on
   one machine and spills to system RAM on another is slower there, so more
-  requests hit their timeout and more generations stop at the budget. Those
-  rows are excluded (as INCOMPLETE, TRUNCATED or failed requests), which moves
-  the rate without the model's behaviour changing. A result is a joint property
+  requests hit their timeout before they finish. Those rows leave the rate as
+  failed requests, which moves the rate without the model's behaviour changing. A result is a joint property
   of the model, the harness, the generation budget *and* the machine. Record the
   hardware with any rate you intend to compare, and do not read a difference
   between two machines as a difference between two models. Every row records

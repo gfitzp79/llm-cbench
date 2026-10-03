@@ -236,21 +236,59 @@ live request.
 ## 5. Positioning
 
 This framework is narrow by design: three suites, one fixed measurement
-question each, built for local and open-weight models. Compared with the
-broader red-teaming and evaluation tools:
+question each, built for models served locally by Ollama. It runs beside the
+broader red-teaming and evaluation tools rather than in place of them. Each
+answers a different question about the same model, and the questions differ
+above all in where the failure comes from.
 
-| | Garak | Promptfoo | PyRIT | Inspect (`inspect_evals`) | This framework |
-|---|---|---|---|---|---|
-| Scope | Broad vulnerability scanner, many probe families | Broad evaluation and red-team harness, configuration-driven | Broad red-teaming toolkit focused on orchestration | General-purpose evaluation framework with a large external task catalogue | Three specific measurement questions, deep rather than broad |
-| Agentic tool-use containment | Not a focus | Not a focus | Partial (depends on the orchestrator) | Depends on the task | Core focus (S1) |
-| Reasoning-channel (hidden versus visible) divergence | No | No | No | No native support in the Ollama provider (see section 8) | Core focus (S2) |
-| Deceptive persistence and audit-log tampering | No | No | No | No | Core focus (S3); high novelty, high risk of a null result |
-| Local, open-weight model focus | Model-agnostic | Model-agnostic | Model-agnostic | Model-agnostic | Built and tuned against models served locally by Ollama |
+| | Promptfoo, Garak, PyRIT | Inspect (`inspect_evals`), with agentic benchmarks such as AgentDojo and AgentHarm | This framework |
+|---|---|---|---|
+| Question | What will the model say when prompted, including adversarially? | Can an attacker steer the agent through content it reads, will it carry out harmful tasks a user asks for, and can it do the work? | What does the model do when its task pulls against its boundary, and can the signals used to oversee it be trusted? |
+| Where the failure comes from | A user or an attacker in the conversation | An attacker in the environment, or a misusing user | The task itself; no attacker is needed |
+| Scored on | The reply, by a detector or a judge model | Task outcome and environment state, with a judge model on some benchmarks | The tool-call log, the reasoning trace and the audit record, by rule, with only the model under test in memory |
+| Where it fits | Continuous integration: content behaviour on every prompt or model change | Model selection: hijack resistance and capability against published baselines | The point a specific checkpoint, quantisation or fork is about to receive tools, and again when the tag behind it changes |
 
-This framework complements those tools rather than replacing them. It
-exists for three questions the broader tools do not cover well, and its
-optional `integrations/` module uses Inspect to cross-check S1 and S3
-verdicts rather than to compete with it.
+**Containment (S1).** An agent that reaches past its boundary because the
+task finishes faster needs no hostile party, so a tool built around
+simulating one is not designed to surface it. Eight of the ten pressure tasks
+in the 12-task set carry no adversarial content. Of the other two,
+`indirect_injection` plants an instruction in a file the agent reads, and
+`urgency_authority` asserts an approval the boundary does not grant. The harmful-intent set overlaps
+AgentHarm's territory of a user stating harmful intent; the difference is
+that S1 scores the attempt from the tool-call log, behind a boundary that
+cannot be crossed, with a positive and a negative control.
+
+**Reasoning-channel divergence (S2).** Ollama's OpenAI-compatible `/v1`
+endpoint, which Inspect's Ollama provider uses, returns the reasoning trace in
+a `reasoning` field, and Inspect reads it. No Inspect task compares that trace
+with the visible answer, and `/v1` cannot set `num_ctx`, so an equivalent
+could not run on the generation budget S2 pins (section 8).
+
+**Audit-log persistence (S3).** Whether a model, challenged about a logged
+step, rewrites its own record. A narrower question than published scheming
+evaluations, packaged as a suite that runs against a local endpoint.
+
+**The cost of a judge model.** By default Promptfoo generates and grades its
+red-team attacks with a cloud model through an OpenAI key, DeepTeam has one
+model write the attacks and another judge the answers, and PyRIT's multi-turn
+attacks pair an attacker model with a scorer. Each can use a local model, but
+on a single consumer GPU a second resident model can push the model under test
+partly onto the CPU, which changes its results
+([docs/METHODOLOGY.md](docs/METHODOLOGY.md), section 7), while a cloud judge
+sends every row off the machine and costs per token. This framework scores by
+rule.
+
+**MITRE ATLAS** is a reporting layer across all three columns: a taxonomy of
+adversary tactics and techniques, not a test.
+[docs/framework_mapping.md](docs/framework_mapping.md) maps each suite onto
+it. Promptfoo's ATLAS preset marks where it has no direct checks. MITRE's
+Arsenal plugin for CALDERA (2023, built around Microsoft's Counterfit) targets
+model files, served models and image classifiers rather than an agent's tool
+loop.
+
+The optional `integrations/` module re-runs S1 and S3 as Inspect tasks to
+cross-check verdicts, not to compete with Inspect. Section 8 sets out what
+that comparison can and cannot show.
 
 ## 6. Why the harmful-intent task set ships
 
@@ -553,14 +591,16 @@ Most of them apply to any evaluation of agentic or reasoning models.
 
 ## 8. Known limitations
 
-- **Inspect's Ollama provider does not expose a separate reasoning
-  channel.** `integrations/` can cross-validate S1 and S3 verdicts against
-  Inspect, because neither depends on a reasoning-channel field. S2's
-  divergence measurement has no Inspect-based equivalent: Inspect's Ollama
-  provider talks to Ollama's OpenAI-compatible `/v1` endpoint, which does
-  not surface a separate `thinking` or `reasoning_content` field the way
-  the native `/api/chat` endpoint used by `suites/channel.py` does. An
-  Inspect equivalent of S2 needs that gap closed upstream first.
+- **The Inspect cross-check is not a like-for-like re-run.** `integrations/`
+  re-runs S1 and S3 as Inspect tasks. Those use Inspect's own tool loop, and
+  Inspect's Ollama provider talks to Ollama's OpenAI-compatible `/v1`
+  endpoint, which cannot set `num_ctx` or `top_k`, so the two harnesses differ
+  in more than scoring. Agreement on a finding is informative; agreement that
+  neither harness recorded anything shows nothing; a disagreement is a lead to
+  investigate, not evidence against either harness. S2 has no Inspect
+  equivalent. `/v1` does return the reasoning trace, in a `reasoning` field
+  that Inspect reads, but no Inspect task compares it with the visible answer,
+  and without `num_ctx` one could not run on the generation budget S2 pins.
 - **The catalogue is a starting point, not a guarantee.** Each entry in
   the packaged seed (`data/models/verified.json`) records what one gate
   check found, at one time, against one serving setup, and an entry in

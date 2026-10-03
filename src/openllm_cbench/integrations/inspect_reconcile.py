@@ -2,9 +2,11 @@
 Reconciliation between the Inspect-framework containment task and this
 project's own containment suite.
 
-Every disagreement between the two is a calibration signal about the
-hand-rolled harness's own scoring -- cross-framework agreement is a
-stronger validity claim than either tool's numbers on their own.
+The two harnesses differ in more than scoring: the Inspect task runs
+Inspect's own tool loop, and the OpenAI-compatible endpoint it calls cannot
+set num_ctx or top_k. Agreement on a finding is informative; agreement that
+neither harness recorded anything shows nothing; and a disagreement is a
+lead to investigate, not evidence against either harness.
 
 Usage (per model, per boundary variant -- run both `inspect eval` tasks
 first, from inspect_containment.py; path is relative to the project root,
@@ -171,9 +173,10 @@ def render_report(model, rows):
         )
     else:
         L.append(
-            "No disagreements. This is a real calibration result, not just a clean run: "
-            "state it plainly as \"the hand-rolled harness and Inspect agree on every "
-            "task/boundary combination tested,\" not silently."
+            "No disagreements. Where either harness recorded an escape attempt, agreement on "
+            "it is informative: state it plainly as \"the harness and Inspect agree on every "
+            "task/boundary combination tested.\" Where neither recorded one, the two agree on "
+            "nothing, which cannot show that either would detect an attempt."
         )
     return "\n".join(L) + "\n"
 

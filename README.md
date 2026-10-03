@@ -168,12 +168,14 @@ tests against, see [SECURITY.md](SECURITY.md).
 
 ## Comparison to other tools
 
-See [section 5 of ARCHITECTURE.md](ARCHITECTURE.md#5-positioning) for how
-this tool relates to Garak, Promptfoo, PyRIT and Inspect. In short, those
-are broad, general-purpose red-teaming and evaluation harnesses; this tool
-answers three specific measurement questions in depth, built for agentic
-tool-use containment, hidden-reasoning-channel divergence and audit-log
-persistence behaviour in locally served models.
+This tool is built to run beside Promptfoo, Garak, PyRIT and Inspect rather
+than in place of them. Those mostly measure what a user or an attacker can
+make a model say or do. This tool measures what a model does when its own
+task pulls against its boundary, and whether the signals used to oversee it,
+the reasoning trace and the audit log, can be trusted. It scores by rule,
+from the tool-call log, with only the model under test in memory on your own
+machine. See [section 5 of ARCHITECTURE.md](ARCHITECTURE.md#5-positioning) for
+the comparison in full.
 
 ## Extending this framework with an AI coding assistant
 

@@ -141,6 +141,67 @@ it failed, and `2` when it refused to start and wrote nothing. The exception
 is `cbench extension-rule`, whose exit code is its decision; see
 [Exit codes](docs/USER_GUIDE.md#exit-codes).
 
+## Running on a MacBook Air
+
+A MacBook Air has no fan, so heat, not memory, is what limits a run.
+Measured on a MacBook Air with an Apple M5 and 32 GB of memory (Ollama
+0.35.0):
+
+- **Memory is not the constraint.** macOS let the GPU use 25 GB of the
+  32 GB, which `cbench doctor` reports, and its rough estimate is that a
+  model of up to ~43B parameters at Q4_K_M fits.
+- **Time is.** `cbench score --depth quick` on qwen3:0.6b took 16 minutes
+  for 228 rows. S2 took 12 of them: it asks 100 probes at each of two
+  reasoning settings, where S1 runs 24 tasks and S3 two scenarios. The
+  default depth runs three times as many trials, and a 3B model ran hot
+  enough in its first suite that the run was stopped.
+
+A hot Air slows itself down, and a slower model sends more rows past the
+time limit, out of the rates, so a throttled run is in effect a run on
+slower hardware (see [Responsible use](#responsible-use)).
+`cbench` records how much of the model was in GPU memory, but not
+throttling. So:
+
+- **Run one suite at a time and let the machine cool in between.** Results
+  from separate sessions pool into one grade, as long as the settings
+  match:
+
+  ```bash
+  cbench assess --model <model-tag> --suites s1 --trials 3
+  cbench assess --model <model-tag> --suites s3 --trials 3
+  cbench assess --model <model-tag> --suites s2 --trials 3
+  cbench score --model <model-tag> --from-existing
+  ```
+
+  Three trials per suite is the same depth as the default
+  `cbench score --depth standard`. S2 is the longest, so give it a session
+  of its own.
+- **Start small.** Gate-check first (`cbench gate --model <model-tag>`
+  takes seconds) and try `--depth quick` before committing to three
+  trials. A smaller model finishes sooner and runs cooler; one that fits
+  in memory but is larger still runs, for longer and hotter, so split it
+  into more sessions.
+- **Check for throttling** while a run is going:
+
+  ```bash
+  pmset -g therm
+  ```
+
+  A recorded thermal or performance warning means macOS is slowing the
+  machine down. Let it cool before the next suite.
+- **Keep conditions the same across runs you will pool:** plugged in,
+  Low Power Mode off, lid open (`caffeinate -i` keeps it awake; a closed
+  lid sleeps), on a hard surface, and nothing else using the GPU.
+- **Unload the model when you stop.** Ollama keeps a model in memory for
+  5 minutes after its last request:
+
+  ```bash
+  ollama stop <model-tag>
+  ```
+
+[GPU memory on Apple Silicon](docs/SETUP.md#gpu-memory-on-apple-silicon)
+covers how the GPU's share of memory is set.
+
 ## Documentation
 
 | Page | What it covers |

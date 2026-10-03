@@ -521,7 +521,8 @@ prompt would have understated the window's use by 63%.
 
 **GPU residency is recorded for the same reason: a model that does not fit
 fails silently too.** The server runs the remainder on the CPU and the reply
-says nothing; the slower requests time out or stop early and leave the rates.
+says nothing; the slower requests reach their time limit and leave the rates
+as failed requests.
 Every suite records `gpu_resident_fraction` per row: `size_vram / size` for the
 model in Ollama's `/api/ps`, read after every successful model call and reduced
 to the lowest reading in the row, so an eviction and reload part-way through a
@@ -538,12 +539,31 @@ scorecard counts residency over every row it read, including suites refused by
 their own validity guard, because a model that did not fit is a common reason a
 suite runs short of usable rows.
 
+**Speed and the time limit are recorded beside it, for the one channel through
+which speed reaches a rate.** Sampling is pinned and budgets are set in turns
+and tokens, so speed alone changes no verdict; a call still generating when the
+per-request time limit closes it fails, and the row leaves the rate as a failed
+request. Every suite records `gen_tokens_per_s` (the sum of `eval_count` over
+the sum of `eval_duration` across the row's successful calls: token-weighted,
+and generation only), `slowest_call_s` (the longest client wall time of any
+call in the row, failed calls included, which is the quantity the limit races,
+cold load and all), `request_timeout_s`, and `error_kind` (`timeout` for a read
+timeout, `connection` for a refused or timed-out connection, `http` for an
+error status, `other`; blank when no call failed). In S3, the follow-up call
+that asks for the answer after a challenge reply made only of tool calls can
+fail without the row leaving the rate: the row is scored on the reply it had,
+and `error_kind` records the failure. The columns are recorded, not scored.
+They add a caveat to S2 and S3 when a recorded call failed, name the cause of
+each row S1's INCOMPLETE caveat leaves out, and add a sentence to the
+scorecard's hardware section; no rate changes. Runs that differ in
+`request_timeout_s` still pool: a limit no call reached changes nothing, and
+one that bound shows as failed rows, which every report counts by kind.
+
 **What remains your responsibility:** two runs straddling a harness fix that
-changed what an existing column means, a mismatched turn budget, and a CSV that
-predates the budget columns pooled with one that records them. Section 3.5 of
-the companion document states the rule; nothing enforces these parts of it. If
-you build analysis on top of these CSVs, enforce them yourself, and fail loudly
-rather than warn.
+changed what an existing column means, a mismatched turn budget, and a
+mismatched per-request time limit. Section 3.5 of the companion document
+states the rule; nothing enforces these parts of it. If you build analysis on
+top of these CSVs, enforce them yourself, and fail loudly rather than warn.
 
 Two implementation notes:
 
@@ -664,6 +684,7 @@ its full complement.
 | turn budget not recorded per row | the aggregate applies the S1 INCOMPLETE turn-budget test at the default `max_turns` (6), so a run at a non-default turn budget can report a different rate in its single-run report than in the aggregate |
 | harness-joint rates | comparable within this framework, at one version, only |
 | GPU residency read from Ollama | an endpoint that does not report model sizes leaves the column blank (not measured); on unified-memory machines the figure has not yet been checked against the platform's own reporting |
+| generation speed read from the chat reply | an endpoint that does not report `eval_count` and `eval_duration` leaves `gen_tokens_per_s` blank (not measured); it measures generation alone, so it is not a residency signal and does not match the gate's warm-up rate |
 | transform-dependent probes | measure the transform, not the attack; **biases grades up** |
 | probes no model ever fails | consume a cluster and dilute the rate; **biases grades up** |
 | English-only verdict vocabulary | a non-English answer is unadjudicable, and says so |

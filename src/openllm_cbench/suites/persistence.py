@@ -57,6 +57,9 @@ from openllm_cbench.core.residency import (
     read_fraction, lowest as lowest_residency, cell as residency_cell,
     residency_caveat, residency_summary, RESIDENCY_FIELDS,
 )
+from openllm_cbench.core.throughput import (
+    CallMeter, timeout_row_fields, throughput_caveat, throughput_summary, THROUGHPUT_FIELDS,
+)
 from openllm_cbench.core.runclock import (
     run_started_now, run_time_row_fields, RUN_TIME_FIELDS,
 )
@@ -269,6 +272,11 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # Share of the model in GPU memory after each call; the row keeps the
     # lowest. See core/residency.py.
     residencies = []
+    # Wall time of every call, failed ones included, the generation rate the
+    # server reports, and why a call failed. Carried on the error returns
+    # too: a row that ended on a failed call is the one these columns exist
+    # to explain. See core/throughput.py.
+    meter = CallMeter()
 
     messages = [{"role": "user", "content": scenario["task_prompt"]}]
 
@@ -276,15 +284,12 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     turn = 0
     for turn in range(1, max_task_turns + 1):
         try:
-            resp = requests.post(
-                endpoint,
-                json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            data = meter.post(
+                endpoint, _body(model, messages, tools, num_ctx, num_predict, sampling, think),
+                timeout)
         except Exception as e:
-            return {"error": str(e), "log": log, "state": state, "challenge_response": ""}
+            return {"error": str(e), "log": log, "state": state, "challenge_response": "",
+                    **meter.row_fields()}
 
         occupancies.append(call_occupancy(data))
         prompt_counts.append(prompt_tokens(data))
@@ -311,15 +316,12 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # --- Challenge phase: question the flagged step, one turn ---
     messages.append({"role": "user", "content": scenario["challenge_prompt"]})
     try:
-        resp = requests.post(
-            endpoint,
-            json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = meter.post(
+            endpoint, _body(model, messages, tools, num_ctx, num_predict, sampling, think),
+            timeout)
     except Exception as e:
-        return {"error": str(e), "log": log, "state": state, "challenge_response": ""}
+        return {"error": str(e), "log": log, "state": state, "challenge_response": "",
+                **meter.row_fields()}
 
     occupancies.append(call_occupancy(data))
     prompt_counts.append(prompt_tokens(data))
@@ -373,17 +375,19 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
     # If the model made further tool calls before its final text, do one more
     # round-trip to get the actual explanation text. Replays the results
     # captured above -- it must NOT execute anything a second time.
+    #
+    # A failure here leaves `error` blank: the row is still scored, on the
+    # reply the model had already given. The meter records the failure in
+    # `error_kind`, so a row whose answer was never received is visible
+    # rather than read as a model that said nothing. Whether such a row
+    # should leave the rate is a scoring decision this does not take.
     if tool_calls and not challenge_response:
         for result in challenge_results:
             messages.append({"role": "tool", "content": result})
         try:
-            resp = requests.post(
-                endpoint,
-                json=_body(model, messages, tools, num_ctx, num_predict, sampling, think),
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            data2 = resp.json()
+            data2 = meter.post(
+                endpoint, _body(model, messages, tools, num_ctx, num_predict, sampling, think),
+                timeout)
             occupancies.append(call_occupancy(data2))
             prompt_counts.append(prompt_tokens(data2))
             residencies.append(read_fraction(model, endpoint))
@@ -404,6 +408,7 @@ def run_scenario(model, scenario, num_ctx, num_predict, timeout, max_task_turns,
         "max_prompt_tokens": peak_tokens(prompt_counts),
         "peak_context_tokens": peak_tokens(occupancies),
         "gpu_resident_fraction": residency_cell(lowest_residency(residencies)),
+        **meter.row_fields(),
     }
 
 
@@ -528,6 +533,9 @@ def main():
                 "challenge_response": "", "challenge_done_reason": "",
                 "max_prompt_tokens": "", "peak_context_tokens": "",
                 "gpu_resident_fraction": "",
+                "gen_tokens_per_s": result.get("gen_tokens_per_s", ""),
+                "slowest_call_s": result.get("slowest_call_s", ""),
+                "error_kind": result.get("error_kind", ""),
             })
             continue
 
@@ -557,13 +565,16 @@ def main():
             "max_prompt_tokens": result.get("max_prompt_tokens") or "",
             "peak_context_tokens": result.get("peak_context_tokens") or "",
             "gpu_resident_fraction": result.get("gpu_resident_fraction", ""),
+            "gen_tokens_per_s": result.get("gen_tokens_per_s", ""),
+            "slowest_call_s": result.get("slowest_call_s", ""),
+            "error_kind": result.get("error_kind", ""),
         })
 
     fieldnames = ["model", "scenario_id", "error", "log_rewrite", "log_append_correction",
                   "denial_flag", "fresh_identity_flag", "log_before_challenge", "log_after",
                   "rewrite_detail", "challenge_response", "challenge_done_reason",
-                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS,
-                  *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *THROUGHPUT_FIELDS, *SAMPLING_FIELDS,
+                  *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -575,6 +586,7 @@ def main():
         # how one of them ends up disagreeing with the others.
         _row.update(budget_row_fields(num_ctx, num_predict))
         _row.update(run_time_row_fields(run_started_at))
+        _row.update(timeout_row_fields(timeout))
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")
@@ -610,6 +622,12 @@ def render_report(model, rows):
     if caveat:
         L += [caveat, ""]
     L += [residency_summary(rows), ""]
+    # A failed follow-up call leaves a row scored on the reply it had, so
+    # this belongs before the table, beside the other machine readings.
+    caveat = throughput_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [throughput_summary(rows), ""]
     L += [
         "**Heuristic keyword/behavior matching: every non-clean verdict below is "
         "REVIEW, meant to be read manually before it's cited. A row with no flags "

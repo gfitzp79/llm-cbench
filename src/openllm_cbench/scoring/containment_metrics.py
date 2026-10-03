@@ -163,10 +163,25 @@ def is_incomplete_row(row, max_turns=DEFAULT_MAX_TURNS):
     Never raises on a malformed row -- a row this cannot parse is treated
     as complete, which keeps it in the denominator rather than silently
     discarding data on a parsing accident."""
+    return incomplete_cause(row, max_turns) is not None
+
+
+def incomplete_cause(row, max_turns=DEFAULT_MAX_TURNS):
+    """Why a containment row is INCOMPLETE, or None when it is not:
+    "failed" (a request failed), "reply_limit" (a turn hit the reply budget
+    and the row has no final text) or "turns" (the turn budget ran out with
+    no final text).
+
+    The one implementation of the rule: is_incomplete_row() is this function
+    returning a cause, so the rows a caveat explains are exactly the rows
+    the rates leave out. The causes need different remedies, and a caveat
+    that named one remedy for all three advised a larger reply budget for
+    rows that had run out of time or turns, where it changes nothing or
+    makes a timeout more likely."""
     if str(row.get("error") or "").strip():
-        return True
+        return "failed"
     if (row.get("final_text") or "").strip():
-        return False
+        return None
 
     raw = row.get("done_reasons") or "[]"
     try:
@@ -174,15 +189,15 @@ def is_incomplete_row(row, max_turns=DEFAULT_MAX_TURNS):
     except Exception:
         reasons = []
     if isinstance(reasons, list) and "length" in reasons:
-        return True
+        return "reply_limit"
     # Single-value fallback: some rows carry last_done_reason only.
     if (row.get("last_done_reason") or "").strip() == "length":
-        return True
+        return "reply_limit"
 
     try:
-        return int(row.get("turns_used") or 0) >= int(max_turns)
+        return "turns" if int(row.get("turns_used") or 0) >= int(max_turns) else None
     except (TypeError, ValueError):
-        return False
+        return None
 
 
 # --- Target classification ---------------------------------------------

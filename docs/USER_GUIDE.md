@@ -213,10 +213,11 @@ different things:
 
 A model too large for the GPU still answers. The server runs the part that
 does not fit on the CPU and says nothing about it in the reply. The model
-generates the same text more slowly, so more requests hit their timeout or stop
-before finishing, and those rows leave the rates. Speed does not reveal it
-reliably: a mixture-of-experts model computes only its active experts for each
-token, so it can generate quickly with much of itself on the CPU.
+generates the same text more slowly, so more requests reach their time limit
+before they finish, and those rows leave the rates as failed requests. Speed
+does not reveal it reliably: a mixture-of-experts model computes only its
+active experts for each token, so it can generate quickly with much of itself
+on the CPU.
 
 Every suite therefore records `gpu_resident_fraction` in each row: the share of
 the loaded model, by bytes, that the server placed in GPU memory. It is read
@@ -235,6 +236,49 @@ change: residency is recorded, not scored. Compare such a result only with runs
 from the same machine. A blank cell means not measured (an endpoint that does
 not report sizes, or a row written before the column existed), never fully
 resident.
+
+#### Generation speed and the time limit are recorded too
+
+Speed changes no verdict on its own: sampling is pinned and every budget is set
+in turns and tokens, so a faster machine runs the same rows sooner. It reaches a
+rate through one channel, the per-request time limit (`--timeout`). A call still
+generating when the limit closes it fails, and its row leaves the rate as a
+failed request. Every suite therefore records four columns in each row:
+
+| column | what it records |
+|---|---|
+| `gen_tokens_per_s` | tokens generated per second of generation across the row's successful calls, from the server's own `eval_count` and `eval_duration` |
+| `slowest_call_s` | the longest wall time of any model call in the row, failed calls included |
+| `request_timeout_s` | the per-request time limit the run used |
+| `error_kind` | why the row's first failed call failed: `timeout`, `connection`, `http` or `other`; blank when no call failed |
+
+Every run report, trial summary and scorecard states them, whether or not
+anything failed:
+
+```
+Generation speed: median 48.2 tokens/s (range 41.0 to 52.7) over 72 measured row(s). Time limit: slowest call 98.4 s of a 120 s limit; 3 row(s) used more than half the limit without reaching it; 0 row(s) timed out.
+```
+
+A row that used more than half its limit is worth knowing about: another
+process sharing the GPU has been measured to double wall time, which would
+have timed it out. When a call fails, the report says how many rows it cost
+and why. In S2 and S3 the suite's result on the scorecard then carries a
+caveat (so the grade shows `*`); S1 already carries one for every row it leaves
+out, and it names what each row ran out of. A timeout is a reason in the
+machine, not in the model: raise `--timeout`, or run where the model fits in
+GPU memory. A larger `--num-predict` makes a timeout more likely, not less.
+
+In S3 one call can fail without its row leaving the rate: the follow-up that
+asks for the model's answer when its reply to the challenge was only tool
+calls. The row is still scored on the reply it gave, `error_kind` records the
+failure, and the report counts such rows separately, because a denial in them
+could not be seen.
+
+None of this is scored, and speed is not a residency signal. A blank cell
+means not measured (an endpoint that does not report the counts, or a row
+written before the columns existed), never zero. `gen_tokens_per_s` measures
+generation alone, so it will not match the tokens per second `cbench gate`
+measures from a short warm-up call to size its own checks.
 
 ### Reproducibility: pinned sampling
 

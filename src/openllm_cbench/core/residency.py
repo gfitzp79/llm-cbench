@@ -6,10 +6,11 @@ WHY THIS EXISTS
 A model that does not fit in GPU memory still runs. The server places what
 fits on the GPU, runs the rest on the CPU, and says nothing about it in the
 chat response. With sampling pinned the model generates the same text, but
-more slowly, and a slower request is more likely to hit its timeout or to
-stop before it finishes. Those rows leave the rates, so a rate can move
-with no change in the model's behaviour, and it moves most for exactly the
-models that are too large for the machine running them.
+more slowly, and a slower request is more likely to reach its time limit
+before it finishes. Those rows leave the rates as failed requests, so a rate
+can move with no change in the model's behaviour, and it moves most for
+exactly the models that are too large for the machine running them.
+core/throughput.py records how close each row's calls came to that limit.
 
 Speed is not a reliable sign of this. A mixture-of-experts model computes
 only its active experts for each token, so it can generate quickly with a
@@ -206,9 +207,10 @@ class ResidencyTally:
             f"> **[!] Part of the model ran outside GPU memory on {self.below_full} of "
             f"{self.measured} row(s)** (lowest {_pct(self.lowest)} in GPU memory). The "
             f"server runs what does not fit on the CPU and says nothing about it in its "
-            f"reply. The model generates the same text more slowly, so more requests hit "
-            f"their timeout or stop before finishing, and those rows leave the rates. "
-            f"Which rows survive then depends on this machine as well as on the model. "
+            f"reply. The model generates the same text more slowly, so more requests reach "
+            f"their time limit before they finish, and those rows leave the rates as failed "
+            f"requests. Which rows survive then depends on this machine as well as on the "
+            f"model. "
             f"**Compare this result only with runs from the same machine, and prefer one "
             f"where the model fits before citing it.** Speed is not a reliable sign of "
             f"this: a mixture-of-experts model can run quickly with much of itself on the "

@@ -290,10 +290,12 @@ truncation cannot be ruled out. Re-running at a larger `num_ctx` is what
 separates a prompt that fit from one cut down to fit.
 
 **Every other dimension is your responsibility.** A mismatched `max_turns` does
-not stop a pool. Neither does a harness correctness fix that changed what an
-existing column means without changing whether it is present. Every row records
-the sampling parameters, the generation budget and the time the run started,
-which is what makes the rule checkable at all. Beyond the checks above, however,
+not stop a pool. Neither does a mismatched per-request time limit: a limit no
+call reached changes nothing, and one that bound shows as failed rows, which
+every report counts by kind. Nor does a harness correctness fix that changed
+what an existing column means without changing whether it is present. Every
+row records the sampling parameters, the generation budget, the time limit and
+the time the run started, which is what makes the rule checkable at all. Beyond the checks above, however,
 `cbench score` reads every CSV for the model tag you name, comparable or not.
 If you build analysis on top of these CSVs, enforce the rest of this rule
 there, and fail rather than warn.
@@ -456,13 +458,16 @@ the gate check first. Each is a single definition, imported by every caller.
 - **Attempt rates depend on the hardware too.** A model that fits in VRAM on
   one machine and spills to system RAM on another is slower there, so more
   requests hit their timeout before they finish. Those rows leave the rate as
-  failed requests, which moves the rate without the model's behaviour changing. A result is a joint property
-  of the model, the harness, the generation budget *and* the machine. Record the
-  hardware with any rate you intend to compare, and do not read a difference
-  between two machines as a difference between two models. Every row records
-  `gpu_resident_fraction`, the share of the model that was in GPU memory while
-  it ran, and every report and scorecard states it, so a model that did not fit
-  is visible rather than inferred from its speed.
+  failed requests, which moves the rate without the model's behaviour
+  changing. A result is a joint property of the model, the harness, the
+  generation budget *and* the machine. Record the hardware with any rate you
+  intend to compare, and do not read a difference between two machines as a
+  difference between two models. Every row records `gpu_resident_fraction`,
+  the share of the model that was in GPU memory while it ran, and every report
+  and scorecard states it, so a model that did not fit is visible rather than
+  inferred from its speed. Every row also records its slowest model call
+  against the per-request time limit and why any call failed, so a rate the
+  time limit moved is visible too.
 - **Attempt rates are joint properties** of model and harness. They are
   comparable across models tested with this framework at the same version and
   budget, and are not comparable to numbers from another harness.

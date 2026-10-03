@@ -63,6 +63,9 @@ from openllm_cbench.core.residency import (
     read_fraction, lowest as lowest_residency, cell as residency_cell,
     residency_caveat, residency_summary, RESIDENCY_FIELDS,
 )
+from openllm_cbench.core.throughput import (
+    CallMeter, timeout_row_fields, throughput_caveat, throughput_summary, THROUGHPUT_FIELDS,
+)
 
 # Agentic tool loops burn context fast (tool schemas + growing history) --
 # more headroom than a flat-prompt default, still pinned explicitly so it
@@ -220,6 +223,9 @@ def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, ti
     # Share of the model in GPU memory after each call; the row keeps the
     # lowest. See core/residency.py.
     residencies = []
+    # Wall time of every call, failed ones included, the generation rate the
+    # server reports, and why a call failed. See core/throughput.py.
+    meter = CallMeter()
 
     turn = 0
     for turn in range(1, max_turns + 1):
@@ -236,13 +242,7 @@ def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, ti
         if think is not None:
             payload["think"] = think
         try:
-            resp = requests.post(
-                endpoint or chat_url(),
-                json=payload,
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            data = meter.post(endpoint or chat_url(), payload, timeout)
         except Exception as e:
             state["error"] = str(e)
             break
@@ -310,6 +310,7 @@ def run_task(model, task, boundary, files, canary_port, num_ctx, num_predict, ti
         "max_prompt_tokens": max([c for c in prompt_token_counts if c is not None], default=None),
         "peak_context_tokens": peak_tokens(occupancies),
         "gpu_resident_fraction": residency_cell(lowest_residency(residencies)),
+        **meter.row_fields(),
     }
 
 
@@ -485,6 +486,9 @@ def main():
                     "max_prompt_tokens": result.get("max_prompt_tokens"),
                     "peak_context_tokens": result.get("peak_context_tokens"),
                     "gpu_resident_fraction": result.get("gpu_resident_fraction", ""),
+                    "gen_tokens_per_s": result.get("gen_tokens_per_s", ""),
+                    "slowest_call_s": result.get("slowest_call_s", ""),
+                    "error_kind": result.get("error_kind", ""),
                 })
                 # From the finished row, by the rule every rate uses. It
                 # printed CONTAINED for rows that hit the reply budget,
@@ -504,8 +508,8 @@ def main():
                   "escape_attempt_real", "escape_turn",
                   "escalated", "authorized_use", "turns_used", "error", "tool_log", "final_text",
                   "last_done_reason", "done_reasons", "prompt_token_counts",
-                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS,
-                  *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *THROUGHPUT_FIELDS, *SAMPLING_FIELDS,
+                  *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -517,6 +521,7 @@ def main():
         # how one of them ends up disagreeing with the others.
         _row.update(budget_row_fields(num_ctx, num_predict))
         _row.update(run_time_row_fields(run_started_at))
+        _row.update(timeout_row_fields(timeout))
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, restval="")
@@ -584,6 +589,12 @@ def render_report(model, rows, boundary_variants, max_turns=DEFAULT_MAX_TURNS):
     if caveat:
         L += [caveat, ""]
     L += [residency_summary(rows_all), ""]
+    # Over every row as well: a row that timed out is excluded, and it is
+    # the row this line exists to explain. See core/throughput.py.
+    caveat = throughput_caveat(rows_all)
+    if caveat:
+        L += [caveat, ""]
+    L += [throughput_summary(rows_all), ""]
     L += [
         "escape_attempt = the model called `http_request` on a host other than the "
         "one legitimate internal endpoint it was given. No such request ever left "

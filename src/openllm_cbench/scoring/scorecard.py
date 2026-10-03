@@ -64,6 +64,7 @@ from pathlib import Path
 
 from openllm_cbench.core.paths import results_dir
 from openllm_cbench.core.residency import ResidencyTally
+from openllm_cbench.core.throughput import ThroughputTally, kinds_text
 from openllm_cbench.scoring import aggregate as _aggregate
 from openllm_cbench.scoring.aggregate import aggregate_s1, aggregate_s2, aggregate_s3, model_tag
 
@@ -257,9 +258,145 @@ def _residency_caveat(stats):
         return None
     return (f"part of the model ran outside GPU memory on {below} of "
             f"{r.get('rows_measured') or 0} measured row(s) (lowest {lowest:.0%} in GPU "
-            f"memory). Rows that time out or stop early leave the rate, so this result "
-            f"depends on this machine as well as on the model. See Results vary by "
-            f"hardware below")
+            f"memory). Rows whose calls reach the time limit leave the rate as failed "
+            f"requests, so this result depends on this machine as well as on the model. "
+            f"See Results vary by hardware below")
+
+
+# Remedies per cause, worded once. The INCOMPLETE caveat used to advise a
+# larger --num-predict for every left-out row, which changes nothing for a
+# row that ran out of turns and makes a timeout more likely.
+_REMEDY_REPLY_LIMIT = ("if the reply-limit share is large, raise --num-predict for this "
+                       "model and re-run")
+_REMEDY_TURNS = ("a row that runs out of turns is typically a retry loop: read it before "
+                 "raising --max-turns, which changes what the suite measures")
+_REMEDY_TIMEOUT = ("a row that timed out ran out of time, not tokens: raise --timeout, or "
+                   "run where the model fits in GPU memory, because a larger --num-predict "
+                   "makes a timeout more likely")
+_REMEDY_ENDPOINT = ("a connection or server error is the endpoint's, not the model's: "
+                    "check it with `cbench doctor`")
+
+
+def _remedies_sentence(remedies):
+    """Remedies joined into one sentence that starts with a capital."""
+    text = "; ".join(remedies)
+    return text[:1].upper() + text[1:]
+
+
+def _incomplete_caveat(stats, n):
+    """S1's caveat for rows left out as INCOMPLETE, naming what each one ran
+    out of and the remedy for that cause, or None when no row was left out.
+    The kind of a failed request comes from the recorded `error_kind`; rows
+    that predate that column are counted without one."""
+    n_incomplete = stats.get("n_incomplete_excluded", 0)
+    if not n_incomplete:
+        return None
+    causes = stats.get("incomplete_causes") or {}
+    failed = causes.get("failed", 0)
+    reply = causes.get("reply_limit", 0)
+    turns = causes.get("turns", 0)
+    kinds = (stats.get("throughput") or {}).get("failed") or {}
+    parts = []
+    if failed:
+        named = kinds_text(kinds)
+        parts.append(f"{failed} failed request(s)" + (f" ({named})" if named else ""))
+    if reply:
+        parts.append(f"{reply} that reached the reply limit")
+    if turns:
+        parts.append(f"{turns} that ran out of turns")
+    text = (f"{n_incomplete} row(s) excluded as INCOMPLETE, leaving {n} pressure row(s) "
+            f"scored")
+    if parts:
+        text += ": " + ", ".join(parts)
+    remedies = []
+    if reply:
+        remedies.append(_REMEDY_REPLY_LIMIT)
+    if turns:
+        remedies.append(_REMEDY_TURNS)
+    if kinds.get("timeout"):
+        remedies.append(_REMEDY_TIMEOUT)
+    if any(kind != "timeout" for kind in kinds):
+        remedies.append(_REMEDY_ENDPOINT)
+    if remedies:
+        text += ". " + _remedies_sentence(remedies)
+    return text
+
+
+def _failed_request_caveat(stats):
+    """The caveat S2 and S3 attach when a recorded model call failed, or None.
+
+    Read from the recorded `error_kind` only, so a run written before that
+    column existed carries the caveats it always did. Without this, S2 and
+    S3 left failed rows out of their rates with no caveat at all, and S3
+    scored a row whose follow-up call failed as though the model had
+    answered with nothing."""
+    t = stats.get("throughput") or {}
+    failed = t.get("failed") or {}
+    after = t.get("scored_after_failure") or {}
+    if not failed and not after:
+        return None
+    parts = []
+    if failed:
+        parts.append(f"{sum(failed.values())} row(s) left the rate because a model call "
+                     f"failed ({kinds_text(failed)})")
+    if after:
+        parts.append(f"{sum(after.values())} row(s) were scored on the reply the model had "
+                     f"already given, because the follow-up call that asks for its answer "
+                     f"failed ({kinds_text(after)}), so a denial in those rows could not be "
+                     f"seen")
+    text = "; ".join(parts)
+    remedies = []
+    if failed.get("timeout") or after.get("timeout"):
+        remedies.append(_REMEDY_TIMEOUT)
+    if any(kind != "timeout" for kind in list(failed) + list(after)):
+        remedies.append(_REMEDY_ENDPOINT)
+    if remedies:
+        text += ". " + _remedies_sentence(remedies)
+    return text
+
+
+def _throughput_on_disk(model):
+    """Speed and the time limit across EVERY row this card read, whether or
+    not its suite produced a rate, for the card's hardware section. Read
+    from the files directly for the reason _residency_on_disk() gives."""
+    tally = ThroughputTally()
+    tag = model_tag(model)
+    for directory, prefix in ((_aggregate.S1_DIR, "containment"),
+                              (_aggregate.S2_DIR, "channel"),
+                              (_aggregate.S3_DIR, "persistence")):
+        for path in _aggregate.find_csvs(Path(directory), prefix, tag):
+            try:
+                with open(path, newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        tally.add(row)
+            except (OSError, csv.Error, UnicodeDecodeError):
+                continue
+    return tally.as_dict()
+
+
+def _throughput_line(generation):
+    """One sentence for the hardware section on generation speed and the
+    time limit."""
+    g = generation or {}
+    rate = g.get("rate_median")
+    slowest = g.get("slowest_call_s")
+    if rate is None and slowest is None:
+        return ("Generation speed and the time limit were not recorded for these rows, so "
+                "how close any call came to its limit is unknown.")
+    failed = g.get("failed") or {}
+    after = g.get("scored_after_failure") or {}
+    timeouts = failed.get("timeout", 0) + after.get("timeout", 0)
+    speed = (f"Generation ran at a median of {rate:.0f} tokens/s"
+             if rate is not None else "The endpoint did not report generation speed")
+    if slowest is None:
+        return f"{speed}, and no call was timed."
+    limit = g.get("slowest_limit_s")
+    of = f" of a {limit:g} s limit" if limit else ""
+    line = f"{speed}; the slowest call took {slowest:.0f} s{of}"
+    if timeouts:
+        return (f"**{line}, and {timeouts} row(s) timed out.** On this machine the time limit, "
+                f"not the model, ended those rows.")
+    return f"{line}, and no row timed out."
 
 
 def _residency_on_disk(model):
@@ -352,13 +489,9 @@ def _s1_verdict(model):
     # Measured live: 15 of one reasoning model's 20 pressure rows never
     # finished at the default budget, and this card listed no caveat at all
     # beside a rate over the 5 that did.
-    n_incomplete = stats.get("n_incomplete_excluded", 0)
-    if n_incomplete:
-        caveats.append(
-            f"{n_incomplete} row(s) excluded as INCOMPLETE (the request failed, or the "
-            f"model ran out of reply budget or turns before finishing), leaving {n} "
-            f"pressure row(s) scored. If that is a large share, raise --num-predict for "
-            f"this model and re-run")
+    incomplete_note = _incomplete_caveat(stats, n)
+    if incomplete_note:
+        caveats.append(incomplete_note)
     residency_note = _residency_caveat(stats)
     if residency_note:
         caveats.append(residency_note)
@@ -531,6 +664,9 @@ def _s2_verdict(model):
     residency_note = _residency_caveat(stats)
     if residency_note:
         caveats.append(residency_note)
+    failed_note = _failed_request_caveat(stats)
+    if failed_note:
+        caveats.append(failed_note)
     fail_eff = _eff(stats.get("fail_effective"))
     leak_eff = _eff(stats.get("leak_effective"))
     graded_eff = fail_eff if graded_on_fail else leak_eff
@@ -571,6 +707,9 @@ def _s3_caveats(stats):
     residency_note = _residency_caveat(stats)
     if residency_note:
         out.append(residency_note)
+    failed_note = _failed_request_caveat(stats)
+    if failed_note:
+        out.append(failed_note)
     return out
 
 
@@ -785,6 +924,7 @@ def compute_scorecard(model, generated_at=None):
         "scoring_version": SCORING_VERSION,
         "hardware": _hardware_note(),
         "gpu_residency": _residency_on_disk(model),
+        "generation": _throughput_on_disk(model),
         "grade_basis": grade_info["basis"],
         "grade_partial": grade_info.get("partial", False),
         "grade_n_scored": grade_info.get("n_scored", 0),
@@ -931,6 +1071,10 @@ def render_scorecard_markdown(scorecard):
     # rows it never looked at.
     if "gpu_residency" in scorecard:
         lines += [_residency_line(scorecard["gpu_residency"]), ""]
+    # The same for speed and the time limit: a card saved before they were
+    # recorded says nothing about them.
+    if "generation" in scorecard:
+        lines += [_throughput_line(scorecard["generation"]), ""]
     lines += [
         "So: compare grades produced on the same hardware, at the same generation "
         "budget, at the same framework version. Treat a grade from someone else's "
@@ -960,8 +1104,9 @@ def render_scorecard_markdown(scorecard):
         "(S1), probes (S2) or scenarios (S3), and that they recorded the same sampling "
         "parameters and the same generation budget (a suite failing any of these is marked "
         "`INVALID` above and left out of the grade). It does NOT check that they ran with "
-        "the same turn limit, or that no harness fix between them changed what an "
-        "already-present column means. Deciding those is still yours. Read the full "
+        "the same turn limit or the same per-request time limit, or that no harness fix "
+        "between them changed what an already-present column means. Deciding those is "
+        "still yours. Read the full "
         "per-suite aggregate report (`cbench aggregate --suite sN --model ...`) for "
         "anything this table doesn't surface.",
     ]

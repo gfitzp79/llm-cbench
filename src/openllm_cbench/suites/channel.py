@@ -60,6 +60,9 @@ from openllm_cbench.core.residency import (
     read_fraction, cell as residency_cell, residency_caveat, residency_summary,
     RESIDENCY_FIELDS,
 )
+from openllm_cbench.core.throughput import (
+    CallMeter, timeout_row_fields, throughput_caveat, throughput_summary, THROUGHPUT_FIELDS,
+)
 # Named model_registry / load_model_registry throughout this file, distinct
 # from load_registry() below -- that's the unrelated probe-metadata registry
 # (prompt_id -> check info) from scoring/probes.py, not the model catalogue.
@@ -150,10 +153,16 @@ def supports_thinking(model, endpoint=None, timeout=30):
         return None
 
 
-def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampling=None, endpoint=None):
+def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampling=None, endpoint=None,
+               meter=None):
     """One /api/chat call.
 
     Returns (content, thinking, done_reason, prompt_tokens, occupancy, error).
+
+    `meter`, when given, is the row's core/throughput.py CallMeter: it records
+    the call's wall time, the generation rate the server reports and why the
+    call failed, if it did. Passed in rather than returned, so this function's
+    return value is the same with or without it.
 
     done_reason is persisted (not just used internally) so a future run is
     self-diagnosing about truncation -- "length" means num_predict ran out
@@ -176,10 +185,9 @@ def call_model(model, prompt, think_value, num_ctx, num_predict, timeout, sampli
         # parameters silently confound a comparison otherwise).
         "options": build_options(num_ctx, num_predict, sampling),
     }
+    meter = meter if meter is not None else CallMeter()
     try:
-        resp = requests.post(endpoint or chat_url(), json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
+        data = meter.post(endpoint or chat_url(), payload, timeout)
     except Exception as e:
         return "", "", "", None, None, str(e)
     msg = data.get("message", {})
@@ -406,10 +414,11 @@ def main():
         for item in prompts:
             pid = item["id"]
             print(f"  -> {pid} ...", end=" ", flush=True)
+            meter = CallMeter()
             content, thinking, done_reason, n_prompt, occupancy, err = call_model(
                 args.model, item["prompt"], api_value,
                 num_ctx, num_predict, timeout, endpoint=endpoint_chat,
-                sampling=sampling,
+                sampling=sampling, meter=meter,
             )
             if err:
                 print(f"FAILED ({err})")
@@ -421,6 +430,7 @@ def main():
                     "content_full": "", "thinking_full": "", "done_reason": "",
                     "max_prompt_tokens": "", "peak_context_tokens": "",
                     "gpu_resident_fraction": "",
+                    **meter.row_fields(),
                 })
                 continue
 
@@ -467,6 +477,7 @@ def main():
                 "max_prompt_tokens": "" if n_prompt is None else n_prompt,
                 "peak_context_tokens": "" if occupancy is None else occupancy,
                 "gpu_resident_fraction": residency_cell(resident),
+                **meter.row_fields(),
             })
 
     fieldnames = ["model", "prompt_id", "category", "think_label", "content_verdict",
@@ -474,8 +485,8 @@ def main():
                   "truncation_suspected", "content_note", "thinking_note", "error",
                   "content_full", "thinking_full", "done_reason", "merge_evidence",
                   "scoring_version",
-                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *SAMPLING_FIELDS, *BUDGET_FIELDS,
-                  *RUN_TIME_FIELDS]
+                  *CONTEXT_FIELDS, *RESIDENCY_FIELDS, *THROUGHPUT_FIELDS, *SAMPLING_FIELDS,
+                  *BUDGET_FIELDS, *RUN_TIME_FIELDS]
     # Stamp sampling at WRITE time, not where each row is built. A suite
     # constructs rows in several places (success, error and timeout paths)
     # and per-site drift is precisely how one of them ends up disagreeing
@@ -502,6 +513,7 @@ def main():
         # how one of them ends up disagreeing with the others.
         _row.update(budget_row_fields(num_ctx, num_predict))
         _row.update(run_time_row_fields(run_started_at))
+        _row.update(timeout_row_fields(timeout))
         _row["scoring_version"] = SCORING_VERSION
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -539,6 +551,10 @@ def render_report(model, rows, variants):
     if caveat:
         L += [caveat, ""]
     L += [residency_summary(rows), ""]
+    caveat = throughput_caveat(rows)
+    if caveat:
+        L += [caveat, ""]
+    L += [throughput_summary(rows), ""]
     L += [
         "Each probe scored independently on the visible answer (`content`) and the "
         "hidden reasoning trace (`thinking`), using the same heuristics as the L1 "

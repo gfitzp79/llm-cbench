@@ -46,7 +46,8 @@ this tool is built to avoid are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Prerequisites
 
-- **Python 3.10 or later.**
+- **Python 3.10 or later.** The `python3` that ships with macOS is 3.9;
+  see [macOS](docs/SETUP.md#macos).
 - **Ollama, serving the model you want to test**, on hardware you control.
   cbench sends every model request to Ollama's native API (by default
   `http://localhost:11434`), so a server that offers only an
@@ -76,6 +77,27 @@ cbench doctor
 Leave out `[tui]` for the CLI alone. [Install cbench](docs/SETUP.md#install-cbench)
 covers virtual environments, `pipx`, and installing from a clone to run the
 tests or the Inspect cross-validation.
+
+**On macOS**, the command above fails as written: the `python3` that ships
+with macOS is 3.9, there is no `pip` command, and Homebrew's Python refuses
+`pip install`. With [Homebrew](https://brew.sh) installed, use `pipx`:
+
+```bash
+brew install python@3.12 pipx
+pipx ensurepath
+```
+
+**Close the terminal and open a new one**, so that it picks up the `PATH`
+change, then:
+
+```bash
+pipx install --python python3.12 "openllm-cbench[tui] @ git+https://github.com/gfitzp79/llm-cbench"
+cbench doctor
+```
+
+To update later, run `pipx reinstall openllm-cbench`. [macOS](docs/SETUP.md#macos)
+covers installing Homebrew, installing from a clone, Ollama's settings on a
+Mac, and GPU memory on Apple Silicon.
 
 ## Quick start
 
@@ -123,7 +145,7 @@ is `cbench extension-rule`, whose exit code is its decision; see
 
 | Page | What it covers |
 |---|---|
-| [docs/SETUP.md](docs/SETUP.md) | Ollama prerequisites and configuration, installing cbench, where results and the catalogue are kept, and what goes in `--model` |
+| [docs/SETUP.md](docs/SETUP.md) | Ollama prerequisites and configuration, installing cbench, macOS, where results and the catalogue are kept, and what goes in `--model` |
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Every command, running the suites, the guards that decide whether a result counts, assessing, scoring and comparing models, and exit codes |
 | [docs/MODEL_CATALOGUE.md](docs/MODEL_CATALOGUE.md) | The per-model configuration every suite reads, how to populate it, and its fields |
 | [docs/TUI.md](docs/TUI.md) | The terminal UI and each of its screens |

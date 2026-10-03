@@ -308,10 +308,14 @@ def ollama_report(base_url):
 
     host_setting = config.get("OLLAMA_HOST", "")
     if listens_beyond_loopback(host_setting):
+        # The macOS app takes its environment from launchd, not from a shell,
+        # so `export OLLAMA_HOST=...` there changes nothing it reads.
+        env_fix = ("run `launchctl unsetenv OLLAMA_HOST` and quit and reopen the app"
+                   if sys.platform == "darwin" else "set OLLAMA_HOST=127.0.0.1")
         lines.append(f"  network:       [!] the server listens on {host_setting}; other machines "
                      f"on your network can use it, and Ollama has no authentication. Unless you "
                      f"meant that, turn off \"Expose Ollama to the network\" in the Ollama app, "
-                     f"or set OLLAMA_HOST=127.0.0.1.")
+                     f"or {env_fix}.")
     elif config:
         lines.append("  network:       loopback only (from the server's startup log)")
     return lines

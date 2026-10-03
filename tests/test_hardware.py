@@ -6,9 +6,80 @@ what's testable and load-bearing without real hardware is the arithmetic
 check_model_fit() runs on whatever numbers it's given.
 """
 
+from openllm_cbench.core import hardware as H
 from openllm_cbench.core.hardware import (
     check_model_fit, fit_assessment, is_moe, parse_active_params_b,
 )
+
+
+# --- Apple Silicon GPU budget ---------------------------------------------
+
+# Ollama 0.35.0's startup line on a 32 GB Apple M5, verbatim.
+METAL_LINE = (
+    'time=2026-10-02T18:06:30.519+01:00 level=INFO source=types.go:32 '
+    'msg="inference compute" id=0 filter_id=0 library=Metal compute=0.0 name=MTL0 '
+    'description="Apple M5" libdirs="" driver=0.0 pci_id="" type=iGPU '
+    'total="25.0 GiB" available="25.0 GiB"'
+)
+
+
+def _sysctl(values):
+    """A stand-in for _run() that answers `sysctl -n <key>` from a dict."""
+    def run(cmd, timeout=10):
+        if cmd[:2] == ["sysctl", "-n"] and cmd[2] in values:
+            return values[cmd[2]]
+        return None
+    return run
+
+
+def test_metal_total_is_read_from_the_last_inference_compute_line():
+    older = METAL_LINE.replace("25.0 GiB", "21.3 GiB")
+    assert H.parse_metal_total_mb(older + "\n" + METAL_LINE) == 25600
+    assert H.parse_metal_total_mb(METAL_LINE.replace('total="25.0 GiB"', 'total="512.0 MiB"')) == 512
+    assert H.parse_metal_total_mb('msg="inference compute" library=CUDA total="24.0 GiB"') is None
+    assert H.parse_metal_total_mb("") is None
+
+
+def test_apple_budget_is_not_total_ram(monkeypatch):
+    # Measured: doctor reported 32768 MB and a ~56B band on a Mac whose
+    # GPU could wire 25 GiB. The cap is what decides whether a model spills.
+    monkeypatch.setattr(H, "_run", _sysctl({"hw.optional.arm64": "1\n",
+                                            "iogpu.wired_limit_mb": "0\n",
+                                            "hw.memsize": str(32 * 1024 ** 3)}))
+    monkeypatch.setattr(H, "_metal_total_from_ollama_log", lambda: 25600)
+    assert H.detect_apple_gpu_budget_mb() == (25600, "Metal limit reported by Ollama")
+
+
+def test_an_operator_wired_limit_wins_over_the_logged_figure(monkeypatch):
+    monkeypatch.setattr(H, "_run", _sysctl({"hw.optional.arm64": "1\n",
+                                            "iogpu.wired_limit_mb": "28000\n"}))
+    monkeypatch.setattr(H, "_metal_total_from_ollama_log", lambda: 25600)
+    assert H.detect_apple_gpu_budget_mb() == (28000, "iogpu.wired_limit_mb")
+
+
+def test_without_a_log_the_budget_is_an_estimate_and_says_so(monkeypatch):
+    monkeypatch.setattr(H, "_run", _sysctl({"hw.optional.arm64": "1\n",
+                                            "hw.memsize": str(32 * 1024 ** 3)}))
+    monkeypatch.setattr(H, "_metal_total_from_ollama_log", lambda: None)
+    mb, source = H.detect_apple_gpu_budget_mb()
+    assert mb == 24576 and source.startswith("estimated")
+
+
+def test_an_intel_mac_reports_no_gpu_rather_than_ram_as_vram(monkeypatch):
+    monkeypatch.setattr(H, "_run", _sysctl({"hw.optional.arm64": "0\n",
+                                            "hw.memsize": str(32 * 1024 ** 3)}))
+    monkeypatch.setattr(H.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(H.shutil, "which", lambda name: None)
+    mb, source = H.detect_apple_gpu_budget_mb()
+    assert mb is None and "Intel" in source
+    assert H.detect_gpu_vram_mb() == (None, None)
+
+
+def test_the_report_says_where_an_apple_figure_came_from():
+    report = H.format_report({"gpu_vendor": "apple-unified", "gpu_vram_mb": 25600,
+                              "gpu_vram_source": "Metal limit reported by Ollama",
+                              "system_ram_mb": 32768, "advisory_max_params_b_q4": 43.6})
+    assert "25600 MB of unified memory usable by the GPU (Metal limit reported by Ollama)" in report
 
 
 # --- MoE detection -------------------------------------------------------

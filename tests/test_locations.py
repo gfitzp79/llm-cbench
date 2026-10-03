@@ -105,6 +105,32 @@ def test_network_exposure_is_read_from_the_bind_address():
     assert not L.listens_beyond_loopback("http://localhost:11434")
 
 
+def _exposed_report(tmp_path, monkeypatch, platform):
+    (tmp_path / "server.log").write_text(CONFIG_LINE + "\n", encoding="utf-8")
+    monkeypatch.setattr(L, "ollama_log_dir", lambda: (tmp_path, ""))
+    monkeypatch.setattr(L, "find_ollama_binary", lambda: None)
+    monkeypatch.setattr(L, "server_version", lambda url: None)
+    monkeypatch.setattr(L, "server_tags", lambda url: None)
+    monkeypatch.setattr(L.sys, "platform", platform)
+    [line] = [x for x in L.ollama_report("http://localhost:11434") if "network:" in x]
+    return line
+
+
+def test_the_exposure_fix_on_macos_names_launchctl_not_a_shell_variable(tmp_path, monkeypatch):
+    # The macOS app reads its environment from launchd, so the Linux advice
+    # (set OLLAMA_HOST in a shell) would change nothing the server sees.
+    line = _exposed_report(tmp_path, monkeypatch, "darwin")
+    assert "Expose Ollama to the network" in line
+    assert "launchctl unsetenv OLLAMA_HOST" in line
+    assert "set OLLAMA_HOST=127.0.0.1" not in line
+
+
+def test_the_exposure_fix_elsewhere_still_names_the_variable(tmp_path, monkeypatch):
+    line = _exposed_report(tmp_path, monkeypatch, "linux")
+    assert "set OLLAMA_HOST=127.0.0.1" in line
+    assert "launchctl" not in line
+
+
 def test_only_a_loopback_endpoint_has_local_files():
     assert L.endpoint_is_local("http://localhost:11434")
     assert L.endpoint_is_local("http://127.0.0.1:11434")

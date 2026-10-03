@@ -40,7 +40,8 @@ def _run(cmd, timeout=10):
 def detect_gpu_vram_mb():
     """Returns (vendor, total_mb) for the first detected GPU, or (None, None)
     if nothing could be detected. Tries nvidia-smi, then rocm-smi, then
-    (on macOS) sysctl for unified memory. Never raises."""
+    (on Apple Silicon) the share of unified memory the GPU may use; see
+    detect_apple_gpu_budget_mb(). Never raises."""
     if shutil.which("nvidia-smi"):
         out = _run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"])
         if out:
@@ -61,17 +62,84 @@ def detect_gpu_vram_mb():
                     pass
 
     if platform.system() == "Darwin":
-        out = _run(["sysctl", "-n", "hw.memsize"])
-        if out:
-            try:
-                # Apple Silicon: unified memory, treat total system RAM as
-                # the GPU-accessible ceiling (a rough overestimate in
-                # practice, since the OS and other processes also share it).
-                return "apple-unified", int(out.strip()) // (1024 * 1024)
-            except ValueError:
-                pass
+        mb, _source = detect_apple_gpu_budget_mb()
+        if mb:
+            return "apple-unified", mb
 
     return None, None
+
+
+# Share of unified memory macOS lets the GPU wire by default, used only when
+# neither an operator override nor Ollama's own figure is available.
+# Measured: Ollama 0.35.0 on a 32 GB Apple M5 reported Metal total=25.0 GiB
+# (0.78). 0.75 stays on the conservative side of that.
+APPLE_DEFAULT_GPU_SHARE = 0.75
+
+_METAL_TOTAL = re.compile(
+    r'msg="inference compute".*library=Metal.*?\btotal="([\d.]+) (GiB|MiB)"')
+
+
+def parse_metal_total_mb(text):
+    """The Metal GPU budget, in MB, from the last `inference compute` line
+    with library=Metal in Ollama's server log; None when there is none."""
+    matches = _METAL_TOTAL.findall(text or "")
+    if not matches:
+        return None
+    value, unit = matches[-1]
+    return int(float(value) * (1024 if unit == "GiB" else 1))
+
+
+def _metal_total_from_ollama_log(max_bytes=2_000_000):
+    from openllm_cbench.core.locations import ollama_log_dir
+    folder, _ = ollama_log_dir()
+    if folder is None:
+        return None
+    try:
+        with open(folder / "server.log", encoding="utf-8", errors="replace") as f:
+            return parse_metal_total_mb(f.read(max_bytes))
+    except OSError:
+        return None
+
+
+def detect_apple_gpu_budget_mb():
+    """(mb, source) for the unified memory the GPU may use on this Mac, or
+    (None, reason). Never raises.
+
+    Total RAM is the wrong figure: macOS caps how much of it the GPU can
+    wire (Metal's recommendedMaxWorkingSetSize), and a model past that cap
+    runs partly on the CPU, which is exactly what the fit check exists to
+    predict. Taken from the first of: the operator's own
+    `iogpu.wired_limit_mb` override, the Metal total Ollama logged at
+    startup, and a default share of RAM, labelled as an estimate.
+
+    An Intel Mac has no Metal backend in Ollama, so it reports no GPU
+    rather than presenting system RAM as VRAM. hw.optional.arm64 is read
+    rather than platform.machine(), which says x86_64 under Rosetta."""
+    arm = _run(["sysctl", "-n", "hw.optional.arm64"])
+    if not arm or arm.strip() != "1":
+        return None, "Intel Mac: Ollama runs models on the CPU"
+
+    out = _run(["sysctl", "-n", "iogpu.wired_limit_mb"])
+    try:
+        override = int(out.strip()) if out else 0
+    except ValueError:
+        override = 0
+    if override > 0:
+        return override, "iogpu.wired_limit_mb"
+
+    logged = _metal_total_from_ollama_log()
+    if logged:
+        return logged, "Metal limit reported by Ollama"
+
+    ram = _run(["sysctl", "-n", "hw.memsize"])
+    try:
+        ram_mb = int(ram.strip()) // (1024 * 1024) if ram else None
+    except ValueError:
+        ram_mb = None
+    if ram_mb:
+        return (int(ram_mb * APPLE_DEFAULT_GPU_SHARE),
+                f"estimated as {int(APPLE_DEFAULT_GPU_SHARE * 100)}% of RAM")
+    return None, "could not read this Mac's memory size"
 
 
 def detect_system_ram_mb():
@@ -350,9 +418,13 @@ def probe():
     vendor, vram_mb = detect_gpu_vram_mb()
     ram_mb = detect_system_ram_mb()
     band_b = recommend_band(vram_mb) if vram_mb else None
+    source = None
+    if platform.system() == "Darwin" and vendor in (None, "apple-unified"):
+        _, source = detect_apple_gpu_budget_mb()
     return {
         "gpu_vendor": vendor,
         "gpu_vram_mb": vram_mb,
+        "gpu_vram_source": source,
         "system_ram_mb": ram_mb,
         "advisory_max_params_b_q4": band_b,
     }
@@ -361,8 +433,14 @@ def probe():
 def format_report(info=None):
     info = info or probe()
     lines = ["Hardware (advisory only; every suite runs regardless):"]
-    if info["gpu_vendor"] and info["gpu_vram_mb"]:
+    source = info.get("gpu_vram_source")
+    if info["gpu_vendor"] == "apple-unified" and info["gpu_vram_mb"]:
+        lines.append(f"  GPU: apple-unified, {info['gpu_vram_mb']} MB of unified memory "
+                     f"usable by the GPU ({source})")
+    elif info["gpu_vendor"] and info["gpu_vram_mb"]:
         lines.append(f"  GPU: {info['gpu_vendor']}, {info['gpu_vram_mb']} MB VRAM")
+    elif source:
+        lines.append(f"  GPU: not detected ({source})")
     else:
         lines.append("  GPU: not detected (nvidia-smi/rocm-smi not found, or non-GPU/unsupported platform)")
     if info["system_ram_mb"]:

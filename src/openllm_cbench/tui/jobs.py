@@ -116,7 +116,7 @@ async def _stream(result, argv, on_line, cwd, fh):
         raw = await proc.stdout.readline()
         if not raw:
             break
-        line = raw.decode(errors="replace").rstrip("\n")
+        line = raw.decode(errors="replace").rstrip("\r\n")
         result.lines.append(line)
         if fh is not None:
             try:

@@ -333,6 +333,11 @@ caffeinate -i cbench score --model <model-tag>
 `caffeinate -i` prevents idle sleep only; closing a MacBook's lid still
 sleeps it.
 
+The M5 above is a MacBook Air, which has no fan; it was used to check that
+cbench installs and runs on macOS. [Running on a MacBook Air](../README.md#running-on-a-macbook-air)
+covers running on one, and recommends a Mac with a fan, such as a Mac mini,
+for dedicated runs.
+
 The canary listens on `127.0.0.1` only, so the macOS firewall does not
 prompt for it.
 

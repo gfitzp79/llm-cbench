@@ -159,8 +159,12 @@ Measured on a MacBook Air with an Apple M5 and 32 GB of memory (Ollama
 A hot Air slows itself down, and a slower model sends more rows past the
 time limit, out of the rates, so a throttled run is in effect a run on
 slower hardware (see [Responsible use](#responsible-use)).
-`cbench` records how much of the model was in GPU memory, but not
-throttling. So:
+`cbench` cannot read throttling itself, but every report states the
+generation speed and the slowest call against the time limit, which is
+where throttling shows. The Air these figures come from was a check that
+cbench installs and runs on macOS; for dedicated runs, use a Mac with a
+fan, such as a Mac mini, which holds its speed through a long run. On an
+Air:
 
 - **Run one suite at a time and let the machine cool in between.** Results
   from separate sessions pool into one grade, as long as the settings

@@ -37,6 +37,7 @@ import requests
 
 from openllm_cbench.core.endpoint import chat_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
+from openllm_cbench.core.plan import plan_line
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.budget import budget_line, model_reasons, resolve_budget
@@ -442,6 +443,10 @@ def main():
                     help="Ignore the model catalogue entirely.")
     p.add_argument("--dry-run", action="store_true",
                     help="Print the first scenario's task-phase payload and exit without calling the model.")
+    p.add_argument("--plan", action="store_true",
+                    help="Print how many rows one run would produce and exit without calling the "
+                         "model. `cbench score` and `cbench assess` use it to size their progress "
+                         "estimate.")
     args = p.parse_args()
     sampling = resolve_sampling(args)
     endpoint = chat_url(args.endpoint)
@@ -481,6 +486,10 @@ def main():
     scenarios = [s for s in all_scenarios if not args.scenario or s["id"] == args.scenario]
     if not scenarios:
         raise SystemExit(f"No scenario matching id '{args.scenario}'.")
+
+    if args.plan:
+        print(plan_line(len(scenarios)))
+        return 0
 
     if args.dry_run:
         scenario = scenarios[0]

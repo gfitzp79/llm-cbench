@@ -70,16 +70,35 @@ class JobResult:
     returncode: int | None
     lines: list[str] = field(default_factory=list)
     error: str = ""
+    log_path: "Path | None" = None
 
 
-async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | None = None) -> JobResult:
+async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | None = None,
+                  live_log: bool = False) -> JobResult:
     """Runs argv as a subprocess, calling on_line(line) as each line of
     combined stdout/stderr arrives (so a long-running suite streams live
     rather than dumping everything at the end), and returns the full
     result once the process exits. Never raises past this point -- a
     failure to even start the process is reported as an error string,
-    not an unhandled exception in the UI's event loop."""
+    not an unhandled exception in the UI's event loop.
+
+    live_log=True writes each line to the job's log file as it arrives,
+    rather than all at once when the job exits: a score run stopped
+    part-way (a fanless laptop getting too hot, a closed lid, a quit TUI)
+    otherwise left no log at all. save_job_log() then adds the exit line
+    to the same file."""
     result = JobResult(argv=list(argv), returncode=None)
+    fh = None
+    if live_log:
+        result.log_path, fh = _open_job_log(result.argv)
+    try:
+        return await _stream(result, argv, on_line, cwd, fh)
+    finally:
+        if fh is not None:
+            fh.close()
+
+
+async def _stream(result, argv, on_line, cwd, fh):
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -99,6 +118,13 @@ async def run_job(argv: list[str], on_line: Callable[[str], None], cwd: Path | N
             break
         line = raw.decode(errors="replace").rstrip("\n")
         result.lines.append(line)
+        if fh is not None:
+            try:
+                fh.write(line + "\n")
+                fh.flush()
+            except OSError:
+                # The screen and result.lines still have every line.
+                fh = None
         on_line(line)
 
     result.returncode = await proc.wait()
@@ -121,6 +147,7 @@ _CONDENSED_KEEP_PREFIXES = (
     "$ ", "=== ", "--- ", "Scoring '", "Full assessment:", "Assessment complete",
     "Aggregating ", "Report:", "CSV:", "Saved:", "[run-lock]", "[!]",
     "Model not catalogued", "Gate-checking", "Full log saved", "Generation budget:",
+    "Plan:",
 ) + _preflight_prefixes()
 
 # After this line nothing else runs, and what follows is the explanation:
@@ -196,6 +223,33 @@ def parse_trial_header(line: str) -> tuple[int, int] | None:
     return int(m.group(1)), int(m.group(2))
 
 
+def _job_log_path(argv) -> Path:
+    import datetime
+
+    from openllm_cbench.core.paths import results_dir
+
+    try:
+        subcommand = argv[argv.index("openllm_cbench.cli") + 1]
+    except (ValueError, IndexError):
+        subcommand = "unknown"
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return results_dir("tui-logs") / f"{subcommand}_{ts}.log"
+
+
+def _open_job_log(argv):
+    """(path, open file) for a job's live log, or (None, None) when the
+    results folder cannot be written; the job still runs."""
+    try:
+        path = _job_log_path(argv)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(path, "w", encoding="utf-8")
+        fh.write(f"$ {' '.join(argv)}\n\n")
+        fh.flush()
+        return path, fh
+    except OSError:
+        return None, None
+
+
 def save_job_log(result: JobResult) -> "Path | None":
     """Writes a completed job's full stdout/stderr (result.lines) to a
     timestamped file under results/tui-logs/, and returns its path.
@@ -217,10 +271,6 @@ def save_job_log(result: JobResult) -> "Path | None":
     point: if the file can't be written (e.g. a read-only results/ tree),
     the caller still has result.lines in memory and this failure is
     theirs to report, not something to crash the TUI over."""
-    import datetime
-
-    from openllm_cbench.core.paths import results_dir
-
     try:
         subcommand = result.argv[result.argv.index("openllm_cbench.cli") + 1]
     except (ValueError, IndexError):
@@ -235,10 +285,14 @@ def save_job_log(result: JobResult) -> "Path | None":
     # The promise above was not kept: an uncreatable results folder raised
     # here, inside a worker, and took every TUI action down with it.
     try:
-        d = results_dir("tui-logs")
-        d.mkdir(parents=True, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = d / f"{subcommand}_{ts}.log"
+        if result.log_path is not None and result.log_path.exists():
+            # Written line by line as the job ran (run_job's live_log);
+            # the lines are already there, so only the exit line is added.
+            with open(result.log_path, "a", encoding="utf-8") as f:
+                f.write(footer.lstrip("\n"))
+            return result.log_path
+        path = _job_log_path(result.argv)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"$ {' '.join(result.argv)}\n\n" + "\n".join(result.lines) + footer,
                         encoding="utf-8")
     except OSError:

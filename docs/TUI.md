@@ -10,7 +10,8 @@ appears on screen before it starts; there is no second implementation of
 any suite. No command runs until you click. The safety invariant is shown on
 every screen, and suite, score, gate, search, pull and doctor actions save
 their full output as a log under `tui-logs/` in the results
-folder.
+folder. The log is written line by line as the job runs, so a run stopped
+part-way keeps everything it printed.
 
 The dashboard shows the active results location and a short progress panel:
 how many models are local (pulled into your endpoint), catalogued, scored
@@ -184,9 +185,14 @@ the exact command line, including the gate step whenever it will run.
 - **Hardware warning.** If this machine's GPU looks too small for the
   model, an advisory warning says so before the run starts (from the
   best-effort probe in `core/hardware.py`; it never blocks a run).
-- **Progress.** A run that is not a re-score shows a progress bar, driven
-  by the `--- suite trial N/M ---` lines in the log, with an estimated time
-  remaining that appears once the first trial has finished.
+- **Progress.** A run that is not a re-score shows a progress bar and an
+  estimated time remaining. Before the first trial, `cbench score` prints
+  a `Plan:` line with the number of rows the run will produce, which each
+  suite works out with its own `--plan`; the bar then advances as each row
+  finishes, and the estimate appears within the first few rows. If a suite
+  cannot say how many rows it will produce, there is no `Plan:` line and the
+  bar counts trials instead, which gives no estimate until the first trial
+  has finished.
 - **Re-score saved results only** refuses to start when no results are
   saved yet for the tag you entered, before running anything, rather than
   producing grade N/A, which looks like a real result until you

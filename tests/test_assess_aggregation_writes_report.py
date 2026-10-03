@@ -44,7 +44,12 @@ def test_assess_body_writes_trial_summary_without_nameerror(tmp_path, monkeypatc
     with patch.object(cli, "_dispatch_passthrough", return_value=0) as mock_dispatch:
         rc = cli._assess_body(Args(), ["s1"], suite_info)
 
-    assert mock_dispatch.call_count == 1  # one trial, as configured
+    # The first call is the suite's --plan (core/plan.py), which sizes the
+    # progress estimate and runs nothing; the rest are trials.
+    calls = [c.args[1] for c in mock_dispatch.call_args_list]
+    assert "--plan" in calls[0]
+    trials = [argv for argv in calls if "--plan" not in argv]
+    assert len(trials) == 1  # one trial, as configured
     assert rc == 0
 
     out_path = tmp_path / "s1_containment" / "trial_summary_fake-model-1b.md"

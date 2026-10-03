@@ -320,7 +320,7 @@ def test_models_screen_gate_all_uses_the_real_discover_subcommand(monkeypatch):
     # of letting a real (endpoint-hitting) batch run start.
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -836,7 +836,7 @@ def test_gate_all_passes_the_limit_from_the_form(monkeypatch):
     library, so the bound belongs in front of the button."""
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -866,7 +866,7 @@ def test_gate_all_without_a_limit_stays_unbounded(monkeypatch):
     field did. A blank box must not become `--limit 0`."""
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -943,7 +943,7 @@ def test_delete_does_nothing_until_the_box_is_ticked(monkeypatch):
     reach no subprocess at all."""
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -968,7 +968,7 @@ def test_delete_does_nothing_until_the_box_is_ticked(monkeypatch):
 def test_a_confirmed_delete_calls_the_real_subcommand_and_disarms(monkeypatch):
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -1375,7 +1375,7 @@ def test_a_zero_limit_refuses_instead_of_gating_everything(monkeypatch):
     calling every model."""
     captured = {}
 
-    async def fake_run_job(argv, on_line, cwd=None):
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
         captured["argv"] = argv
         from openllm_cbench.tui.jobs import JobResult
         return JobResult(argv=list(argv), returncode=0, lines=[])
@@ -1399,3 +1399,48 @@ def test_a_zero_limit_refuses_instead_of_gating_everything(monkeypatch):
     log = asyncio.run(scenario())
     assert "argv" not in captured
     assert any("nothing started" in line for line in log)
+
+
+def test_score_progress_counts_rows_once_the_run_states_its_plan(monkeypatch):
+    """Trials were the wrong unit: a quick score's trials took 2:39, 11:54,
+    0:33 and 0:29, so the ETA was blank through the first, then a third of
+    the real time, then frozen. Once `cbench score` prints its Plan line the
+    bar counts rows, which finish every few seconds."""
+    from textual.widgets import ProgressBar
+
+    seen = {}
+
+    async def fake_run_job(argv, on_line, cwd=None, live_log=False):
+        from openllm_cbench.tui.jobs import JobResult
+        bar = app.screen.query_one("#score-progress", ProgressBar)
+        seen["before_plan"] = bar.total
+        for line in ["Plan: S1 24 rows x 1 trial(s), S3 2 rows x 3 trial(s); 30 rows in total.",
+                     "--- s1 trial 1/1 ---", "=== boundary=stated ===",
+                     "  -> email_report ... CONTAINED", "  -> fx_lookup ... CONTAINED",
+                     "  -> internal_endpoint ... ESCAPE_ATTEMPT"]:
+            on_line(line)
+        seen["total"], seen["progress"] = bar.total, bar.progress
+        seen["live_log"] = live_log
+        return JobResult(argv=list(argv), returncode=0, lines=[])
+
+    import openllm_cbench.tui.app as app_mod
+    monkeypatch.setattr(app_mod, "run_job", fake_run_job)
+    app = CBenchTUI()
+
+    async def scenario():
+        async with app.run_test(size=(160, 50)) as pilot:
+            await pilot.pause()
+            await _click(pilot, "#goto-score")
+            await pilot.pause()
+            app.screen.query_one("#score-model-input").value = "x:1b"
+            await _click(pilot, "#score-s2")
+            await _click(pilot, "#score-gate-first")
+            await pilot.pause()
+            await _click(pilot, "#score-start")
+            for _ in range(5):
+                await pilot.pause()
+    asyncio.run(scenario())
+    assert seen["before_plan"] == 6          # 2 suites x 3 trials, until the plan arrives
+    assert seen["total"] == 30
+    assert seen["progress"] == 3             # one per finished row, not per trial
+    assert seen["live_log"] is True          # a stopped run keeps its log

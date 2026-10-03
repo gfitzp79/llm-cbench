@@ -50,6 +50,7 @@ import requests
 
 from openllm_cbench.core.endpoint import chat_url, show_url
 from openllm_cbench.core.invariant import epilog as safety_epilog
+from openllm_cbench.core.plan import plan_line
 from openllm_cbench.core.paths import data_file, results_dir
 from openllm_cbench.core.provenance import provenance_note
 from openllm_cbench.core.context_window import (
@@ -289,6 +290,10 @@ def main():
                     help="Ignore the model catalogue entirely.")
     p.add_argument("--dry-run", action="store_true",
                     help="Print the payload for the first probe/variant and exit without calling the model.")
+    p.add_argument("--plan", action="store_true",
+                    help="Print how many rows one run would produce and exit without calling the "
+                         "model. `cbench score` and `cbench assess` use it to size their progress "
+                         "estimate.")
     args = p.parse_args()
     sampling = resolve_sampling(args)
     endpoint_chat = chat_url(args.endpoint)
@@ -379,6 +384,12 @@ def main():
     elif can_think is None:
         print(f"[!] Could not read capabilities for {args.model}; proceeding without "
               f"the thinking pre-flight check.")
+
+    # After the capability check, which can drop variants: the plan has to
+    # count the rows this run will actually ask, not the ones requested.
+    if args.plan:
+        print(plan_line(len(prompts) * len(variants)))
+        return 0
 
     out_dir = results_dir("s2_channel", args.results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

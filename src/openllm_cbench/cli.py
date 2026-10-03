@@ -471,6 +471,10 @@ def _assess_body(args, suites, SUITE_INFO):
     # `cbench score` can give one suite more trials than the rest (see
     # scorecard.depth_trials); `cbench assess` runs --trials for every suite.
     per_suite = getattr(args, "trials_by_suite", None) or {}
+    if not args.dry_run:
+        plan = _plan_line(args, suites, SUITE_INFO, per_suite)
+        if plan:
+            print(plan)
     for suite in suites:
         label, module_path, aggregate_fn, results_subdir = SUITE_INFO[suite]
         n_trials = per_suite.get(suite, args.trials)
@@ -1376,6 +1380,40 @@ _NATIVE = {
     "catalogue": _cmd_catalogue,
     "tui": _cmd_tui,
 }
+
+
+def _plan_rows(module_path, argv):
+    """Rows one trial of a suite will produce, from that suite's own
+    `--plan` (see core/plan.py), or None if it could not say. Its start-up
+    output is swallowed: the trial prints the same lines when it runs."""
+    import contextlib
+    import io
+
+    from openllm_cbench.core.plan import parse_plan
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            _dispatch_passthrough(module_path, argv + ["--plan"])
+    except (SystemExit, Exception):
+        return None
+    return parse_plan(buf.getvalue())
+
+
+def _plan_line(args, suites, suite_info, per_suite):
+    """The `Plan: ... rows in total.` line for a run, or None when any
+    suite cannot say how many rows it will produce. A partial total would
+    make the estimate confidently wrong, which is worse than none."""
+    from openllm_cbench.core.plan import total_line
+
+    parts = []
+    for suite in suites:
+        argv = ["--model", args.model] + _sampling_argv(args, 1)
+        rows = _plan_rows(suite_info[suite][1], argv)
+        if rows is None:
+            return None
+        parts.append((suite, rows, per_suite.get(suite, args.trials)))
+    return total_line(parts, sum(rows * trials for _, rows, trials in parts))
 
 
 def _dispatch_passthrough(module_path, argv):

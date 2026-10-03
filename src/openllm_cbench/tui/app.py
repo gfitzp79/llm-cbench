@@ -29,6 +29,7 @@ from textual.widgets import (
 
 from openllm_cbench.core import exitcodes
 from openllm_cbench.core.invariant import SAFETY_INVARIANT
+from openllm_cbench.core.plan import is_row_line, parse_total
 from openllm_cbench.core.runclock import time_from_filename
 from openllm_cbench.tui.jobs import (
     RUNNABLE_SUITES, build_args, cbench_command, condensed_line_filter, parse_trial_header,
@@ -309,7 +310,7 @@ class DashboardScreen(Screen):
 
     @work(exclusive=True)
     async def _run_doctor_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         log.write(_saved_log_line(result))
 
 
@@ -393,7 +394,7 @@ class RunScreen(Screen):
 
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         _report_job_result(log, result)
 
 
@@ -454,7 +455,7 @@ class GateScreen(Screen):
 
     @work(exclusive=True)
     async def _run_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         _report_job_result(log, result)
 
 
@@ -854,7 +855,7 @@ class ModelsScreen(Screen):
 
     @work(exclusive=True)
     async def _gate_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         if _report_job_result(log, result):
             self._refresh()
 
@@ -912,7 +913,7 @@ class PullScreen(Screen):
 
     @work(exclusive=True)
     async def _search_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         _report_job_result(log, result)
 
     def _start_pull(self) -> None:
@@ -928,7 +929,7 @@ class PullScreen(Screen):
 
     @work(exclusive=True)
     async def _pull_worker(self, argv, log: RichLog) -> None:
-        result = await run_job(argv, on_line=lambda line: log.write(line))
+        result = await run_job(argv, on_line=lambda line: log.write(line), live_log=True)
         _report_job_result(log, result,
                             "Done. Go to \"Local models\" and gate + save it to add it "
                             "to your catalogue.")
@@ -1408,14 +1409,15 @@ class ScoreScreen(Screen):
 
         progress = self.query_one("#score-progress", ProgressBar)
         if total_trials:
-            # Total is known upfront (suites x trials-for-depth); progress
-            # advances one unit per completed trial as `--- suite trial
-            # N/M ---` headers stream past (see _run_worker). Textual's
-            # own ProgressBar computes ETA from the observed rate of
-            # .advance() calls, so it only starts reporting one once the
-            # first trial has actually finished -- exactly the "don't
-            # guess before you have a real data point" behaviour wanted
-            # here, with no hand-rolled timing code needed.
+            # Starts in trials (suites x trials-for-depth), and switches to
+            # rows when the run prints its `Plan:` line (see _run_worker).
+            # Trials alone were measured to be the wrong unit: one quick
+            # score's trials took 2:39, 11:54, 0:33 and 0:29, so the ETA
+            # was blank for the whole first trial, then a third of the
+            # real time, then frozen, because Textual's ProgressBar
+            # projects only 30 seconds past its last update. Rows finish
+            # every few seconds. The ETA itself is still Textual's, from
+            # the observed rate of .advance() calls.
             progress.update(total=total_trials, progress=0)
             progress.display = True
         else:
@@ -1437,7 +1439,8 @@ class ScoreScreen(Screen):
             log.write("[dim]Model not catalogued, so gate-checking first "
                       "(untick \"Gate-check the model first\" to skip this):[/dim]")
             log.write(f"[dim]$ {' '.join(gate_first_argv)}[/dim]")
-            gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line))
+            gate_result = await run_job(gate_first_argv, on_line=lambda line: log.write(line),
+                                        live_log=True)
             log.write(_saved_log_line(gate_result))
 
             from openllm_cbench.core.gate import summarize_gate_output
@@ -1484,17 +1487,29 @@ class ScoreScreen(Screen):
 
         should_show = condensed_line_filter()
         trial_headers_seen = 0
+        rows_total = None
 
         def on_line(line):
-            nonlocal trial_headers_seen
-            if parse_trial_header(line) is not None:
+            nonlocal trial_headers_seen, rows_total
+            # Rows once the run has said how many there will be (the
+            # `Plan:` line, from each suite's own --plan); whole trials
+            # only when it could not. See core/plan.py for why trials are
+            # the wrong unit for an estimate.
+            total = parse_total(line)
+            if total:
+                rows_total = total
+                progress.update(total=total, progress=0)
+            elif rows_total is not None:
+                if is_row_line(line) and (progress.progress or 0) < rows_total:
+                    progress.advance(1)
+            elif parse_trial_header(line) is not None:
                 if trial_headers_seen > 0:
                     progress.advance(1)
                 trial_headers_seen += 1
             if should_show(line):
                 log.write(line)
 
-        result = await run_job(argv, on_line=on_line)
+        result = await run_job(argv, on_line=on_line, live_log=True)
         if progress.display and progress.total:
             progress.update(progress=progress.total)
         _report_job_result(log, result,

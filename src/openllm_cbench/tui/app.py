@@ -511,7 +511,8 @@ class ModelsScreen(Screen):
                 "did not; move the older runs out of the results folder). "
                 "That suite is excluded from the grade; do not trust it yet. Trailing \"*\" = an "
                 "otherwise-ok suite still has an unresolved caveat: read the full "
-                "scorecard (results/scorecards/<tag>.md) before citing the grade alone.",
+                f"scorecard ({escape(str(_results_root() / 'scorecards'))}/<tag>.md) before "
+                "citing the grade alone.",
                 id="models-score-legend",
             )
             with Horizontal(id="models-limit-row"):

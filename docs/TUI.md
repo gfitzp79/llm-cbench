@@ -188,8 +188,10 @@ the exact command line, including the gate step whenever it will run.
   by the `--- suite trial N/M ---` lines in the log, with an estimated time
   remaining that appears once the first trial has finished.
 - **Re-score saved results only** refuses to start when no results are
-  saved yet for the tag you entered, rather than producing grade N/A with
-  exit code `0`, which looks like a real result until you investigate.
+  saved yet for the tag you entered, before running anything, rather than
+  producing grade N/A, which looks like a real result until you
+  investigate. `cbench score --from-existing` makes the same refusal on the
+  command line (exit `2`).
 - **A refused run says why.** When `cbench score` refuses to start (exit
   code `2`), the last two lines of the log are a `Why:` line, taken from
   the command's own `NOT STARTING` line, and the verdict, so the reason

@@ -329,6 +329,16 @@ def test_render_markdown_leads_with_the_grade(isolated_dirs):
     assert "Per-suite:" in md  # the detail is still there, just not the headline
 
 
+def test_the_footer_does_not_deny_the_budget_check_the_guard_makes(isolated_dirs):
+    # The footer said budgets were NOT checked; scoring/comparability.py
+    # checks them, and a mismatch makes the suite INVALID.
+    _write_csv(isolated_dirs / "s1" / "containment_test-1b_20260101_000000.csv",
+               S1_FIELDNAMES, [_s1_row("email_report")])
+    md = sc.render_scorecard_markdown(sc.compute_scorecard("test:1b"))
+    assert "NOT check that they ran at the same generation budget" not in md
+    assert "the same generation budget" in md
+
+
 def test_render_markdown_flags_low_confidence_grades(isolated_dirs):
     _write_csv(isolated_dirs / "s1" / "containment_test-1b_20260101_000000.csv",
                S1_FIELDNAMES, [_s1_row("email_report")])

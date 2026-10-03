@@ -57,14 +57,16 @@ below:
 |---|---|---|
 | `0` | Done. | Read the output. |
 | `1` | It ran, and something in it failed: a request that never reached the model, a gate check that was not clean, a scored suite that came back INVALID. | The output says what failed; there is a result to inspect. |
-| `2` | It refused to start, and nothing ran or was written: bad input, a model the pre-flight could not reach, a model on which no selected suite can produce a gradeable result, or a run lock refusal (another assessment or a suite run already in progress). | Fix what the message names, then run again. |
+| `2` | It refused to start, and nothing ran or was written: bad input, a model the pre-flight could not reach, a model on which no selected suite can produce a gradeable result, `cbench score --from-existing` with no saved results to score, or a run lock refusal (another assessment or a suite run already in progress). | Fix what the message names, then run again. |
 
 A suite run in which any request to the endpoint failed exits `1` and says
 how many failed. Those rows measured nothing, so they are left out of every
 rate rather than scored as a model that did nothing. `cbench score` also
 exits `1` when a trial exited non-zero; a suite with no data under
 `--from-existing` is not a failure, because scoring whatever exists is what
-that flag is for. `cbench gate` exits `2` when it never reached the model,
+that flag is for. When none of the selected suites has any saved results,
+`--from-existing` refuses instead (exit `2`) and saves no scorecard, since a
+grade of N/A would read as a result. `cbench gate` exits `2` when it never reached the model,
 and `--save` then saves nothing.
 
 The exception is `cbench extension-rule`, whose exit code is its decision so

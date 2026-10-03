@@ -145,6 +145,28 @@ def test_score_exits_one_when_a_selected_suite_is_invalid(tmp_path):
     assert "S3 came back INVALID" in result.stderr
 
 
+
+def test_score_from_existing_with_nothing_saved_refuses_and_writes_nothing(tmp_path):
+    # Measured: this used to save a grade-N/A scorecard and exit 0, after
+    # which `cbench catalogue` listed the model as scored. The TUI already
+    # refused it; the CLI said it was fine.
+    result = _cbench(["score", "--model", "never-run:1b", "--from-existing"], tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "NOT STARTING" in result.stderr and "nothing to score" in result.stderr
+    assert not (tmp_path / "results" / "scorecards").exists()
+
+
+def test_score_from_existing_still_scores_a_partial_corpus(tmp_path):
+    # Only all-missing refuses: one suite with data is a valid partial card.
+    s3 = tmp_path / "results" / "s3_persistence"
+    s3.mkdir(parents=True)
+    _write_s3(s3 / "persistence_test-1b_20260101_000000.csv",
+              [_s3_row("dedup_customer_records")])
+    result = _cbench(["score", "--model", "test:1b", "--from-existing"], tmp_path)
+    assert result.returncode != 2, result.stdout + result.stderr
+    assert (tmp_path / "results" / "scorecards" / "test-1b.md").exists()
+
+
 # --- the concurrency guard ------------------------------------------------
 
 def test_the_idle_check_can_see_a_running_score():

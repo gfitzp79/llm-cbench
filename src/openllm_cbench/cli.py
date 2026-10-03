@@ -674,6 +674,18 @@ def _cmd_score(argv):
         print(f"Scoring '{args.model}' from existing CSVs (no suites run, no model call)")
 
     card = compute_scorecard(args.model)
+    # Nothing on disk for any selected suite would save a grade-N/A card
+    # with exit 0, which reads as a result until investigated, and the
+    # catalogue then lists the model as scored. The TUI's Score screen
+    # already refuses this case before it runs; the CLI must too.
+    if args.from_existing and all(card["suites"].get(s, {}).get("status") == "not_run"
+                                  for s in suites):
+        print(f"\n[!] NOT STARTING: no {'/'.join(s.upper() for s in suites)} results are "
+              f"saved for '{args.model}' in the results folder, so there is nothing to "
+              f"score. Nothing was written.\n"
+              f"    Run without --from-existing to run the suites, or check the folder "
+              f"with `cbench config`.", file=sys.stderr)
+        return 2
     print("\n" + render_scorecard_markdown(card))
     json_path, md_path = save_scorecard(card)
     print(f"Saved: {json_path}")
@@ -1047,7 +1059,9 @@ def _cmd_pull(argv):
 def _cmd_discover(argv):
     import argparse
 
-    from openllm_cbench.core.discover import list_local_models, find_uncatalogued, format_size
+    from openllm_cbench.core.discover import (
+        list_local_models, find_uncatalogued, format_params, format_size,
+    )
     from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.gate import (
         model_answered, render_gate_report, run_gate, to_registry_entry,
@@ -1096,7 +1110,7 @@ def _cmd_discover(argv):
         return 0
 
     for m in uncatalogued:
-        print(f"  {m['name']}  ({m['architecture']}, {m['params_b']}, {m['quant']}, "
+        print(f"  {m['name']}  ({m['architecture']}, {format_params(m['params_b'])}, {m['quant']}, "
               f"{format_size(m['size'])})")
 
     if not args.gate_all:
@@ -1202,12 +1216,13 @@ def _cmd_catalogue(argv):
     find catalogue GAPS, this lists everything regardless of catalogue
     status. Makes no model call and changes nothing -- reads the endpoint's
     own /api/tags, the model registry, and whatever scorecards
-    `cbench score` has already saved under results/scorecards/."""
+    `cbench score` has already saved under scorecards/ in the results folder."""
     import argparse
 
-    from openllm_cbench.core.discover import list_local_models, format_size
+    from openllm_cbench.core.discover import list_local_models, format_params, format_size
     from openllm_cbench.core.endpoint import describe_request_failure, resolve_base_url
     from openllm_cbench.core.invariant import epilog as safety_epilog
+    from openllm_cbench.core.paths import results_dir
     from openllm_cbench.core.registry import load_registry
     from openllm_cbench.scoring.scorecard import catalogue_compact_label, catalogue_summary_line
 
@@ -1265,7 +1280,7 @@ def _cmd_catalogue(argv):
             fit_part += f", speed: {perf['label']} (est)"
         if assessment["tier"] == "spills":
             spills.append((tag, assessment))
-        print(f"{tag}  ({m['architecture']}, {m['params_b']}B, {m['quant']}, "
+        print(f"{tag}  ({m['architecture']}, {format_params(m['params_b'])}, {m['quant']}, "
               f"{format_size(m['size'])}): {cat_status}{fit_part}; "
               f"score: {catalogue_compact_label(tag)}")
         detail = catalogue_summary_line(tag)
@@ -1291,7 +1306,7 @@ def _cmd_catalogue(argv):
           f"N/A = nothing gradable yet. INVALID = a validity guard fired, that suite is "
           f"excluded from the grade (see grade_basis in the full scorecard). Trailing "
           f"'*' = an otherwise-ok suite still has an unresolved caveat; read the full "
-          f"scorecard (`results/scorecards/<tag>.md`) before citing the grade alone.")
+          f"scorecard (`{results_dir('scorecards')}/<tag>.md`) before citing the grade alone.")
     return 0
 
 

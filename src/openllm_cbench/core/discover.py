@@ -67,6 +67,15 @@ def find_uncatalogued(local_models, registry=None):
     return [m for m in local_models if m["name"] not in catalogued]
 
 
+def format_params(params_b):
+    """A parameter count in billions as `discover` and `catalogue` print
+    it: `0.75163B`, or `unknown params` when it could not be measured
+    (params_b holds the literal string "unknown"), never `unknownB`."""
+    if isinstance(params_b, (int, float)) and not isinstance(params_b, bool):
+        return f"{params_b}B"
+    return "unknown params"
+
+
 def format_size(num_bytes):
     if not isinstance(num_bytes, (int, float)):
         return "unknown size"

@@ -306,6 +306,10 @@ def test_models_screen_explains_the_score_column_persistently():
             assert "INVALID" in legend
             assert "grade" in legend.lower()
             assert "caveat" in legend
+            # The real results folder, not a hard-coded results/ that is
+            # wrong for anyone who pinned another location.
+            from openllm_cbench.tui.app import _results_root
+            assert str(_results_root() / "scorecards") in legend
     asyncio.run(scenario())
 
 

@@ -956,13 +956,14 @@ def render_scorecard_markdown(scorecard):
         "produce.",
         "",
         "This scorecard reads whatever CSVs already exist on disk for this model tag. It "
-        "checks two things about whether they belong together: that every trial covered the "
-        "same task set, and that they agree on the sampling parameters they recorded (a "
-        "suite failing either is marked `INVALID` above and left out of the grade). It does "
-        "NOT check that they ran at the same generation budget, or that no harness fix "
-        "between them changed what an already-present column means. Deciding those is still "
-        "yours. Read the full per-suite aggregate report (`cbench aggregate --suite sN "
-        "--model ...`) for anything this table doesn't surface.",
+        "checks that they belong together: that every trial covered the same task set "
+        "(S1), probes (S2) or scenarios (S3), and that they recorded the same sampling "
+        "parameters and the same generation budget (a suite failing any of these is marked "
+        "`INVALID` above and left out of the grade). It does NOT check that they ran with "
+        "the same turn limit, or that no harness fix between them changed what an "
+        "already-present column means. Deciding those is still yours. Read the full "
+        "per-suite aggregate report (`cbench aggregate --suite sN --model ...`) for "
+        "anything this table doesn't surface.",
     ]
     return "\n".join(lines) + "\n"
 

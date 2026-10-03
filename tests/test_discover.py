@@ -5,7 +5,7 @@ cover the parsing/diffing logic against fabricated /api/tags-shaped data
 and a fabricated catalogue, no model or network required.
 """
 
-from openllm_cbench.core.discover import find_uncatalogued, format_size
+from openllm_cbench.core.discover import find_uncatalogued, format_params, format_size
 
 
 def _model(name, **overrides):
@@ -51,6 +51,15 @@ def test_format_size_converts_bytes_to_gb():
 def test_format_size_handles_missing_or_bad_input():
     assert format_size(None) == "unknown size"
     assert format_size("not a number") == "unknown size"
+
+
+def test_format_params_carries_its_unit_and_never_prints_unknownB():
+    # `discover` printed 0.75163 with no unit while `catalogue` printed
+    # 0.75163B, and would have printed `unknownB` for an unmeasured model.
+    assert format_params(0.75163) == "0.75163B"
+    assert format_params(14) == "14B"
+    assert format_params("unknown") == "unknown params"
+    assert format_params(None) == "unknown params"
 
 
 def test_discover_output_never_includes_the_unreliable_capabilities_field():
